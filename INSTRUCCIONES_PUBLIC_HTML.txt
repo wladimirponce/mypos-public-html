@@ -1,0 +1,19 @@
+Distribuible directo a public_html
+==================================
+
+Sube TODO el contenido de esta carpeta directamente a:
+
+/home/TU_USUARIO/public_html/
+
+Despues de subir:
+
+1. Copia public_html/api/.env.example como public_html/api/.env.
+2. Edita DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD y JWT_SECRET.
+3. Abre temporalmente https://www.mypos.cl/api/instalar.php.
+4. Elimina public_html/api/public/instalar.php al terminar.
+5. Prueba https://www.mypos.cl.
+
+Notas:
+- Este distribuible usa /api en el mismo dominio; no requiere api.mypos.cl.
+- No borres public_html/api/.htaccess.
+- Activa "Show Hidden Files" en cPanel para ver .htaccess y .env.example.
