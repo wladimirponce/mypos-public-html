@@ -1,0 +1,63 @@
+# Apache Configuration for MyPOS Frontend (React SPA)
+# Renombrar a .htaccess y colocar en public_html (o raíz del dominio www.mypos.cl)
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # 1. Forzar HTTPS
+  RewriteCond %{HTTPS} !=on
+  # Si tienes un proxy Cloudflare u otro LB, a veces es util verificar HTTP_X_FORWARDED_PROTO
+  # RewriteCond %{HTTP:X-Forwarded-Proto} !https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+  # Dejar que el backend en /api maneje sus propias rutas.
+  RewriteRule ^api(/.*)?$ - [L]
+
+  # 2. Enrutamiento para SPA (React Router)
+  # Si el archivo o directorio existe físicamente, servirlo directamente
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Si no existe, enviar la solicitud a index.html para que el router de React se encargue
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# Configuración de compresión (GZIP/Brotli)
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/plain text/html text/xml text/css application/xml application/xhtml+xml application/rss+xml application/javascript application/x-javascript application/json image/svg+xml
+</IfModule>
+
+# Políticas de Caché
+<IfModule mod_expires.c>
+  ExpiresActive On
+
+  # Caché agresivo para assets generados por Vite (tienen hash en el nombre)
+  # ej: assets/index-D1AZA2BW.css
+  <FilesMatch "\.(css|js|woff2|woff|eot|ttf|otf|png|jpg|jpeg|gif|ico|svg|webp)$">
+    ExpiresDefault "access plus 1 year"
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+
+  # Nunca cachear agresivamente el index.html
+  <FilesMatch "^index\.html$">
+    ExpiresDefault "access plus 0 seconds"
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+  </FilesMatch>
+  
+  # Nunca cachear el manifiesto o el service worker
+  <FilesMatch "^(sw\.js|manifest\.webmanifest)$">
+    ExpiresDefault "access plus 0 seconds"
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+  </FilesMatch>
+</IfModule>
+
+# Headers de Seguridad Básicos
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+</IfModule>
