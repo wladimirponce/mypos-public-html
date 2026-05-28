@@ -83,6 +83,15 @@ function mypos_execute_sql_file(PDO $pdo, string $archivo): void
     }
 }
 
+function mypos_env_value(string $value): string
+{
+    if (preg_match('/^[A-Za-z0-9_.:@\/-]*$/', $value) === 1) {
+        return $value;
+    }
+
+    return '"' . addcslashes($value, "\\\"") . '"';
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $host = $_POST['host'] ?? 'localhost';
     $db   = $_POST['db'] ?? '';
@@ -159,10 +168,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             if ($envPath && is_writable($envPath)) {
                 $envContent = file_get_contents($envPath);
-                $envContent = preg_replace('/DB_DATABASE=.*/', "DB_DATABASE=$db", $envContent);
-                $envContent = preg_replace('/DB_USERNAME=.*/', "DB_USERNAME=$user", $envContent);
-                $envContent = preg_replace('/DB_PASSWORD=.*/', "DB_PASSWORD=$pass", $envContent);
-                $envContent = preg_replace('/DB_HOST=.*/', "DB_HOST=$host", $envContent);
+                $envContent = preg_replace('/DB_DATABASE=.*/', 'DB_DATABASE=' . mypos_env_value($db), $envContent);
+                $envContent = preg_replace('/DB_USERNAME=.*/', 'DB_USERNAME=' . mypos_env_value($user), $envContent);
+                $envContent = preg_replace('/DB_PASSWORD=.*/', 'DB_PASSWORD=' . mypos_env_value($pass), $envContent);
+                $envContent = preg_replace('/DB_HOST=.*/', 'DB_HOST=' . mypos_env_value($host), $envContent);
                 file_put_contents($envPath, $envContent);
                 $mensaje .= "<div class='alert alert-info'>El archivo <b>.env</b> fue actualizado automáticamente.</div>";
             }
