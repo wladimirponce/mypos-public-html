@@ -14,6 +14,7 @@ SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 # Acceso directo a instalar.php (solo necesario en el primer despliegue,
 # eliminar public/instalar.php del servidor una vez instalada la BD)
 RewriteRule ^instalar\.php$ public/instalar.php [L]
+RewriteRule ^public/instalar\.php$ public/instalar.php [L]
 
 # Reenviar todas las demás peticiones al router PHP
 RewriteRule ^ public/index.php [QSA,L]
