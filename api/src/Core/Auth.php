@@ -45,6 +45,22 @@ final class Auth
         return null;
     }
 
+    public static function id(): int
+    {
+        $token = self::bearerToken();
+        if ($token === null) {
+            throw new HttpException('No autenticado', 401);
+        }
+
+        $claims = self::decodeToken($token);
+        $userId = self::positiveInt($claims['user_id'] ?? null);
+        if ($userId === null) {
+            throw new HttpException('Token invalido', 401);
+        }
+
+        return $userId;
+    }
+
     /**
      * @param array<string, mixed> $claims
      */

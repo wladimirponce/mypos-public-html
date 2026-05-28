@@ -129,3 +129,12 @@ WHERE e.rut = '76000000-0'
 ON DUPLICATE KEY UPDATE
     nombre = VALUES(nombre),
     activo = 1;
+
+INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado)
+SELECT e.id, 'multisucursal', NOW(), DATE_ADD(NOW(), INTERVAL 30 DAY), 'activa'
+FROM empresas e
+WHERE e.rut = '76000000-0'
+ON DUPLICATE KEY UPDATE
+    plan_id = VALUES(plan_id),
+    fecha_fin = IF(fecha_fin < NOW(), VALUES(fecha_fin), fecha_fin),
+    estado = 'activa';

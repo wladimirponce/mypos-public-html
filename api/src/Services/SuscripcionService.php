@@ -111,7 +111,7 @@ class SuscripcionService
             return ['url' => $paypalResp['approveUrl'], 'orden_numero' => $ordenNumero];
         }
 
-        throw new HttpException(400, 'Gateway de pago no implementado');
+        throw new HttpException('Gateway de pago no implementado', 400);
     }
 
     public function confirmFlowPayment(string $token): void
@@ -120,12 +120,12 @@ class SuscripcionService
 
         // 2 means pagado
         if ((int)$status['status'] !== 2) {
-            throw new HttpException(400, 'Pago en Flow no completado');
+            throw new HttpException('Pago en Flow no completado', 400);
         }
 
         $orden = $this->repository->getOrderByFlowToken($token);
         if (!$orden) {
-            throw new HttpException(404, 'Orden Flow no encontrada');
+            throw new HttpException('Orden Flow no encontrada', 404);
         }
 
         if ($orden['estado'] !== 'completado') {
@@ -138,7 +138,7 @@ class SuscripcionService
     {
         $orden = $this->repository->getOrderByPayPalOrderId($token);
         if (!$orden) {
-            throw new HttpException(404, 'Orden PayPal no encontrada');
+            throw new HttpException('Orden PayPal no encontrada', 404);
         }
 
         if ($orden['estado'] !== 'completado') {
