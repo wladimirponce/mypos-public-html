@@ -219,6 +219,58 @@ $router->get('/api/health/config', static function (): void {
     ]);
 });
 
+$router->get('/api/health/auth', static function (): void {
+    $connection = Database::connection();
+    $email = 'admin@mypos.cl';
+    $userStatement = $connection->prepare(
+        'SELECT id, nombre, email, password_hash, activo, ultimo_login_at
+         FROM usuarios
+         WHERE email = :email
+         LIMIT 1'
+    );
+    $userStatement->execute(['email' => $email]);
+    $user = $userStatement->fetch();
+
+    $empresaRows = [];
+    if (is_array($user)) {
+        $empresaStatement = $connection->prepare(
+            'SELECT
+                eu.empresa_id,
+                e.razon_social,
+                e.nombre_fantasia,
+                e.onboarding_completado,
+                r.codigo AS rol,
+                eu.sucursal_id,
+                s.nombre AS sucursal_nombre
+             FROM empresa_usuarios eu
+             INNER JOIN empresas e ON e.id = eu.empresa_id
+             INNER JOIN roles r ON r.id = eu.rol_id
+             LEFT JOIN sucursales s ON s.id = eu.sucursal_id
+             WHERE eu.usuario_id = :user_id
+               AND eu.activo = 1
+               AND e.activo = 1'
+        );
+        $empresaStatement->execute(['user_id' => (int) $user['id']]);
+        $empresaRows = $empresaStatement->fetchAll();
+    }
+
+    $jwtSecret = (string) ($_ENV['JWT_SECRET'] ?? getenv('JWT_SECRET') ?: '');
+
+    Response::success([
+        'admin_found' => is_array($user),
+        'admin_active' => is_array($user) ? ((int) $user['activo'] === 1) : false,
+        'admin_password_hash_length' => is_array($user) ? strlen((string) $user['password_hash']) : 0,
+        'admin_password_verify_default' => is_array($user)
+            ? password_verify('Admin123456', (string) $user['password_hash'])
+            : false,
+        'jwt_secret_configured' => $jwtSecret !== '',
+        'jwt_secret_length' => strlen($jwtSecret),
+        'empresa_context_count' => count($empresaRows),
+        'first_empresa_id' => isset($empresaRows[0]['empresa_id']) ? (int) $empresaRows[0]['empresa_id'] : null,
+        'first_empresa_rol' => isset($empresaRows[0]['rol']) ? (string) $empresaRows[0]['rol'] : null,
+    ]);
+});
+
 $authController = new AuthController();
 $router->post('/api/v1/auth/register', [$authController, 'register']);
 $router->post('/api/v1/auth/login', [$authController, 'login']);
