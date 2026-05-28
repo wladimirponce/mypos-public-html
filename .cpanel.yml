@@ -1,0 +1,6 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/zylajdcb/public_html
+    - /bin/mkdir -p $DEPLOYPATH
+    - /usr/bin/rsync -a --delete --exclude='.git' --exclude='.cpanel.yml' --exclude='api/.env' --exclude='api/storage/logs/*' --exclude='api/storage/uploads/*' ./ $DEPLOYPATH/
