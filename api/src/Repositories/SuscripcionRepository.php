@@ -76,10 +76,28 @@ class SuscripcionRepository
         return $row ?: null;
     }
 
+    public function getOrderByNumber(string $ordenNumero): ?array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT * FROM suscripciones_ordenes WHERE orden_numero = :orden_numero LIMIT 1'
+        );
+        $statement->execute(['orden_numero' => $ordenNumero]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
     public function markOrderCompleted(int $ordenId): void
     {
         $statement = $this->connection->prepare(
             'UPDATE suscripciones_ordenes SET estado = "completado" WHERE id = :id'
+        );
+        $statement->execute(['id' => $ordenId]);
+    }
+
+    public function markOrderRejected(int $ordenId): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE suscripciones_ordenes SET estado = "rechazado" WHERE id = :id AND estado = "pendiente"'
         );
         $statement->execute(['id' => $ordenId]);
     }

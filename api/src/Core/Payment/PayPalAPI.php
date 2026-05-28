@@ -17,7 +17,9 @@ class PayPalAPI
     public function __construct()
     {
         $this->clientId = $_ENV['PAYPAL_CLIENT_ID'] ?? getenv('PAYPAL_CLIENT_ID') ?: '';
-        $this->secretKey = $_ENV['PAYPAL_SECRET_KEY'] ?? getenv('PAYPAL_SECRET_KEY') ?: '';
+        $secretKey = $_ENV['PAYPAL_SECRET_KEY'] ?? getenv('PAYPAL_SECRET_KEY') ?: '';
+        $clientSecret = $_ENV['PAYPAL_CLIENT_SECRET'] ?? getenv('PAYPAL_CLIENT_SECRET') ?: '';
+        $this->secretKey = $secretKey !== '' ? $secretKey : $clientSecret;
 
         $mode = $_ENV['PAYPAL_MODE'] ?? getenv('PAYPAL_MODE') ?: 'sandbox';
         
@@ -123,8 +125,18 @@ class PayPalAPI
         ]);
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
         curl_close($ch);
+
+        if ($resp === false) {
+            throw new PayPalException("cURL PayPal createOrder: {$err}");
+        }
+
         $data = json_decode((string)$resp, true);
+        if (!is_array($data)) {
+            throw new PayPalException("PayPal createOrder respuesta no JSON (HTTP {$code})");
+        }
+
         if ($code >= 400 || empty($data['id'])) {
             throw new PayPalException('PayPal createOrder: ' . ($data['message'] ?? "HTTP {$code}"));
         }
@@ -167,8 +179,17 @@ class PayPalAPI
         ]);
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
         curl_close($ch);
+
+        if ($resp === false) {
+            throw new PayPalException("cURL PayPal capture: {$err}");
+        }
+
         $data = json_decode((string)$resp, true);
+        if (!is_array($data)) {
+            throw new PayPalException("PayPal capture respuesta no JSON (HTTP {$code})");
+        }
 
         if ($code >= 400) {
             throw new PayPalException('PayPal capture: ' . ($data['message'] ?? "HTTP {$code}"));

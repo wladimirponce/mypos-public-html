@@ -19,9 +19,9 @@ class FlowAPI
     {
         $this->apiKey = $_ENV['FLOW_API_KEY'] ?? getenv('FLOW_API_KEY') ?: '';
         $this->secretKey = $_ENV['FLOW_SECRET_KEY'] ?? getenv('FLOW_SECRET_KEY') ?: '';
-        
+
         $mode = $_ENV['FLOW_MODE'] ?? getenv('FLOW_MODE') ?: 'sandbox';
-        
+
         if ($mode === 'production') {
             $this->baseUrl = 'https://www.flow.cl/api';
             $this->paymentUrl = 'https://www.flow.cl/app/web/pay.php';
@@ -41,11 +41,14 @@ class FlowAPI
             }
             $buf .= $k . $v;
         }
+
         return hash_hmac('sha256', $buf, $this->secretKey);
     }
 
     private function request(string $endpoint, array $params, string $method = 'GET'): array
     {
+        $this->ensureConfigured();
+
         $url = $this->baseUrl . '/' . ltrim($endpoint, '/');
         $ch = curl_init();
         $opt = [
@@ -55,6 +58,7 @@ class FlowAPI
             CURLOPT_TIMEOUT => 30,
             CURLOPT_CONNECTTIMEOUT => 10,
         ];
+
         if ($method === 'POST') {
             $opt[CURLOPT_POST] = true;
             $opt[CURLOPT_POSTFIELDS] = http_build_query($params);
@@ -65,24 +69,35 @@ class FlowAPI
             }
             $opt[CURLOPT_HTTPHEADER] = ['Accept: application/json'];
         }
+
         $opt[CURLOPT_URL] = $url;
         curl_setopt_array($ch, $opt);
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
         curl_close($ch);
-        
+
         if ($resp === false) {
             throw new FlowException("cURL Flow: {$err}");
         }
-        $data = json_decode((string)$resp, true);
+
+        $data = json_decode((string) $resp, true);
         if (!is_array($data)) {
             throw new FlowException("Respuesta Flow no JSON (HTTP {$code})");
         }
+
         if ($code !== 200) {
             throw new FlowException('Flow error: ' . ($data['message'] ?? "HTTP {$code}"));
         }
+
         return $data;
+    }
+
+    private function ensureConfigured(): void
+    {
+        if ($this->apiKey === '' || $this->secretKey === '') {
+            throw new FlowException('Flow no configurado: definir FLOW_API_KEY y FLOW_SECRET_KEY');
+        }
     }
 
     /**
@@ -107,25 +122,28 @@ class FlowAPI
             'urlConfirmation' => $urlConfirmation,
             'urlReturn' => $urlReturn,
         ];
+
         if (!empty($optional)) {
             $params['optional'] = json_encode($optional);
         }
+
         $params['s'] = $this->sign($params);
 
         $resp = $this->request('/payment/create', $params, 'POST');
         if (empty($resp['token'])) {
-            throw new FlowException('Flow no devolvió token');
+            throw new FlowException('Flow no devolvio token');
         }
 
+        $paymentUrl = isset($resp['url']) && is_string($resp['url']) && $resp['url'] !== ''
+            ? $resp['url']
+            : $this->paymentUrl;
+
         return [
-            'token' => $resp['token'],
-            'url' => $this->paymentUrl . '?token=' . $resp['token'],
+            'token' => (string) $resp['token'],
+            'url' => $paymentUrl . '?token=' . rawurlencode((string) $resp['token']),
         ];
     }
 
-    /**
-     * @return array
-     */
     public function getStatus(string $token): array
     {
         $params = ['apiKey' => $this->apiKey, 'token' => $token];
@@ -135,6 +153,7 @@ class FlowAPI
         if (!isset($status['status'])) {
             throw new FlowException('getStatus sin status');
         }
+
         return $status;
     }
 }

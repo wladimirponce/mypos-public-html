@@ -7,10 +7,12 @@ namespace Mypos\Services;
 use Mypos\Config\Database;
 use Mypos\Core\HttpException;
 use Mypos\Core\Payment\FlowAPI;
+use Mypos\Core\Payment\FlowException;
 use Mypos\Core\Payment\PayPalAPI;
-use Mypos\Repositories\SuscripcionRepository;
+use Mypos\Core\Payment\PayPalException;
 use Mypos\Repositories\AuthRepository;
-use Throwable;
+use Mypos\Repositories\SuscripcionRepository;
+use Mypos\Support\AppConfig;
 
 class SuscripcionService
 {
@@ -30,14 +32,13 @@ class SuscripcionService
 
     private function getPlanDetails(string $planId): array
     {
-        // This could come from DB, but we'll hardcode it per requirements for now.
         $plans = [
             'pos' => ['price_clp' => 11888, 'price_usd' => 12.50, 'name' => 'Plan POS ($9.990 + IVA)'],
             'multisucursal' => ['price_clp' => 35688, 'price_usd' => 38.00, 'name' => 'Plan MultiSucursal ($29.990 + IVA)'],
         ];
 
         if (!isset($plans[$planId])) {
-            throw new HttpException(400, 'Plan no válido');
+            throw new HttpException('Plan no valido', 422);
         }
 
         return $plans[$planId];
@@ -45,17 +46,24 @@ class SuscripcionService
 
     public function createPaymentOrder(array $payload, int $empresaId, int $usuarioId): array
     {
-        $gateway = $payload['gateway'] ?? 'flow';
-        $planId = $payload['plan_id'] ?? 'pos';
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        if (!$this->authRepo->userHasEmpresaContext($usuarioId, $empresaId)) {
+            throw new HttpException('Usuario no pertenece a la empresa', 403);
+        }
+
+        $gateway = strtolower((string) ($payload['gateway'] ?? 'flow'));
+        $planId = (string) ($payload['plan_id'] ?? 'pos');
 
         if (!in_array($gateway, ['flow', 'paypal'], true)) {
-            throw new HttpException(400, 'Gateway de pago inválido');
+            throw new HttpException('Gateway de pago invalido', 422);
         }
 
         $plan = $this->getPlanDetails($planId);
         $ordenNumero = 'MP_' . time() . '_' . bin2hex(random_bytes(3));
-        $correo = 'usuario@mypos.cl'; // En producción esto debería sacarse de AuthRepository
-
+        $correo = $this->userEmail($usuarioId);
         $monto = $gateway === 'flow' ? $plan['price_clp'] : $plan['price_usd'];
         $moneda = $gateway === 'flow' ? 'CLP' : 'USD';
 
@@ -69,57 +77,33 @@ class SuscripcionService
             $moneda
         );
 
-        $base = $_ENV['API_BASE_URL'] ?? 'http://localhost:8082';
-        // In reality, this API_BASE_URL handles the backend API.
-        $frontendUrl = $_ENV['CORS_ALLOWED_ORIGINS'] ?? 'http://localhost:5173';
-        $frontendUrls = explode(',', $frontendUrl);
-        $appUrl = $frontendUrls[0] ?? 'http://localhost:5173';
+        try {
+            if ($gateway === 'flow') {
+                return $this->createFlowOrder($ordenId, $ordenNumero, $correo, (int) $monto, $plan);
+            }
 
-        if ($gateway === 'flow') {
-            $urlConfirmation = $base . '/api/v1/suscripciones/flow-webhook';
-            $urlReturn = $appUrl . '/app/billing/return?gateway=flow&order=' . $ordenNumero;
-
-            $flowResp = $this->flowApi->createOrder(
-                $ordenNumero,
-                $correo,
-                (int) $monto,
-                'Suscripción MyPOS: ' . $plan['name'],
-                $urlConfirmation,
-                $urlReturn
+            return $this->createPayPalOrder($ordenId, $ordenNumero, (float) $monto, $plan);
+        } catch (FlowException | PayPalException $exception) {
+            $this->repository->markOrderRejected($ordenId);
+            error_log($exception->getMessage());
+            throw new HttpException(
+                'No se pudo iniciar el pago en linea. Verifica la configuracion de ' . ucfirst($gateway) . ' o intenta con otro metodo.',
+                503,
+                AppConfig::debug() && !AppConfig::isProduction() ? ['payment' => [$exception->getMessage()]] : null
             );
-
-            $this->repository->updateOrderTokenFlow($ordenId, $flowResp['token']);
-
-            return ['url' => $flowResp['url'], 'orden_numero' => $ordenNumero];
         }
-
-        if ($gateway === 'paypal') {
-            $returnUrl = $base . '/api/v1/suscripciones/paypal-return?order=' . $ordenNumero;
-            $cancelUrl = $appUrl . '/app/billing/return?gateway=paypal&cancel=1&order=' . $ordenNumero;
-
-            $paypalResp = $this->paypalApi->createOrder(
-                $ordenNumero,
-                (float) $monto,
-                'Suscripción MyPOS: ' . $plan['name'],
-                $returnUrl,
-                $cancelUrl,
-                'MyPOS SaaS'
-            );
-
-            $this->repository->updateOrderTokenPayPal($ordenId, $paypalResp['id']);
-
-            return ['url' => $paypalResp['approveUrl'], 'orden_numero' => $ordenNumero];
-        }
-
-        throw new HttpException('Gateway de pago no implementado', 400);
     }
 
     public function confirmFlowPayment(string $token): void
     {
-        $status = $this->flowApi->getStatus($token);
+        try {
+            $status = $this->flowApi->getStatus($token);
+        } catch (FlowException $exception) {
+            error_log($exception->getMessage());
+            throw new HttpException('No se pudo confirmar el pago en Flow', 503);
+        }
 
-        // 2 means pagado
-        if ((int)$status['status'] !== 2) {
+        if ((int) $status['status'] !== 2) {
             throw new HttpException('Pago en Flow no completado', 400);
         }
 
@@ -129,8 +113,8 @@ class SuscripcionService
         }
 
         if ($orden['estado'] !== 'completado') {
-            $this->repository->markOrderCompleted((int)$orden['id']);
-            $this->repository->updateOrActivateSubscription((int)$orden['empresa_id'], $orden['plan_id']);
+            $this->repository->markOrderCompleted((int) $orden['id']);
+            $this->repository->updateOrActivateSubscription((int) $orden['empresa_id'], (string) $orden['plan_id']);
         }
     }
 
@@ -142,25 +126,31 @@ class SuscripcionService
         }
 
         if ($orden['estado'] !== 'completado') {
-            $this->paypalApi->captureOrder($token);
-            $this->repository->markOrderCompleted((int)$orden['id']);
-            $this->repository->updateOrActivateSubscription((int)$orden['empresa_id'], $orden['plan_id']);
+            try {
+                $this->paypalApi->captureOrder($token);
+            } catch (PayPalException $exception) {
+                error_log($exception->getMessage());
+                throw new HttpException('No se pudo capturar el pago en PayPal', 503);
+            }
+
+            $this->repository->markOrderCompleted((int) $orden['id']);
+            $this->repository->updateOrActivateSubscription((int) $orden['empresa_id'], (string) $orden['plan_id']);
         }
 
-        $frontendUrl = $_ENV['CORS_ALLOWED_ORIGINS'] ?? 'http://localhost:5173';
-        $frontendUrls = explode(',', $frontendUrl);
-        $appUrl = $frontendUrls[0] ?? 'http://localhost:5173';
-
-        return $appUrl . '/app/billing/return?gateway=paypal&status=success&order=' . $orden['orden_numero'];
+        return $this->frontendUrl() . '/app/billing/return?gateway=paypal&status=success&order=' . urlencode((string) $orden['orden_numero']);
     }
 
     public function getCurrentStatus(int $empresaId): array
     {
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
         $status = $this->repository->getSubscriptionStatus($empresaId);
         if (!$status) {
             return [
                 'has_subscription' => false,
-                'estado' => 'inactiva'
+                'estado' => 'inactiva',
             ];
         }
 
@@ -169,7 +159,100 @@ class SuscripcionService
             'plan_id' => $status['plan_id'],
             'fecha_inicio' => $status['fecha_inicio'],
             'fecha_fin' => $status['fecha_fin'],
-            'estado' => $status['estado']
+            'estado' => $status['estado'],
         ];
+    }
+
+    public function getOrderStatus(string $ordenNumero, int $empresaId, int $usuarioId): array
+    {
+        if ($ordenNumero === '') {
+            throw new HttpException('orden obligatoria', 422);
+        }
+
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        if (!$this->authRepo->userHasEmpresaContext($usuarioId, $empresaId)) {
+            throw new HttpException('Usuario no pertenece a la empresa', 403);
+        }
+
+        $orden = $this->repository->getOrderByNumber($ordenNumero);
+        if (!$orden || (int) $orden['empresa_id'] !== $empresaId) {
+            throw new HttpException('Orden no encontrada', 404);
+        }
+
+        return [
+            'orden_numero' => $orden['orden_numero'],
+            'gateway' => $orden['gateway'],
+            'estado' => $orden['estado'],
+            'plan_id' => $orden['plan_id'],
+        ];
+    }
+
+    private function createFlowOrder(int $ordenId, string $ordenNumero, string $correo, int $monto, array $plan): array
+    {
+        $urlConfirmation = $this->apiBaseUrl() . '/api/v1/suscripciones/flow-webhook';
+        $urlReturn = $this->frontendUrl() . '/app/billing/return?gateway=flow&order=' . urlencode($ordenNumero);
+
+        $flowResp = $this->flowApi->createOrder(
+            $ordenNumero,
+            $correo,
+            $monto,
+            'Suscripcion MyPOS: ' . $plan['name'],
+            $urlConfirmation,
+            $urlReturn,
+            ['orden_numero' => $ordenNumero]
+        );
+
+        $this->repository->updateOrderTokenFlow($ordenId, $flowResp['token']);
+
+        return ['url' => $flowResp['url'], 'orden_numero' => $ordenNumero];
+    }
+
+    private function createPayPalOrder(int $ordenId, string $ordenNumero, float $monto, array $plan): array
+    {
+        $returnUrl = $this->apiBaseUrl() . '/api/v1/suscripciones/paypal-return?order=' . urlencode($ordenNumero);
+        $cancelUrl = $this->frontendUrl() . '/app/billing/return?gateway=paypal&cancel=1&order=' . urlencode($ordenNumero);
+
+        $paypalResp = $this->paypalApi->createOrder(
+            $ordenNumero,
+            $monto,
+            'Suscripcion MyPOS: ' . $plan['name'],
+            $returnUrl,
+            $cancelUrl,
+            'MyPOS SaaS',
+            ['orden_numero' => $ordenNumero]
+        );
+
+        $this->repository->updateOrderTokenPayPal($ordenId, $paypalResp['id']);
+
+        return ['url' => $paypalResp['approveUrl'], 'orden_numero' => $ordenNumero];
+    }
+
+    private function userEmail(int $usuarioId): string
+    {
+        $user = $this->authRepo->findUserById($usuarioId);
+
+        return is_array($user) && isset($user['email']) && (string) $user['email'] !== ''
+            ? (string) $user['email']
+            : 'usuario@mypos.cl';
+    }
+
+    private function apiBaseUrl(): string
+    {
+        return rtrim(AppConfig::apiBaseUrl(), '/');
+    }
+
+    private function frontendUrl(): string
+    {
+        $frontendUrl = $_ENV['FRONTEND_URL'] ?? getenv('FRONTEND_URL') ?: '';
+        if ($frontendUrl !== '') {
+            return rtrim($frontendUrl, '/');
+        }
+
+        $origins = AppConfig::corsAllowedOrigins();
+
+        return rtrim((string) ($origins[0] ?? 'http://localhost:5173'), '/');
     }
 }

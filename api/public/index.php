@@ -283,6 +283,7 @@ $router->post('/api/v1/suscripciones/flow-webhook', [$suscripcionController, 'fl
 $router->get('/api/v1/suscripciones/flow-return', [$suscripcionController, 'flowReturn']);
 $router->get('/api/v1/suscripciones/paypal-return', [$suscripcionController, 'paypalReturn']);
 $router->get('/api/v1/suscripciones/status', [$suscripcionController, 'status']);
+$router->get('/api/v1/suscripciones/order-status', [$suscripcionController, 'orderStatus']);
 
 $permissionController = new PermissionController();
 $router->get('/api/v1/permisos/mis-permisos', [$permissionController, 'myPermissions']);

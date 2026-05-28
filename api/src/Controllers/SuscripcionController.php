@@ -27,6 +27,10 @@ class SuscripcionController
             $payload = Request::json();
             $empresaId = Auth::empresaId();
             $usuarioId = Auth::id();
+
+            if ($empresaId === null) {
+                throw new HttpException('empresa_id obligatorio', 422);
+            }
             
             return $this->service->createPaymentOrder($payload, $empresaId, $usuarioId);
         }, 201);
@@ -83,7 +87,27 @@ class SuscripcionController
     {
         $this->respond(function (): array {
             $empresaId = Auth::empresaId();
+
+            if ($empresaId === null) {
+                throw new HttpException('empresa_id obligatorio', 422);
+            }
+
             return $this->service->getCurrentStatus($empresaId);
+        });
+    }
+
+    public function orderStatus(): void
+    {
+        $this->respond(function (): array {
+            $empresaId = Auth::empresaId();
+            $usuarioId = Auth::id();
+            $ordenNumero = trim((string) ($_GET['order'] ?? ''));
+
+            if ($empresaId === null) {
+                throw new HttpException('empresa_id obligatorio', 422);
+            }
+
+            return $this->service->getOrderStatus($ordenNumero, $empresaId, $usuarioId);
         });
     }
 
