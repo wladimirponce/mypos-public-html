@@ -33,8 +33,8 @@ class SuscripcionService
     private function getPlanDetails(string $planId): array
     {
         $plans = [
-            'pos' => ['price_clp' => 11888, 'price_usd' => 12.50, 'name' => 'Plan POS ($9.990 + IVA)'],
-            'multisucursal' => ['price_clp' => 35688, 'price_usd' => 38.00, 'name' => 'Plan MultiSucursal ($29.990 + IVA)'],
+            'pos' => ['price_clp' => 11888, 'price_usd' => 12.50, 'name' => 'Plan Emprendedor ($9.990 + IVA)'],
+            'multisucursal' => ['price_clp' => 35688, 'price_usd' => 38.00, 'name' => 'Plan Crecimiento MultiSucursal (desde $29.990 + IVA)'],
         ];
 
         if (!isset($plans[$planId])) {

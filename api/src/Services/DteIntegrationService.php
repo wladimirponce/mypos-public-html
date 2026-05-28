@@ -92,6 +92,9 @@ final class DteIntegrationService
         if ($config['modo'] === 'REAL' && empty($config['endpoint_http'])) {
             throw new HttpException('Integracion real DTE no configurada; use modo SIMULADO o configure endpoint real.', 422);
         }
+        if ($config['modo'] === 'REAL') {
+            $this->adminApiKey($config, $empresaId);
+        }
 
         return $config;
     }
@@ -161,6 +164,8 @@ final class DteIntegrationService
                 'modo' => (string) $config['modo'],
                 'xml_path' => $result['xml_path'],
                 'pdf_path' => $result['pdf_path'],
+                'track_id' => $result['track_id'] ?? null,
+                'dte_print_payload' => $result['dte_print_payload'] ?? null,
             ];
         } catch (Throwable $exception) {
             if ($connection->inTransaction()) {
@@ -356,7 +361,224 @@ final class DteIntegrationService
             throw new HttpException('Integracion real DTE no configurada; use modo SIMULADO o configure endpoint real.', 422);
         }
 
-        throw new HttpException('Adaptador REAL DTE pendiente de habilitar con contrato HTTP seguro.', 501);
+        $endpoint = (string) $config['endpoint_http'];
+        $apiKey = $this->adminApiKey($config, (int) $payload['documento']['empresa_id']);
+        $request = $this->adminGeneratePayload($payload);
+        $generate = $this->adminRequest($endpoint, 'generate', $request, $apiKey);
+
+        if (empty($generate['ok'])) {
+            return [
+                'success' => false,
+                'estado' => 'ERROR',
+                'track_id' => null,
+                'xml_path' => null,
+                'pdf_path' => null,
+                'response' => [
+                    'modo' => 'REAL',
+                    'paso' => 'generate',
+                    'request' => $request,
+                    'admin_response' => $generate,
+                ],
+                'error' => (string) ($generate['error'] ?? $generate['message'] ?? 'No se pudo generar DTE real'),
+            ];
+        }
+
+        $xml = (string) ($generate['xml'] ?? '');
+        $tipo = (int) ($generate['tipo'] ?? $request['tipo']);
+        $folio = (int) ($generate['folio'] ?? $request['folio'] ?? 0);
+
+        if ($xml === '' || $folio <= 0) {
+            return [
+                'success' => false,
+                'estado' => 'ERROR',
+                'track_id' => null,
+                'xml_path' => null,
+                'pdf_path' => null,
+                'response' => [
+                    'modo' => 'REAL',
+                    'paso' => 'generate',
+                    'request' => $request,
+                    'admin_response' => $this->withoutXml($generate),
+                ],
+                'error' => 'Admin DTE no devolvio XML o folio valido',
+            ];
+        }
+
+        $send = $this->adminRequest($endpoint, 'send', [
+            'xml' => $xml,
+            'tipo' => $tipo,
+            'folio' => $folio,
+        ], $apiKey);
+
+        $tedXml = $this->extractTedXml($xml);
+        $sendOk = !empty($send['ok']);
+        $trackId = isset($send['trackId']) ? (string) $send['trackId'] : (isset($send['track_id']) ? (string) $send['track_id'] : null);
+        $printPayload = $this->buildPrintPayload($payload, $generate, $send, $tedXml);
+
+        return [
+            'success' => $sendOk,
+            'estado' => $sendOk ? 'ENVIADO' : 'ERROR',
+            'track_id' => $trackId,
+            'xml_path' => "admin://dte/T{$tipo}F{$folio}",
+            'pdf_path' => null,
+            'response' => [
+                'modo' => 'REAL',
+                'generate' => $this->withoutXml($generate),
+                'send' => $send,
+                'ted_xml' => $tedXml,
+                'dte_print_payload' => $printPayload,
+            ],
+            'dte_print_payload' => $printPayload,
+            'error' => $sendOk ? null : (string) ($send['error'] ?? $send['mensaje'] ?? 'No se pudo enviar DTE al SII'),
+        ];
+    }
+
+    private function adminGeneratePayload(array $payload): array
+    {
+        $document = $payload['documento'];
+        $receptor = $payload['receptor'];
+
+        return [
+            'tipo' => (int) $document['tipo_dte'],
+            'folio' => (int) $document['folio'],
+            'fecha' => (string) $document['fecha_emision'],
+            'receptor' => [
+                'rut' => (string) ($receptor['rut'] ?? '66666666-6'),
+                'nombre' => (string) ($receptor['nombre'] ?? 'Consumidor Final'),
+                'giro' => $receptor['giro'] ?? null,
+                'direccion' => $receptor['direccion'] ?? null,
+                'comuna' => $receptor['comuna'] ?? null,
+                'ciudad' => $receptor['ciudad'] ?? null,
+            ],
+            'items' => array_map(static fn (array $item): array => [
+                'codigo' => $item['codigo'] ?? null,
+                'nombre' => (string) ($item['nombre'] ?? 'Item'),
+                'cantidad' => (float) ($item['cantidad'] ?? 1),
+                'precio' => (int) ($item['precio'] ?? 0),
+                'descuento' => (int) ($item['descuento'] ?? 0),
+                'exento' => (int) ($item['exento'] ?? 0) > 0,
+            ], $payload['items'] ?? []),
+        ];
+    }
+
+    private function adminRequest(string $endpoint, string $action, array $payload, string $apiKey): array
+    {
+        if (!function_exists('curl_init')) {
+            return ['ok' => false, 'error' => 'Extension cURL no disponible en PHP'];
+        }
+
+        $url = rtrim($endpoint, '?&');
+        $url .= (str_contains($url, '?') ? '&' : '?') . 'action=' . rawurlencode($action);
+        $body = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($body === false) {
+            return ['ok' => false, 'error' => 'No se pudo serializar payload DTE'];
+        }
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 45,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json',
+                'Content-Type: application/json',
+                'X-API-KEY: ' . $apiKey,
+            ],
+        ]);
+
+        $raw = curl_exec($ch);
+        $curlError = curl_error($ch);
+        $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($curlError !== '') {
+            return ['ok' => false, 'error' => 'Error de red contra admin DTE: ' . $curlError, 'http' => $http];
+        }
+
+        $decoded = json_decode((string) $raw, true);
+        if (!is_array($decoded)) {
+            return [
+                'ok' => false,
+                'error' => 'Admin DTE no devolvio JSON valido',
+                'http' => $http,
+                'raw' => is_string($raw) ? substr($raw, 0, 500) : null,
+            ];
+        }
+
+        if ($http >= 400) {
+            $decoded['ok'] = false;
+            $decoded['http'] = $http;
+        }
+
+        return $decoded;
+    }
+
+    private function adminApiKey(array $config, int $empresaId): string
+    {
+        $metadata = $this->decodeJson($config['metadata_json'] ?? null) ?? [];
+        $envName = is_string($metadata['admin_api_key_env'] ?? null) && trim((string) $metadata['admin_api_key_env']) !== ''
+            ? trim((string) $metadata['admin_api_key_env'])
+            : 'DTE_ADMIN_API_KEY_' . $empresaId;
+
+        $apiKey = (string) ($_ENV[$envName] ?? getenv($envName) ?: '');
+        if ($apiKey === '') {
+            $apiKey = (string) ($_ENV['DTE_ADMIN_API_KEY'] ?? getenv('DTE_ADMIN_API_KEY') ?: '');
+        }
+
+        if (trim($apiKey) === '') {
+            throw new HttpException("Falta configurar API key de admin DTE en {$envName} o DTE_ADMIN_API_KEY", 422);
+        }
+
+        return trim($apiKey);
+    }
+
+    private function extractTedXml(string $xml): ?string
+    {
+        if (preg_match('/<TED\b[^>]*>.*?<\/TED>/s', $xml, $match) === 1) {
+            return $match[0];
+        }
+
+        return null;
+    }
+
+    private function withoutXml(array $response): array
+    {
+        if (isset($response['xml'])) {
+            $response['xml_length'] = strlen((string) $response['xml']);
+            unset($response['xml']);
+        }
+
+        return $response;
+    }
+
+    private function buildPrintPayload(array $payload, array $generate, array $send, ?string $tedXml): ?array
+    {
+        if ($tedXml === null || $tedXml === '') {
+            return null;
+        }
+
+        $document = $payload['documento'];
+        $items = array_map(static fn (array $item): array => [
+            'nombre' => (string) ($item['nombre'] ?? 'Item'),
+            'cantidad' => (float) ($item['cantidad'] ?? 1),
+            'precio_unitario' => (int) ($item['precio'] ?? 0),
+            'subtotal' => (int) ($item['total'] ?? 0),
+        ], $payload['items'] ?? []);
+
+        return [
+            'tipo' => 'boleta_electronica_dte',
+            'tipo_dte' => (int) ($generate['tipo'] ?? $document['tipo_dte']),
+            'folio_dte' => (int) ($generate['folio'] ?? $document['folio']),
+            'fecha_dte' => (string) $document['fecha_emision'],
+            'track_id' => isset($send['trackId']) ? (string) $send['trackId'] : null,
+            'ted_xml' => $tedXml,
+            'total' => (int) $document['total'],
+            'neto' => (int) $document['neto'],
+            'iva' => (int) $document['impuestos'],
+            'productos' => $items,
+        ];
     }
 
     private function persistEmissionResult(int $empresaId, int $emissionId, int $documentId, array $result, int $incrementAttempts): void
