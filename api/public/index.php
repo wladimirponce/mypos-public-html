@@ -153,6 +153,14 @@ $router->get('/health', static function (): void {
     ]);
 });
 
+$router->get('/api/health', static function (): void {
+    Response::success([
+        'status' => 'ok',
+        'app' => 'MyPOS',
+        'company' => 'Agentika Ingeniería y Soluciones Inteligentes SpA',
+    ]);
+});
+
 $router->get('/health/db', static function (): void {
     Database::connection()->query('SELECT 1');
 
@@ -162,7 +170,36 @@ $router->get('/health/db', static function (): void {
     ]);
 });
 
+$router->get('/api/health/db', static function (): void {
+    Database::connection()->query('SELECT 1');
+
+    Response::success([
+        'status' => 'ok',
+        'database' => 'connected',
+    ]);
+});
+
 $router->get('/health/config', static function (): void {
+    $envPath = dirname(__DIR__) . '/.env';
+    $dbHost = (string) ($_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: '');
+    $dbName = (string) ($_ENV['DB_DATABASE'] ?? getenv('DB_DATABASE') ?: '');
+    $dbUser = (string) ($_ENV['DB_USERNAME'] ?? getenv('DB_USERNAME') ?: '');
+    $dbPassword = (string) ($_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '');
+
+    Response::success([
+        'env_file_exists' => is_file($envPath),
+        'env_file_readable' => is_readable($envPath),
+        'pdo_loaded' => class_exists(PDO::class),
+        'pdo_mysql_loaded' => in_array('mysql', PDO::getAvailableDrivers(), true),
+        'db_host' => $dbHost,
+        'db_database' => $dbName,
+        'db_username' => $dbUser,
+        'db_password_length' => strlen($dbPassword),
+        'db_password_has_hash' => str_contains($dbPassword, '#'),
+    ]);
+});
+
+$router->get('/api/health/config', static function (): void {
     $envPath = dirname(__DIR__) . '/.env';
     $dbHost = (string) ($_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: '');
     $dbName = (string) ($_ENV['DB_DATABASE'] ?? getenv('DB_DATABASE') ?: '');
