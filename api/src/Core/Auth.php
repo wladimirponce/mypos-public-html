@@ -22,6 +22,29 @@ final class Auth
         return trim($matches[1]);
     }
 
+    public static function empresaId(): ?int
+    {
+        $empresaId = self::positiveInt($_GET['empresa_id'] ?? null);
+        if ($empresaId !== null) {
+            return $empresaId;
+        }
+
+        $empresaId = self::positiveInt($_POST['empresa_id'] ?? null);
+        if ($empresaId !== null) {
+            return $empresaId;
+        }
+
+        $raw = file_get_contents('php://input');
+        if (is_string($raw) && trim($raw) !== '') {
+            $payload = json_decode($raw, true);
+            if (is_array($payload)) {
+                return self::positiveInt($payload['empresa_id'] ?? null);
+            }
+        }
+
+        return null;
+    }
+
     /**
      * @param array<string, mixed> $claims
      */
@@ -55,5 +78,16 @@ final class Auth
         }
 
         return $secret;
+    }
+
+    private static function positiveInt(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $number = filter_var($value, FILTER_VALIDATE_INT);
+
+        return is_int($number) && $number > 0 ? $number : null;
     }
 }
