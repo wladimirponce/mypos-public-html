@@ -3,4 +3,12 @@ deployment:
   tasks:
     - export DEPLOYPATH=/home/zylajdcb/public_html
     - /bin/mkdir -p $DEPLOYPATH
-    - /usr/bin/rsync -a --delete --exclude='.git' --exclude='.cpanel.yml' --exclude='api/.env' --exclude='api/storage/logs/*' --exclude='api/storage/uploads/*' ./ $DEPLOYPATH/
+    - /bin/cp -R assets $DEPLOYPATH/
+    - /bin/cp -R img $DEPLOYPATH/
+    - /bin/cp -R api $DEPLOYPATH/
+    - /bin/cp .htaccess $DEPLOYPATH/.htaccess
+    - /bin/cp icons.svg $DEPLOYPATH/icons.svg
+    - /bin/cp index.html $DEPLOYPATH/index.html
+    - /bin/cp manifest.webmanifest $DEPLOYPATH/manifest.webmanifest
+    - /bin/cp sw.js $DEPLOYPATH/sw.js
+    - /bin/cp vite.svg $DEPLOYPATH/vite.svg
