@@ -162,6 +162,26 @@ $router->get('/health/db', static function (): void {
     ]);
 });
 
+$router->get('/health/config', static function (): void {
+    $envPath = dirname(__DIR__) . '/.env';
+    $dbHost = (string) ($_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: '');
+    $dbName = (string) ($_ENV['DB_DATABASE'] ?? getenv('DB_DATABASE') ?: '');
+    $dbUser = (string) ($_ENV['DB_USERNAME'] ?? getenv('DB_USERNAME') ?: '');
+    $dbPassword = (string) ($_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '');
+
+    Response::success([
+        'env_file_exists' => is_file($envPath),
+        'env_file_readable' => is_readable($envPath),
+        'pdo_loaded' => class_exists(PDO::class),
+        'pdo_mysql_loaded' => in_array('mysql', PDO::getAvailableDrivers(), true),
+        'db_host' => $dbHost,
+        'db_database' => $dbName,
+        'db_username' => $dbUser,
+        'db_password_length' => strlen($dbPassword),
+        'db_password_has_hash' => str_contains($dbPassword, '#'),
+    ]);
+});
+
 $authController = new AuthController();
 $router->post('/api/v1/auth/register', [$authController, 'register']);
 $router->post('/api/v1/auth/login', [$authController, 'login']);
