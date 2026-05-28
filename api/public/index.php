@@ -284,6 +284,7 @@ $router->get('/api/v1/suscripciones/flow-return', [$suscripcionController, 'flow
 $router->get('/api/v1/suscripciones/paypal-return', [$suscripcionController, 'paypalReturn']);
 $router->get('/api/v1/suscripciones/status', [$suscripcionController, 'status']);
 $router->get('/api/v1/suscripciones/order-status', [$suscripcionController, 'orderStatus']);
+$router->get('/api/v1/suscripciones/payment-config', [$suscripcionController, 'paymentConfig']);
 
 $permissionController = new PermissionController();
 $router->get('/api/v1/permisos/mis-permisos', [$permissionController, 'myPermissions']);

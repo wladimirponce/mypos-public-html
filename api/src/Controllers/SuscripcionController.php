@@ -111,6 +111,15 @@ class SuscripcionController
         });
     }
 
+    public function paymentConfig(): void
+    {
+        $this->respond(function (): array {
+            Auth::id();
+
+            return $this->service->getPaymentConfig();
+        });
+    }
+
     private function respond(callable $callback, int $statusCode = 200): void
     {
         try {

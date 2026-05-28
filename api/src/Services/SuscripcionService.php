@@ -163,6 +163,21 @@ class SuscripcionService
         ];
     }
 
+    public function getPaymentConfig(): array
+    {
+        return [
+            'flow' => [
+                'configured' => $this->envValue('FLOW_API_KEY') !== '' && $this->envValue('FLOW_SECRET_KEY') !== '',
+                'mode' => $this->envValue('FLOW_MODE') !== '' ? $this->envValue('FLOW_MODE') : 'sandbox',
+            ],
+            'paypal' => [
+                'configured' => $this->envValue('PAYPAL_CLIENT_ID') !== ''
+                    && ($this->envValue('PAYPAL_SECRET_KEY') !== '' || $this->envValue('PAYPAL_CLIENT_SECRET') !== ''),
+                'mode' => $this->envValue('PAYPAL_MODE') !== '' ? $this->envValue('PAYPAL_MODE') : 'sandbox',
+            ],
+        ];
+    }
+
     public function getOrderStatus(string $ordenNumero, int $empresaId, int $usuarioId): array
     {
         if ($ordenNumero === '') {
@@ -254,5 +269,10 @@ class SuscripcionService
         $origins = AppConfig::corsAllowedOrigins();
 
         return rtrim((string) ($origins[0] ?? 'http://localhost:5173'), '/');
+    }
+
+    private function envValue(string $key): string
+    {
+        return (string) ($_ENV[$key] ?? getenv($key) ?: '');
     }
 }
