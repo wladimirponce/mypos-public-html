@@ -68,6 +68,11 @@ if (is_file($vendorAutoload)) {
     });
 }
 
+$envDir = dirname(__DIR__);
+if (class_exists(\Dotenv\Dotenv::class) && is_file($envDir . '/.env')) {
+    \Dotenv\Dotenv::createImmutable($envDir)->safeLoad();
+}
+
 set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
     SafeLogger::warning('PHP runtime warning', [
         'severity' => $severity,
