@@ -438,10 +438,36 @@ final class EmpresaService
             throw new HttpException('Formato de RUT invalido', 422, ['rut' => ['Formato de RUT invalido']]);
         }
 
-        // Formatear RUT: 12345678-9
         $dv = substr($clean, -1);
         $num = substr($clean, 0, -1);
-        
+
+        if (!is_numeric($num)) {
+            throw new HttpException('El RUT ingresado no es valido', 422, ['rut' => ['El RUT ingresado no es valido']]);
+        }
+
+        $factor = 2;
+        $suma = 0;
+        $strNum = strrev($num);
+        for ($i = 0; $i < strlen($strNum); $i++) {
+            $suma += (int)$strNum[$i] * $factor;
+            $factor = $factor === 7 ? 2 : $factor + 1;
+        }
+
+        $resto = $suma % 11;
+        $dvEsperado = 11 - $resto;
+
+        if ($dvEsperado === 11) {
+            $dvCalculado = '0';
+        } elseif ($dvEsperado === 10) {
+            $dvCalculado = 'K';
+        } else {
+            $dvCalculado = (string) $dvEsperado;
+        }
+
+        if ($dv !== $dvCalculado) {
+            throw new HttpException('El RUT ingresado no es valido (Digito Verificador incorrecto)', 422, ['rut' => ['El RUT ingresado no es valido (Digito Verificador incorrecto)']]);
+        }
+
         return $num . '-' . $dv;
     }
 

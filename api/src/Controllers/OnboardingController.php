@@ -276,4 +276,44 @@ final class OnboardingController
 
         return $text === '' ? null : $text;
     }
+
+    public function simulatePayment(): void
+    {
+        try {
+            $claims = (new AuthMiddleware())->handle();
+            $userId = (int) ($claims['user_id'] ?? 0);
+
+            if ($userId <= 0) {
+                throw new HttpException('Token invalido', 401);
+            }
+
+            $payload = $_POST;
+            if (empty($payload)) {
+                $payload = Request::json();
+            }
+
+            $empresaId = $this->resolveEmpresaId($userId, $payload);
+            $context = $this->permissionRepository->userContext($userId, $empresaId);
+            if ($context === null || !in_array((string) $context['rol_codigo'], ['SUPER_ADMIN', 'ADMIN_EMPRESA'], true)) {
+                throw new HttpException('No tienes permiso para completar la inscripcion de esta empresa', 403);
+            }
+            
+            $monto = (float) ($payload['monto'] ?? 9990);
+            
+            // Obtener email del usuario para enviar boleta
+            $user = $this->authRepository->findUserById($userId);
+            if ($user !== null) {
+                $mailService = new \Mypos\Services\MailService();
+                $mailService->enviarBoletaPago((string) $user['email'], (string) $user['nombre'], $monto);
+            }
+
+            Response::success([
+                'status' => 'ok',
+                'message' => 'Pago simulado correctamente y correo enviado'
+            ]);
+        } catch (Throwable $exception) {
+            error_log($exception->getMessage());
+            Response::error('Error interno del servidor', null, 500);
+        }
+    }
 }

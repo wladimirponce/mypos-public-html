@@ -56,6 +56,9 @@ class SuscripcionService
 
         $gateway = strtolower((string) ($payload['gateway'] ?? 'flow'));
         $planId = (string) ($payload['plan_id'] ?? 'pos');
+        
+        $setupFee = filter_var($payload['setup_fee'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $extraUsers = (int) ($payload['extra_users_count'] ?? 0);
 
         if (!in_array($gateway, ['flow', 'paypal'], true)) {
             throw new HttpException('Gateway de pago invalido', 422);
@@ -64,8 +67,21 @@ class SuscripcionService
         $plan = $this->getPlanDetails($planId);
         $ordenNumero = 'MP_' . time() . '_' . bin2hex(random_bytes(3));
         $correo = $this->userEmail($usuarioId);
-        $monto = $gateway === 'flow' ? $plan['price_clp'] : $plan['price_usd'];
+        
+        $baseMonto = $gateway === 'flow' ? $plan['price_clp'] : $plan['price_usd'];
         $moneda = $gateway === 'flow' ? 'CLP' : 'USD';
+        
+        $montoExtraUsers = 0;
+        if ($planId === 'multisucursal' && $extraUsers > 0) {
+            $montoExtraUsers = $gateway === 'flow' ? ($extraUsers * 11888) : ($extraUsers * 12.50);
+        }
+        
+        $montoSetup = 0;
+        if ($setupFee) {
+            $montoSetup = $gateway === 'flow' ? 35688 : 38.00; // $29.990 + IVA
+        }
+        
+        $montoTotal = $baseMonto + $montoExtraUsers + $montoSetup;
 
         $ordenId = $this->repository->createOrder(
             $ordenNumero,
@@ -73,16 +89,16 @@ class SuscripcionService
             $usuarioId,
             $gateway,
             $planId,
-            (float) $monto,
+            (float) $montoTotal,
             $moneda
         );
 
         try {
             if ($gateway === 'flow') {
-                return $this->createFlowOrder($ordenId, $ordenNumero, $correo, (int) $monto, $plan);
+                return $this->createFlowOrder($ordenId, $ordenNumero, $correo, (int) $montoTotal, $plan);
             }
 
-            return $this->createPayPalOrder($ordenId, $ordenNumero, (float) $monto, $plan);
+            return $this->createPayPalOrder($ordenId, $ordenNumero, (float) $montoTotal, $plan);
         } catch (FlowException | PayPalException $exception) {
             $this->repository->markOrderRejected($ordenId);
             error_log($exception->getMessage());

@@ -61,6 +61,7 @@ class ComposerStaticInit1dfa4a624a16329397dfa48826943182
             'PhpParser\\' => 10,
             'PhpOption\\' => 10,
             'PhpCsFixer\\' => 11,
+            'PHPMailer\\PHPMailer\\' => 20,
         ),
         'M' =>
         array (
@@ -214,6 +215,10 @@ class ComposerStaticInit1dfa4a624a16329397dfa48826943182
         'PhpCsFixer\\' =>
         array (
             0 => __DIR__ . '/..' . '/friendsofphp/php-cs-fixer/src',
+        ),
+        'PHPMailer\\PHPMailer\\' =>
+        array (
+            0 => __DIR__ . '/..' . '/phpmailer/phpmailer/src',
         ),
         'Mypos\\' =>
         array (

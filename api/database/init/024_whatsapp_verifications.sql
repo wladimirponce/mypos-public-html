@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS whatsapp_verifications (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    token VARCHAR(50) NOT NULL UNIQUE,
+    telefono VARCHAR(30) NULL,
+    estado ENUM('pendiente', 'verificado') NOT NULL DEFAULT 'pendiente',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

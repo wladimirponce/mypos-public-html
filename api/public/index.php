@@ -277,6 +277,13 @@ $router->post('/api/v1/auth/login', [$authController, 'login']);
 $router->get('/api/v1/auth/me', [$authController, 'me']);
 $router->post('/api/v1/auth/logout', [$authController, 'logout']);
 
+$onboardingController = new OnboardingController();
+$router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);
+
+$whatsappController = new \Mypos\Controllers\WhatsappController();
+$router->post('/api/v1/whatsapp/token', [$whatsappController, 'generateToken']);
+$router->get('/api/v1/whatsapp/status', [$whatsappController, 'status']);
+
 $suscripcionController = new SuscripcionController();
 $router->post('/api/v1/suscripciones/order', [$suscripcionController, 'createOrder']);
 $router->post('/api/v1/suscripciones/flow-webhook', [$suscripcionController, 'flowWebhook']);
@@ -516,5 +523,75 @@ $router->get('/api/v1/reportes/ventas-por-producto', protectedRoute([$reporteCon
 $router->get('/api/v1/reportes/ventas-por-rubro', protectedRoute([$reporteController, 'ventasPorRubro'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-usuario', protectedRoute([$reporteController, 'ventasPorUsuario'], 'reportes.ver'));
 $router->get('/api/v1/reportes/dashboard', protectedRoute([$reporteController, 'dashboard'], 'dashboard.ver'));
+// Rutas God Mode
+$router->get('/api/v1/god-mode/empresas', function() {
+    if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
+    $db = \Mypos\Config\Database::connection();
+    $stmt = $db->query('SELECT * FROM empresas ORDER BY id DESC');
+    if ($stmt) {
+        \Mypos\Core\Response::success($stmt->fetchAll());
+    } else {
+        \Mypos\Core\Response::error('Error de SQL', null, 500);
+    }
+});
+$router->delete('/api/v1/god-mode/empresas/{id}', function($params) {
+    if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
+    try {
+        $db = \Mypos\Config\Database::connection();
+        $id = (int)$params['id'];
+        $db->exec('SET FOREIGN_KEY_CHECKS = 0');
+        
+        $tablasHijas = [
+            'empresa_usuarios', 
+            'empresas_suscripcion', 
+            'configuracion_empresa', 
+            'cajas', 
+            'sucursales', 
+            'documentos_tributarios', 
+            'ventas', 
+            'productos',
+            'clientes',
+            'proveedores'
+        ];
+        foreach ($tablasHijas as $tabla) {
+            try {
+                $db->prepare("DELETE FROM $tabla WHERE empresa_id = ?")->execute([$id]);
+            } catch (\Throwable $e) {}
+        }
+
+        $db->prepare('DELETE FROM empresas WHERE id = ?')->execute([$id]);
+        $db->exec('SET FOREIGN_KEY_CHECKS = 1');
+        \Mypos\Core\Response::success(['success' => true]);
+    } catch (\Throwable $e) {
+        $db->exec('SET FOREIGN_KEY_CHECKS = 1');
+        \Mypos\Core\Response::error($e->getMessage(), null, 500);
+    }
+});
+$router->get('/api/v1/god-mode/usuarios', function() {
+    if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
+    $db = \Mypos\Config\Database::connection();
+    $stmt = $db->query('SELECT * FROM usuarios ORDER BY id DESC');
+    if ($stmt) {
+        \Mypos\Core\Response::success($stmt->fetchAll());
+    } else {
+        \Mypos\Core\Response::error('Error de SQL', null, 500);
+    }
+});
+$router->delete('/api/v1/god-mode/usuarios/{id}', function($params) {
+    if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
+    try {
+        $db = \Mypos\Config\Database::connection();
+        $id = (int)$params['id'];
+        $db->exec('SET FOREIGN_KEY_CHECKS = 0');
+        $db->prepare('DELETE FROM empresa_usuarios WHERE usuario_id = ?')->execute([$id]);
+        $db->prepare('DELETE FROM sesiones WHERE usuario_id = ?')->execute([$id]);
+        $db->prepare('DELETE FROM usuarios WHERE id = ?')->execute([$id]);
+        $db->exec('SET FOREIGN_KEY_CHECKS = 1');
+        \Mypos\Core\Response::success(['success' => true]);
+    } catch (\Throwable $e) {
+        $db->exec('SET FOREIGN_KEY_CHECKS = 1');
+        \Mypos\Core\Response::error($e->getMessage(), null, 500);
+    }
+});
 
 $router->dispatch($_SERVER['REQUEST_METHOD'] ?? 'GET', $_SERVER['REQUEST_URI'] ?? '/');

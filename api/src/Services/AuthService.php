@@ -45,8 +45,14 @@ final class AuthService
         }
 
         // Verificar email existente
-        if ($this->repository->findUserByEmail($email) !== null) {
-            throw new HttpException('Ya existe una cuenta con este email', 422, ['email' => ['Ya existe una cuenta con este email']]);
+        $existingUser = $this->repository->findUserByEmail($email);
+        $userId = 0;
+        
+        if ($existingUser !== null) {
+            if (!password_verify($password, (string) $existingUser['password_hash'])) {
+                throw new HttpException('El correo ya existe pero la contraseña no coincide. Ingrese su contraseña actual para agregar una nueva empresa.', 422, ['password' => ['Contraseña incorrecta']]);
+            }
+            $userId = (int) $existingUser['id'];
         }
 
         $connection = Database::connection();
@@ -62,9 +68,11 @@ final class AuthService
         try {
             $connection->beginTransaction();
 
-            // 1. Crear Usuario
-            $passwordHash = password_hash($password, PASSWORD_DEFAULT);
-            $userId = $this->repository->createUser($nombreUsuario, $email, $passwordHash);
+            // 1. Crear Usuario si no existe
+            if ($userId === 0) {
+                $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+                $userId = $this->repository->createUser($nombreUsuario, $email, $passwordHash);
+            }
 
             // 2. Crear Empresa
             $empresa = $empresaService->crearEmpresa([
@@ -111,6 +119,10 @@ final class AuthService
             $stmt->execute(['empresa_id' => $empresaId]);
 
             $connection->commit();
+
+            // Enviar correo de bienvenida
+            $mailService = new MailService();
+            $mailService->enviarCorreoBienvenida($email, $nombreUsuario, $razonSocial);
 
             // Iniciar sesión automáticamente después de registrarse
             return $this->login($email, $password);
