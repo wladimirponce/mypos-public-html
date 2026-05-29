@@ -30,7 +30,7 @@ final class WhatsappController
         }
     }
 
-    public function status(array $params): void
+    public function status(array $params = []): void
     {
         try {
             $token = $_GET['token'] ?? '';
