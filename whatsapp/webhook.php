@@ -4,8 +4,16 @@
  * MyPOS - Asistente Virtual
  */
 
-require_once dirname(__DIR__) . '/web/mypos-backend/backend/vendor/autoload.php';
-\Mypos\Support\Env::loadFile(dirname(__DIR__) . '/web/mypos-backend/backend/.env');
+$autoloadProd = dirname(__DIR__) . '/api/vendor/autoload.php';
+$autoloadLocal = dirname(__DIR__) . '/web/mypos-backend/backend/vendor/autoload.php';
+
+if (file_exists($autoloadProd)) {
+    require_once $autoloadProd;
+    \Mypos\Support\Env::loadFile(dirname(__DIR__) . '/api/.env');
+} else {
+    require_once $autoloadLocal;
+    \Mypos\Support\Env::loadFile(dirname(__DIR__) . '/web/mypos-backend/backend/.env');
+}
 
 // Configuración
 $verify_token = 'AGENTIKA-MYPOS';
