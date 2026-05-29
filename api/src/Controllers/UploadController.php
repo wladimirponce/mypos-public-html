@@ -41,6 +41,13 @@ final class UploadController
         }, 'Archivo subido correctamente');
     }
 
+    public function certificadoSii(): void
+    {
+        $this->respond(function (int $userId): array {
+            return $this->service->subirCertificadoSii($userId, $_POST, $_FILES['archivo'] ?? []);
+        }, 'Certificado válido y procesado correctamente');
+    }
+
     public function show(array $params): void
     {
         $this->respond(function () use ($params): array {

@@ -362,6 +362,7 @@ $uploadController = new UploadController();
 $router->post('/api/v1/uploads/productos', protectedRoute([$uploadController, 'producto'], 'uploads.crear'));
 $router->post('/api/v1/uploads/documentos-ia', protectedRoute([$uploadController, 'documentoIa'], 'uploads.crear'));
 $router->post('/api/v1/uploads/logos', protectedRoute([$uploadController, 'logo'], 'configuracion.editar'));
+$router->post('/api/v1/uploads/certificado-sii', protectedRoute([$uploadController, 'certificadoSii'], 'configuracion.editar'));
 $router->get('/api/v1/uploads/{id}/download', protectedRoute([$uploadController, 'download'], 'uploads.ver'));
 $router->get('/api/v1/uploads/{id}', protectedRoute([$uploadController, 'show'], 'uploads.ver'));
 $router->delete('/api/v1/uploads/{id}', protectedRoute([$uploadController, 'destroy'], 'uploads.crear'));

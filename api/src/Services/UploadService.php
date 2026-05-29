@@ -162,6 +162,55 @@ final class UploadService
         ];
     }
 
+    public function subirCertificadoSii(int $userId, array $post, array $file): array
+    {
+        $empresaId = $this->positiveInt($post, 'empresa_id');
+        $this->requireEmpresa($empresaId);
+        
+        $password = (string) ($post['password'] ?? '');
+        if ($password === '') {
+            throw new HttpException('La contraseña del certificado es obligatoria', 422);
+        }
+        
+        $this->validateUpload($file);
+        $tmpName = (string) $file['tmp_name'];
+        $pfxContent = file_get_contents($tmpName);
+        
+        $certs = [];
+        if (!openssl_pkcs12_read($pfxContent, $certs, $password)) {
+            throw new HttpException('Contraseña incorrecta o archivo de certificado inválido', 422);
+        }
+        
+        // Asumiendo que es válido, lo subimos
+        $stored = $this->storeFile($empresaId, $userId, 'certificados', $file, [
+            'application/x-pkcs12' => ['pfx', 'p12'],
+            'application/octet-stream' => ['pfx', 'p12'],
+        ], self::MAX_DOCUMENT_BYTES);
+        
+        $archivoId = $this->repository->insert($this->metadata($stored, [
+            'empresa_id' => $empresaId,
+            'sucursal_id' => null,
+            'usuario_id' => $userId,
+            'modulo' => 'CONFIGURACION',
+            'entidad' => 'certificado_sii',
+            'entidad_id' => $empresaId,
+            'estado' => 'ACTIVO',
+            'metadata_json' => $this->jsonOrNull(['password_certificado' => $password, 'certificado_valido' => true]),
+        ]));
+        
+        $this->audit($empresaId, null, $userId, 'upload.crear', 'archivos_subidos', $archivoId, [
+            'modulo' => 'CONFIGURACION',
+            'mime_type' => $stored['mime_type'],
+            'size_bytes' => $stored['size_bytes'],
+        ]);
+
+        return [
+            'archivo_id' => $archivoId,
+            'ruta_relativa' => $stored['ruta_relativa'],
+            'valido' => true,
+        ];
+    }
+
     public function metadataArchivo(int $empresaId, int $id): array
     {
         $file = $this->requireFile($empresaId, $id);
