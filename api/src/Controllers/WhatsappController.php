@@ -33,7 +33,7 @@ final class WhatsappController
     public function status(array $params): void
     {
         try {
-            $token = $params['token'] ?? '';
+            $token = $_GET['token'] ?? '';
             if ($token === '') {
                 throw new HttpException('Token requerido', 400);
             }
