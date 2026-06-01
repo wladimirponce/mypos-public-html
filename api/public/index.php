@@ -596,9 +596,19 @@ $router->get('/api/v1/god-mode/empresas', function() {
     if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
     $db = \Mypos\Config\Database::connection();
     $stmt = $db->query('
-        SELECT e.*, s.estado as suscripcion_estado, s.fecha_fin as suscripcion_fin 
-        FROM empresas e 
-        LEFT JOIN empresas_suscripcion s ON e.id = s.empresa_id 
+        SELECT e.*,
+               s.estado as suscripcion_estado,
+               s.fecha_fin as suscripcion_fin,
+               s.plan_id as suscripcion_plan_id,
+               COALESCE(p.pagos_completados, 0) as pagos_completados
+        FROM empresas e
+        LEFT JOIN empresas_suscripcion s ON e.id = s.empresa_id
+        LEFT JOIN (
+            SELECT empresa_id, COUNT(*) as pagos_completados
+            FROM suscripciones_ordenes
+            WHERE estado = "completado"
+            GROUP BY empresa_id
+        ) p ON p.empresa_id = e.id
         ORDER BY e.id DESC
     ');
     if ($stmt) {
