@@ -9,7 +9,6 @@ use Mypos\Core\Auth;
 use Mypos\Core\HttpException;
 use Mypos\Repositories\AuthRepository;
 use Mypos\Repositories\PermissionRepository;
-use Mypos\Repositories\SuscripcionRepository;
 
 final class AuthService
 {
@@ -30,6 +29,9 @@ final class AuthService
         $nombreUsuario = trim($data['nombre_usuario'] ?? '');
         $email = trim(strtolower($data['email'] ?? ''));
         $password = trim($data['password'] ?? '');
+        $planId = in_array((string) ($data['plan_id'] ?? 'pos'), ['pos', 'multisucursal'], true)
+            ? (string) ($data['plan_id'] ?? 'pos')
+            : 'pos';
 
         // Validaciones básicas
         if ($rutEmpresa === '' || $razonSocial === '' || $nombreUsuario === '' || $email === '' || $password === '') {
@@ -111,12 +113,14 @@ final class AuthService
             ]);
 
             // 6. Activar 14 días de prueba gratis (Free Trial - MultiSucursal)
-            $suscripcionRepo = new SuscripcionRepository($connection);
-            $stmt = $connection->prepare(
+            $statement = $connection->prepare(
                 'INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado)
-                 VALUES (:empresa_id, "multisucursal", NOW(), DATE_ADD(NOW(), INTERVAL 14 DAY), "activa")'
+                 VALUES (:empresa_id, :plan_id, NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY), "activa")'
             );
-            $stmt->execute(['empresa_id' => $empresaId]);
+            $statement->execute([
+                'empresa_id' => $empresaId,
+                'plan_id' => $planId,
+            ]);
 
             $connection->commit();
 
