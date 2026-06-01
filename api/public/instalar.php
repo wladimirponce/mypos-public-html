@@ -105,7 +105,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Conexión a la BD
             $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::MYSQL_ATTR_MULTI_STATEMENTS => true // Necesario para correr archivos con múltiples sentencias
+                PDO::MYSQL_ATTR_MULTI_STATEMENTS => true, // Necesario para correr archivos con múltiples sentencias
+                PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true
             ]);
 
             // Ruta a los archivos SQL (asumiendo que este script está en backend/public/)
