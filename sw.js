@@ -1,7 +1,5 @@
-const CACHE_NAME = 'mypos-cache-v2';
+const CACHE_NAME = 'mypos-cache-v3';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
   '/manifest.webmanifest'
 ];
 const IS_LOCAL_DEV = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
@@ -47,8 +45,10 @@ self.addEventListener('activate', (event) => {
           .map((name) => caches.delete(name))
       );
     })
+      .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((clients) => Promise.all(clients.map((client) => client.navigate(client.url))))
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
@@ -62,7 +62,7 @@ self.addEventListener('fetch', (event) => {
   // 2. Navegación (HTML) - Network First, fallback a caché
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => {
+      fetch(event.request, { cache: 'no-store' }).catch(() => {
         return caches.match('/index.html');
       })
     );
