@@ -12,6 +12,8 @@ use Exception;
  */
 class Database
 {
+    public const DEPLOY_MARKER = 'admin-db-php85-2026-06-01';
+
     private static ?PDO $instance = null;
     private static array $config = [];
 
