@@ -286,6 +286,7 @@ $router->post('/api/v1/auth/register', [$authController, 'register']);
 $router->post('/api/v1/auth/login', [$authController, 'login']);
 $router->get('/api/v1/auth/me', [$authController, 'me']);
 $router->post('/api/v1/auth/logout', [$authController, 'logout']);
+$router->post('/api/v1/auth/verify-email', [$authController, 'verifyEmail']);
 
 $onboardingController = new OnboardingController();
 $router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);

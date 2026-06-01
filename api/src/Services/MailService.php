@@ -49,6 +49,53 @@ final class MailService
         }
     }
 
+    public function enviarCorreoVerificacion(string $toEmail, string $nombreUsuario, string $razonSocial, string $token): void
+    {
+        try {
+            $mail = $this->getMailer();
+            $mail->addAddress($toEmail, $nombreUsuario);
+
+            $frontendUrl = $_ENV['FRONTEND_URL'] ?? getenv('FRONTEND_URL') ?: 'https://www.mypos.cl';
+            $verifyUrl = rtrim($frontendUrl, '/') . '/verify-email?token=' . urlencode($token);
+            $year = date('Y');
+
+            $mail->isHTML(true);
+            $mail->Subject = 'Verifica tu cuenta - MyPOS';
+            $mail->Body    = '
+                <div style="background-color: #f8fafc; padding: 40px 20px; font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, Helvetica, Arial, sans-serif;">
+                    <div style="max-width: 500px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+                        <!-- Header -->
+                        <div style="background-color: #1e1b4b; padding: 24px; text-align: center;">
+                            <img src="https://www.mypos.cl/img/isotipo.png" alt="MyPOS Logo" style="height: 48px; width: auto; vertical-align: middle;" />
+                            <span style="color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; margin-left: 8px; font-family: inherit; vertical-align: middle;">My<span style="color: #f97316;">POS</span></span>
+                        </div>
+                        <!-- Content -->
+                        <div style="padding: 32px 24px; text-align: center; color: #334155;">
+                            <h2 style="color: #0f172a; font-size: 20px; font-weight: 700; margin-top: 0; margin-bottom: 16px;">¡Hola, ' . htmlspecialchars($nombreUsuario) . '!</h2>
+                            <p style="font-size: 15px; line-height: 1.6; margin-bottom: 24px;">Gracias por registrarte en <strong>MyPOS</strong>. Para activar tu cuenta y poder avanzar en el registro de tu empresa <strong>' . htmlspecialchars($razonSocial) . '</strong>, necesitamos verificar tu dirección de correo electrónico.</p>
+                            
+                            <!-- Button -->
+                            <div style="margin: 32px 0;">
+                                <a href="' . $verifyUrl . '" style="background-color: #f97316; color: #ffffff; text-decoration: none; padding: 14px 32px; font-size: 15px; font-weight: 600; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(249, 115, 22, 0.2); display: inline-block;">Verificar correo electrónico</a>
+                            </div>
+                            
+                            <p style="font-size: 13px; line-height: 1.6; color: #64748b; margin-top: 32px; margin-bottom: 0;">Si el botón no funciona, puedes copiar y pegar el siguiente enlace en tu navegador:<br><a href="' . $verifyUrl . '" style="color: #6366f1; text-decoration: underline; word-break: break-all;">' . $verifyUrl . '</a></p>
+                        </div>
+                        <!-- Footer -->
+                        <div style="background-color: #f1f5f9; padding: 20px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+                            <p style="margin: 0 0 8px 0;">Desarrollado por <strong>Agentika SpA</strong> · Hecho en Chile 🇨🇱</p>
+                            <p style="margin: 0;">© ' . $year . ' MyPOS. Todos los derechos reservados.</p>
+                        </div>
+                    </div>
+                </div>
+            ';
+
+            $mail->send();
+        } catch (Exception $e) {
+            error_log("Error al enviar correo de verificación: {$e->getMessage()}");
+        }
+    }
+
     public function enviarBoletaPago(string $toEmail, string $nombreUsuario, float $monto, array $dteData = []): void
     {
         try {

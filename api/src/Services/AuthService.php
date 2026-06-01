@@ -70,10 +70,13 @@ final class AuthService
         try {
             $connection->beginTransaction();
 
+            $token = bin2hex(random_bytes(16));
             // 1. Crear Usuario si no existe
             if ($userId === 0) {
                 $passwordHash = password_hash($password, PASSWORD_DEFAULT);
-                $userId = $this->repository->createUser($nombreUsuario, $email, $passwordHash);
+                $userId = $this->repository->createUser($nombreUsuario, $email, $passwordHash, $token);
+            } else {
+                $this->repository->setUserVerificationToken($userId, $token);
             }
 
             // 2. Crear Empresa
@@ -124,12 +127,11 @@ final class AuthService
 
             $connection->commit();
 
-            // Enviar correo de bienvenida
+            // Enviar correo de verificación
             $mailService = new MailService();
-            $mailService->enviarCorreoBienvenida($email, $nombreUsuario, $razonSocial);
+            $mailService->enviarCorreoVerificacion($email, $nombreUsuario, $razonSocial, $token);
 
-            // Iniciar sesión automáticamente después de registrarse
-            return $this->login($email, $password);
+            return ['require_verification' => true, 'email' => $email];
 
         } catch (\Throwable $exception) {
             $connection->rollBack();
@@ -173,6 +175,10 @@ final class AuthService
                 'resultado' => 'ERROR',
             ]);
             throw new HttpException('Credenciales incorrectas', 401);
+        }
+
+        if (isset($user['email_verificado']) && (int) $user['email_verificado'] !== 1) {
+            throw new HttpException('Debes verificar tu dirección de correo electrónico antes de iniciar sesión. Te hemos enviado un correo con instrucciones.', 403, ['email_unverified' => true]);
         }
 
         if ((int) $user['activo'] !== 1) {

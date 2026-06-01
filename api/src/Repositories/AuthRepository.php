@@ -12,17 +12,18 @@ final class AuthRepository
     {
     }
 
-    public function createUser(string $nombre, string $email, string $passwordHash): int
+    public function createUser(string $nombre, string $email, string $passwordHash, ?string $emailVerificationToken = null): int
     {
         $statement = $this->connection->prepare(
-            'INSERT INTO usuarios (nombre, email, password_hash, activo)
-             VALUES (:nombre, :email, :password_hash, 1)'
+            'INSERT INTO usuarios (nombre, email, password_hash, activo, email_verificado, email_verification_token)
+             VALUES (:nombre, :email, :password_hash, 1, 0, :email_verification_token)'
         );
 
         $statement->execute([
             'nombre' => $nombre,
             'email' => $email,
             'password_hash' => $passwordHash,
+            'email_verification_token' => $emailVerificationToken,
         ]);
 
         return (int) $this->connection->lastInsertId();
@@ -34,7 +35,7 @@ final class AuthRepository
     public function findUserByEmail(string $email): ?array
     {
         $statement = $this->connection->prepare(
-            'SELECT id, nombre, email, password_hash, activo
+            'SELECT id, nombre, email, password_hash, activo, email_verificado, email_verification_token
              FROM usuarios
              WHERE email = :email
              LIMIT 1'
@@ -52,7 +53,7 @@ final class AuthRepository
     public function findUserById(int $userId): ?array
     {
         $statement = $this->connection->prepare(
-            'SELECT id, nombre, email, activo
+            'SELECT id, nombre, email, activo, email_verificado, email_verification_token
              FROM usuarios
              WHERE id = :id
              LIMIT 1'
@@ -142,5 +143,44 @@ final class AuthRepository
         $statement->execute($params);
 
         return (bool) $statement->fetchColumn();
+    }
+
+    public function setUserVerificationToken(int $userId, ?string $token): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE usuarios SET email_verification_token = :token WHERE id = :id'
+        );
+        $statement->execute([
+            'token' => $token,
+            'id' => $userId,
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findUserByVerificationToken(string $token): ?array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT id, nombre, email, activo, email_verificado
+             FROM usuarios
+             WHERE email_verification_token = :token
+             LIMIT 1'
+        );
+        $statement->execute(['token' => $token]);
+
+        $user = $statement->fetch();
+
+        return is_array($user) ? $user : null;
+    }
+
+    public function verifyUserEmail(int $userId): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE usuarios 
+             SET email_verificado = 1, email_verification_token = NULL 
+             WHERE id = :id'
+        );
+        $statement->execute(['id' => $userId]);
     }
 }
