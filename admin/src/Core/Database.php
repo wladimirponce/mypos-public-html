@@ -79,7 +79,7 @@ class Database
                 $options
             );
         } catch (PDOException $e) {
-            throw new Exception("Error de conexión a la base de datos central.", 0, $e);
+            throw new Exception("Error de conexion a la base de datos central: " . $e->getMessage(), 0, $e);
         }
     }
 
