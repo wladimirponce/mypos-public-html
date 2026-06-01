@@ -10,20 +10,7 @@ if (!$dbOk) {
     return;
 }
 
-$requiredTables = [
-    'empresas',
-    'empresa_configuracion_operativa',
-    'empresas_suscripcion',
-    'suscripciones_ordenes',
-    'documentos_emitidos',
-    'sii_empresa',
-    'sii_certificado',
-    'sii_caf',
-    'sii_folio_consumo',
-];
-
-$missingTables = [];
-foreach ($requiredTables as $table) {
+$tableExists = static function (PDO $db, string $table): bool {
     $stmt = $db->prepare(
         'SELECT COUNT(*)
          FROM information_schema.TABLES
@@ -31,49 +18,56 @@ foreach ($requiredTables as $table) {
            AND TABLE_NAME = ?'
     );
     $stmt->execute([$table]);
-    if ((int)$stmt->fetchColumn() === 0) {
-        $missingTables[] = $table;
-    }
+    return (int)$stmt->fetchColumn() > 0;
+};
+
+$requiredMyposTables = [
+    'empresas',
+    'empresa_configuracion_operativa',
+    'empresas_suscripcion',
+    'suscripciones_ordenes',
+    'documentos_emitidos',
+];
+
+$requiredSiiTables = [
+    'sii_empresa',
+    'sii_certificado',
+    'sii_caf',
+    'sii_folio_consumo',
+];
+
+$missingMyposTables = [];
+foreach ($requiredMyposTables as $table) {
+    if (!$tableExists($db, $table)) $missingMyposTables[] = $table;
 }
 
-if ($missingTables) {
+$missingSiiTables = [];
+foreach ($requiredSiiTables as $table) {
+    if (!$tableExists($db, $table)) $missingSiiTables[] = $table;
+}
+$hasSiiSchema = $missingSiiTables === [];
+
+if ($missingMyposTables) {
     echo '<div class="d-alert warning"><i class="bi bi-exclamation-triangle"></i> Faltan tablas para este tablero: '
-        . htmlspecialchars(implode(', ', $missingTables))
-        . '. No se crearan tablas automaticamente desde admin.</div>';
+        . htmlspecialchars(implode(', ', $missingMyposTables))
+        . '. El tablero necesita estas tablas de MyPOS para listar clientes.</div>';
     return;
 }
 
-$clientes = $db->query(
-    "SELECT
-        e.id,
-        e.rut,
-        e.razon_social,
-        e.nombre_fantasia,
-        e.email,
-        e.telefono,
-        e.activo,
-        COALESCE(eco.documentos_tributarios_habilitados, 0) AS dte_habilitado,
-        es.plan_id,
-        es.estado AS suscripcion_estado,
-        es.fecha_fin AS suscripcion_fin,
-        COALESCE(p.pagos_completados, 0) AS pagos_completados,
-        se.id AS sii_empresa_id,
+$siiSelect = $hasSiiSchema
+    ? "se.id AS sii_empresa_id,
         se.ambiente_default,
         COALESCE(cert.certificados_activos, 0) AS certificados_activos,
         COALESCE(caf.cafs_activos, 0) AS cafs_activos,
-        COALESCE(caf.folios_disponibles, 0) AS folios_disponibles,
-        COALESCE(doc.documentos_30d, 0) AS documentos_30d,
-        doc.ultimo_documento_at
-     FROM empresas e
-     LEFT JOIN empresa_configuracion_operativa eco ON eco.empresa_id = e.id
-     LEFT JOIN empresas_suscripcion es ON es.empresa_id = e.id
-     LEFT JOIN (
-        SELECT empresa_id, COUNT(*) AS pagos_completados
-        FROM suscripciones_ordenes
-        WHERE estado = 'completado'
-        GROUP BY empresa_id
-     ) p ON p.empresa_id = e.id
-     LEFT JOIN sii_empresa se ON REPLACE(REPLACE(UPPER(se.rut), '.', ''), ' ', '') = REPLACE(REPLACE(UPPER(e.rut), '.', ''), ' ', '')
+        COALESCE(caf.folios_disponibles, 0) AS folios_disponibles,"
+    : "NULL AS sii_empresa_id,
+        NULL AS ambiente_default,
+        0 AS certificados_activos,
+        0 AS cafs_activos,
+        0 AS folios_disponibles,";
+
+$siiJoins = $hasSiiSchema
+    ? "LEFT JOIN sii_empresa se ON REPLACE(REPLACE(UPPER(se.rut), '.', ''), ' ', '') = REPLACE(REPLACE(UPPER(e.rut), '.', ''), ' ', '')
      LEFT JOIN (
         SELECT empresa_id, COUNT(*) AS certificados_activos
         FROM sii_certificado
@@ -93,7 +87,36 @@ $clientes = $db->query(
         ) fc ON fc.caf_id = c.id
         WHERE c.activo = 1
         GROUP BY c.empresa_id
-     ) caf ON caf.empresa_id = se.id
+     ) caf ON caf.empresa_id = se.id"
+    : "";
+
+$clientes = $db->query(
+    "SELECT
+        e.id,
+        e.rut,
+        e.razon_social,
+        e.nombre_fantasia,
+        e.email,
+        e.telefono,
+        e.activo,
+        COALESCE(eco.documentos_tributarios_habilitados, 0) AS dte_habilitado,
+        es.plan_id,
+        es.estado AS suscripcion_estado,
+        es.fecha_fin AS suscripcion_fin,
+        COALESCE(p.pagos_completados, 0) AS pagos_completados,
+        {$siiSelect}
+        COALESCE(doc.documentos_30d, 0) AS documentos_30d,
+        doc.ultimo_documento_at
+     FROM empresas e
+     LEFT JOIN empresa_configuracion_operativa eco ON eco.empresa_id = e.id
+     LEFT JOIN empresas_suscripcion es ON es.empresa_id = e.id
+     LEFT JOIN (
+        SELECT empresa_id, COUNT(*) AS pagos_completados
+        FROM suscripciones_ordenes
+        WHERE estado = 'completado'
+        GROUP BY empresa_id
+     ) p ON p.empresa_id = e.id
+     {$siiJoins}
      LEFT JOIN (
         SELECT
             empresa_id,
@@ -135,6 +158,14 @@ function isTrialSubscription(array $cliente): bool
     return $fin > time() && $fin <= strtotime('+8 days');
 }
 ?>
+
+<?php if (!$hasSiiSchema): ?>
+    <div class="d-alert warning">
+        <i class="bi bi-exclamation-triangle"></i>
+        Faltan tablas SII para el control tecnico DTE: <?= htmlspecialchars(implode(', ', $missingSiiTables)) ?>.
+        Se muestran los clientes MyPOS en modo lectura; no se crean tablas automaticamente desde admin.
+    </div>
+<?php endif; ?>
 
 <div class="row g-3 mb-4">
     <div class="col-md-3">

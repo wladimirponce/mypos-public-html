@@ -68,7 +68,6 @@ class Database
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => false,
-            PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES " . self::$config['charset']
         ];
 
         try {
@@ -78,6 +77,7 @@ class Database
                 self::$config['password'],
                 $options
             );
+            self::$instance->exec("SET NAMES " . self::$config['charset']);
         } catch (PDOException $e) {
             throw new Exception("Error de conexion a la base de datos central: " . $e->getMessage(), 0, $e);
         }
