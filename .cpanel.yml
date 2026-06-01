@@ -5,6 +5,7 @@ deployment:
     - /bin/mkdir -p $DEPLOYPATH
     - /bin/cp -R assets $DEPLOYPATH/
     - /bin/cp -R img $DEPLOYPATH/
+    - /bin/cp -R admin $DEPLOYPATH/
     - /bin/cp -R api $DEPLOYPATH/
     - /bin/cp -R whatsapp $DEPLOYPATH/
     - /bin/cp .htaccess $DEPLOYPATH/.htaccess

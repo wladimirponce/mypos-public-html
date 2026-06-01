@@ -26,17 +26,6 @@ class ComunicacionVentasController
         }, 201);
     }
 
-    public function godIndex(): void
-    {
-        $this->respond(function (): array {
-            if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') {
-                throw new HttpException('No autorizado', 403);
-            }
-
-            return $this->service->latest((int) ($_GET['limit'] ?? 100));
-        });
-    }
-
     private function respond(callable $callback, int $statusCode = 200): void
     {
         try {
