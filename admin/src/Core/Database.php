@@ -44,9 +44,9 @@ class Database
         self::$config = [
             'host'     => $host,
             'port'     => EnvLoader::getInt('DB_PORT', 3306),
-            'dbname'   => EnvLoader::getFirstString(['DB_NAME', 'DB_DATABASE'], 'mypos'),
-            'username' => EnvLoader::getFirstString(['DB_USER', 'DB_USERNAME'], $isDocker ? 'mypos_user' : 'mypos_user'),
-            'password' => EnvLoader::getFirstString(['DB_PASS', 'DB_PASSWORD'], $isDocker ? 'mypos_password' : ''),
+            'dbname'   => EnvLoader::getFirstString(['DB_DATABASE', 'DB_NAME'], 'mypos'),
+            'username' => EnvLoader::getFirstString(['DB_USERNAME', 'DB_USER'], $isDocker ? 'mypos_user' : 'mypos_user'),
+            'password' => EnvLoader::getFirstString(['DB_PASSWORD', 'DB_PASS'], $isDocker ? 'mypos_password' : ''),
             'charset'  => EnvLoader::getString('DB_CHARSET', 'utf8mb4'),
         ];
     }
