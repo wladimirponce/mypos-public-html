@@ -695,7 +695,6 @@ $router->delete('/api/v1/god-mode/usuarios/{id}', function($params) {
         $id = (int)$params['id'];
         $db->exec('SET FOREIGN_KEY_CHECKS = 0');
         $db->prepare('DELETE FROM empresa_usuarios WHERE usuario_id = ?')->execute([$id]);
-        $db->prepare('DELETE FROM sesiones WHERE usuario_id = ?')->execute([$id]);
         $db->prepare('DELETE FROM usuarios WHERE id = ?')->execute([$id]);
         $db->exec('SET FOREIGN_KEY_CHECKS = 1');
         \Mypos\Core\Response::success(['success' => true]);
