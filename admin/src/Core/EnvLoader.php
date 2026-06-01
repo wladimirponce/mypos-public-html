@@ -13,8 +13,24 @@ class EnvLoader
      */
     public static function getString(string $key, string $default = ''): string
     {
+        if (array_key_exists($key, $_ENV)) {
+            return (string)$_ENV[$key];
+        }
+
         $value = getenv($key);
-        return ($value !== false) ? $value : $default;
+        return ($value !== false) ? (string)$value : $default;
+    }
+
+    public static function getFirstString(array $keys, string $default = ''): string
+    {
+        foreach ($keys as $key) {
+            $value = self::getString($key, '');
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return $default;
     }
 
     /**

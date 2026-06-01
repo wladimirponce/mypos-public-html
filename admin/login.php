@@ -13,6 +13,7 @@ if (!empty($_SESSION['admin_id'])) {
 
 require_once __DIR__ . '/autoload.php';
 use App\Core\Database;
+use App\Services\AdminBootstrap;
 
 $error = '';
 
@@ -25,6 +26,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         try {
             $db  = Database::getInstance();
+            AdminBootstrap::ensureSuperAdmin($db);
+
             $stmt = $db->prepare(
                 "SELECT id, nombre, password_hash, rol
                    FROM admin_usuario
