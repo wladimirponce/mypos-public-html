@@ -26,8 +26,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         try {
             $db  = Database::getInstance();
-            AdminBootstrap::ensureSuperAdmin($db);
+        } catch (Exception $e) {
+            $error = 'Error de conexion a la base de datos: ' . $e->getMessage();
+            $db = null;
+        }
 
+        if ($db instanceof PDO && $error === '') {
+            try {
+                AdminBootstrap::ensureSuperAdmin($db);
+            } catch (Exception $e) {
+                $error = 'Error preparando superusuario admin: ' . $e->getMessage();
+            }
+        }
+
+        if ($db instanceof PDO && $error === '') {
+            try {
             $stmt = $db->prepare(
                 "SELECT id, nombre, password_hash, rol
                    FROM admin_usuario
@@ -55,9 +68,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Credenciales incorrectas.';
             }
         } catch (Exception $e) {
-            $error = 'Error de conexión a la base de datos: ' . $e->getMessage();
+            $error = 'Error consultando usuario administrador: ' . $e->getMessage();
         }
     }
+}
 }
 ?><!DOCTYPE html>
 <html lang="es">

@@ -79,7 +79,6 @@ class Database
                 $options
             );
         } catch (PDOException $e) {
-            // Loguear error (opcional) y lanzar excepción genérica para seguridad
             throw new Exception("Error de conexión a la base de datos central.", 0, $e);
         }
     }
