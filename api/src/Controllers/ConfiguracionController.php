@@ -29,7 +29,9 @@ final class ConfiguracionController
 
     public function updateEmpresa(): void
     {
-        $this->respond(fn (int $empresaId, int $userId): array => $this->service->actualizarEmpresa($userId, Request::json()), 'configuracion.editar');
+        $this->respond(fn (int $empresaId, int $userId): array => $this->service->actualizarEmpresa($userId, array_merge(Request::json(), [
+            'empresa_id' => $empresaId,
+        ])), 'configuracion.editar');
     }
 
     public function operacion(): void
@@ -39,7 +41,9 @@ final class ConfiguracionController
 
     public function updateOperacion(): void
     {
-        $this->respond(fn (int $empresaId, int $userId): array => $this->service->actualizarOperacion($userId, Request::json()), 'configuracion.editar');
+        $this->respond(fn (int $empresaId, int $userId): array => $this->service->actualizarOperacion($userId, array_merge(Request::json(), [
+            'empresa_id' => $empresaId,
+        ])), 'configuracion.editar');
     }
 
     public function sucursal(array $params): void
@@ -92,4 +96,3 @@ final class ConfiguracionController
         return (int) ($payload['empresa_id'] ?? 0);
     }
 }
-
