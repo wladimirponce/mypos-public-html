@@ -35,14 +35,14 @@ if (isset($_GET['switch_empresa'])) {
         $_SESSION['active_empresa_id'] = $newId;
     }
     // Redirigir para limpiar URL
-    header("Location: dashboard.php?module=" . ($_GET['module'] ?? 'home'));
+    header("Location: dashboard.php?module=" . ($_GET['module'] ?? 'clientes_mypos'));
     exit;
 }
 
 // ── Módulo activo ──
-$module = $_GET['module'] ?? 'home';
-$allowed = ['home','clientes_mypos','emision','consultas','historial','libros','empresas','sucursales','usuarios','config','certificacion','cafs','pos_urgencia','dispositivos',];
-if (!in_array($module, $allowed)) $module = 'home';
+$module = $_GET['module'] ?? 'clientes_mypos';
+$allowed = ['clientes_mypos','emision','consultas','historial','libros','empresas','config','certificacion','cafs','pos_urgencia','dispositivos',];
+if (!in_array($module, $allowed)) $module = 'clientes_mypos';
 
 // ── Intentar conexión DB (opcional, no bloquea) ──
 $dbOk = false;
@@ -107,12 +107,9 @@ if ($dbOk) {
 $titles = [
     'clientes_mypos' => ['Clientes MyPOS', 'Estado DTE, folios y certificacion por cliente'],
     'empresas'      => ['Empresas', 'Gestión multi-cliente y Onboarding'],
-    'sucursales'    => ['Sucursales', 'Gestión de locales'],
-    'usuarios'      => ['Usuarios & Roles', 'Personal operativo y permisos'],
     'config'        => ['Configuración DTE', 'Certificados y firma electrónica'],
     'cafs'          => ['Folios CAF', 'Gestión centralizada por sucursal'],
     'dispositivos'  => ['Dispositivos POS', 'Enrolamiento de hardware'],
-    'home'          => ['Dashboard', 'Resumen ejecutivo'],
     'pos_urgencia'  => ['Urgencias POS', 'Cola de DTEs y stock de folios POS'],
     'emision'       => ['Emisión Manual', 'Generar documentos tributarios (Respaldo)'],
     'consultas'     => ['Consultas SII', 'Verificar estados de documentos'],
@@ -208,12 +205,6 @@ $pageSubtitle = $titles[$module][1] ?? '';
                     <span class="dash-nav-badge warning"><?= count($empresas) ?></span>
                 <?php endif; ?>
             </a>
-            <a href="dashboard.php?module=sucursales" class="dash-nav-item <?= $module === 'sucursales' ? 'active' : '' ?>">
-                <i class="bi bi-shop"></i> Sucursales
-            </a>
-            <a href="dashboard.php?module=usuarios" class="dash-nav-item <?= $module === 'usuarios' ? 'active' : '' ?>">
-                <i class="bi bi-people"></i> Usuarios & Roles
-            </a>
 
             <div class="dash-nav-section">2. Operación y Hardware</div>
             <a href="dashboard.php?module=config" class="dash-nav-item <?= $module === 'config' ? 'active' : '' ?>">
@@ -248,9 +239,6 @@ $pageSubtitle = $titles[$module][1] ?? '';
             </a>
 
             <div class="dash-nav-section">3. Monitoreo Diario</div>
-            <a href="dashboard.php?module=home" class="dash-nav-item <?= $module === 'home' ? 'active' : '' ?>">
-                <i class="bi bi-grid-1x2-fill"></i> Dashboard
-            </a>
             <a href="dashboard.php?module=pos_urgencia" class="dash-nav-item <?= $module === 'pos_urgencia' ? 'active' : '' ?>">
                 <i class="bi bi-exclamation-triangle"></i> Urgencias POS
                 <?php if ($posUrgencia === 'critico'): ?>

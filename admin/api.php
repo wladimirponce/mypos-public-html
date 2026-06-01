@@ -619,38 +619,6 @@ if ($action) {
                 echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
             }
             break;
-        case 'soporte_listar_tickets':
-            $repo = new \App\Repositories\SoporteRepository();
-            $empId = (int)($data['empresa_id'] ?? $_GET['empresa_id'] ?? 0);
-            echo json_encode(['ok' => true, 'data' => $repo->getTickets($empId)]);
-            break;
-        case 'soporte_crear_ticket':
-            $repo = new \App\Repositories\SoporteRepository();
-            try {
-                $empId = (int)($data['empresa_id'] ?? 0);
-                $usuId = isset($data['usuario_id']) ? (int)$data['usuario_id'] : null;
-                $id = $repo->crearTicket($empId, $usuId, $data['asunto'] ?? '', $data['prioridad'] ?? 'media', $data['mensaje'] ?? '');
-                echo json_encode(['ok' => true, 'id' => $id]);
-            } catch (\Exception $e) {
-                echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
-            }
-            break;
-        case 'soporte_agregar_mensaje':
-            $repo = new \App\Repositories\SoporteRepository();
-            try {
-                $usuId = isset($data['usuario_id']) ? (int)$data['usuario_id'] : null;
-                $id = $repo->agregarMensaje((int)$data['ticket_id'], $usuId, $data['mensaje']);
-                echo json_encode(['ok' => true, 'id' => $id]);
-            } catch (\Exception $e) {
-                echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
-            }
-            break;
-        case 'soporte_ver_ticket':
-            $repo = new \App\Repositories\SoporteRepository();
-            $id = (int)($data['ticket_id'] ?? $_GET['ticket_id'] ?? 0);
-            echo json_encode(['ok' => true, 'data' => $repo->getTicketConMensajes($id)]);
-            break;
-
         case 'info':     echo json_encode(emisorInfo());      break;
         case 'generate':
             file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . " | generate called. function_exists(generateDTE)=" . (function_exists('generateDTE') ? 'YES' : 'NO') . PHP_EOL, FILE_APPEND);
@@ -6766,18 +6734,3 @@ function getHistorialPaginado(int $page = 1, ?int $tipo = null, ?string $sucursa
     }
 }
 
-/**
- * Devuelve los anuncios globales (broadcasts) activos para MyPOS.
- */
-function getBroadcastsActivos(): array {
-    global $globalContext;
-    $db = $globalContext ? $globalContext->getDb() : \App\Core\Database::getInstance();
-    if (!$db) return ['success' => false, 'broadcasts' => []];
-    
-    try {
-        $stmt = $db->query("SELECT id, titulo, mensaje, tipo FROM saas_broadcasts WHERE activo = 1 AND fecha_inicio <= NOW() AND fecha_fin >= NOW() ORDER BY creado_en DESC");
-        return ['success' => true, 'broadcasts' => $stmt->fetchAll(PDO::FETCH_ASSOC)];
-    } catch (\Exception $e) {
-        return ['success' => false, 'broadcasts' => []];
-    }
-}
