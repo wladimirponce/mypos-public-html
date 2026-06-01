@@ -38,6 +38,7 @@ final class UploadService
 
     public function subirProducto(int $userId, array $post, array $file): array
     {
+        error_log("UploadService: subirProducto - post: " . print_r($post, true) . " - file keys: " . print_r(array_keys($file), true));
         $empresaId = $this->positiveInt($post, 'empresa_id');
         $productoId = isset($post['producto_id']) && (int) $post['producto_id'] > 0 ? (int) $post['producto_id'] : null;
         $this->requireEmpresa($empresaId);
@@ -178,7 +179,13 @@ final class UploadService
         
         $certs = [];
         if (!openssl_pkcs12_read($pfxContent, $certs, $password)) {
-            throw new HttpException('Contraseña incorrecta o archivo de certificado inválido', 422);
+            $sslErrors = [];
+            while ($err = openssl_error_string()) {
+                $sslErrors[] = $err;
+            }
+            $errorMsg = implode('; ', $sslErrors);
+            error_log("UploadService: openssl_pkcs12_read failed for company {$empresaId}. Errors: " . $errorMsg);
+            throw new HttpException('Contraseña incorrecta, certificado inválido o algoritmo no soportado. Detalles OpenSSL: ' . $errorMsg, 422);
         }
         
         // Asumiendo que es válido, lo subimos
@@ -208,6 +215,76 @@ final class UploadService
             'archivo_id' => $archivoId,
             'ruta_relativa' => $stored['ruta_relativa'],
             'valido' => true,
+        ];
+    }
+
+    public function verificarVigenciaCertificadoSii(int $empresaId): array
+    {
+        $this->requireEmpresa($empresaId);
+        $file = $this->repository->findActiveCertificate($empresaId);
+        
+        if ($file === null) {
+            return [
+                'registrado' => false,
+                'mensaje' => 'No hay ningún certificado digital registrado para esta empresa.',
+            ];
+        }
+
+        $absolutePath = $this->absolutePath((string) $file['ruta_relativa']);
+        if (!is_file($absolutePath)) {
+            return [
+                'registrado' => true,
+                'valido' => false,
+                'mensaje' => 'El archivo físico del certificado digital no se encuentra en el servidor.',
+                'nombre_original' => (string) $file['nombre_original'],
+                'created_at' => (string) $file['created_at'],
+            ];
+        }
+
+        $metadata = json_decode((string) ($file['metadata_json'] ?? '{}'), true);
+        $password = (string) ($metadata['password_certificado'] ?? '');
+
+        $pfxContent = file_get_contents($absolutePath);
+        $certs = [];
+        if (!openssl_pkcs12_read($pfxContent, $certs, $password)) {
+            return [
+                'registrado' => true,
+                'valido' => false,
+                'mensaje' => 'No fue posible abrir el certificado digital (contraseña incorrecta o archivo dañado).',
+                'nombre_original' => (string) $file['nombre_original'],
+                'created_at' => (string) $file['created_at'],
+            ];
+        }
+
+        $certData = openssl_x509_parse($certs['cert']);
+        if ($certData === false) {
+            return [
+                'registrado' => true,
+                'valido' => false,
+                'mensaje' => 'Error al analizar el certificado X509.',
+                'nombre_original' => (string) $file['nombre_original'],
+                'created_at' => (string) $file['created_at'],
+            ];
+        }
+
+        $validFrom = (int) ($certData['validFrom_time_t'] ?? 0);
+        $validTo = (int) ($certData['validTo_time_t'] ?? 0);
+        $subject = $certData['subject'] ?? [];
+        $cn = (string) ($subject['CN'] ?? 'Desconocido');
+        
+        $vencido = time() > $validTo;
+        $diasRestantes = (int) floor(($validTo - time()) / 86400);
+
+        return [
+            'registrado' => true,
+            'valido' => true,
+            'nombre_original' => (string) $file['nombre_original'],
+            'titular' => $cn,
+            'valido_desde' => date('Y-m-d H:i:s', $validFrom),
+            'valido_hasta' => date('Y-m-d H:i:s', $validTo),
+            'vencido' => $vencido,
+            'dias_restantes' => $diasRestantes,
+            'created_at' => (string) $file['created_at'],
         ];
     }
 
@@ -278,6 +355,7 @@ final class UploadService
         $this->validateUpload($file);
         $size = (int) ($file['size'] ?? 0);
         if ($size <= 0 || $size > $maxBytes) {
+            error_log("UploadService: storeFile failed - size is " . $size . ", max is " . $maxBytes);
             throw new HttpException('El archivo excede el tamano permitido', 422);
         }
 
@@ -336,11 +414,13 @@ final class UploadService
     private function validateUpload(array $file): void
     {
         if ($file === [] || !isset($file['tmp_name'])) {
+            error_log("UploadService: validateUpload failed - empty file or no tmp_name. Keys: " . print_r(array_keys($file), true));
             throw new HttpException('archivo obligatorio', 422);
         }
 
         $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
         if ($error !== UPLOAD_ERR_OK) {
+            error_log("UploadService: validateUpload failed - file error code: " . $error);
             throw new HttpException('Archivo invalido o no recibido', 422);
         }
     }

@@ -70,7 +70,8 @@ INSERT INTO metodos_pago (codigo, nombre) VALUES
 ('CREDITO', 'Tarjeta de credito'),
 ('TRANSFERENCIA', 'Transferencia'),
 ('QR', 'Pago QR'),
-('CREDITO_CLIENTE', 'Credito cliente')
+('CREDITO_INTERNO', 'Crédito Interno'),
+('RUTPAY', 'RutPay')
 ON DUPLICATE KEY UPDATE
     nombre = VALUES(nombre),
     activo = 1;

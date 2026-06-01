@@ -66,7 +66,7 @@ final class VentaService
             throw new HttpException('La venta debe incluir items', 422);
         }
 
-        if (!in_array($paymentCondition, ['CONTADO', 'CREDITO'], true)) {
+        if (!in_array($paymentCondition, ['CONTADO', 'CREDITO', 'CREDITO_INTERNO'], true)) {
             throw new HttpException('condicion_pago invalida', 422);
         }
 
@@ -171,6 +171,9 @@ final class VentaService
                     $stockService->descontarPorVenta([
                         'empresa_id' => $empresaId,
                         'sucursal_id' => $sucursalId,
+                        'ubicacion_id' => isset($payload['ubicacion_id']) && (int) $payload['ubicacion_id'] > 0
+                            ? (int) $payload['ubicacion_id']
+                            : null,
                         'producto_id' => $item['producto_id'],
                         'usuario_id' => $userId,
                         'tipo' => 'VENTA',
@@ -209,6 +212,27 @@ final class VentaService
                     'created_by_usuario_id' => $userId,
                 ]);
                 $this->repository->updateSaleCredit($empresaId, $saleId, $creditId);
+            }
+            if ($paymentCondition === 'CREDITO_INTERNO') {
+                $empleadoId = (int) ($payload['empleado_id'] ?? 0);
+                if ($empleadoId <= 0) {
+                     throw new HttpException('empleado_id obligatorio para venta a credito interno', 422);
+                }
+                
+                $stmt = $connection->prepare("
+                    INSERT INTO ventas_credito_interno 
+                    (empresa_id, sucursal_id, venta_id, empleado_id, numero_boleta, monto_total, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $empresaId, 
+                    $sucursalId, 
+                    $saleId, 
+                    $empleadoId, 
+                    $payload['numero_boleta'] ?? null, 
+                    $totals['total'], 
+                    $userId
+                ]);
             }
 
             AuditoriaService::registrarEvento([

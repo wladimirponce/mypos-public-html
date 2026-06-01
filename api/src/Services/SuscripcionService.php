@@ -44,6 +44,37 @@ class SuscripcionService
         return $plans[$planId];
     }
 
+    private function growthBasePriceByBranches(int $branches, string $gateway): float
+    {
+        $branches = max(2, min(10, $branches));
+
+        $pricesClp = [
+            2 => 35688,
+            3 => 47588,
+            4 => 59488,
+            5 => 71388,
+            6 => 85668,
+            7 => 99948,
+            8 => 114228,
+            9 => 128508,
+            10 => 142788,
+        ];
+
+        $pricesUsd = [
+            2 => 38.00,
+            3 => 50.00,
+            4 => 63.00,
+            5 => 76.00,
+            6 => 91.00,
+            7 => 106.00,
+            8 => 121.00,
+            9 => 136.00,
+            10 => 151.00,
+        ];
+
+        return $gateway === 'flow' ? (float) $pricesClp[$branches] : (float) $pricesUsd[$branches];
+    }
+
     public function createPaymentOrder(array $payload, int $empresaId, int $usuarioId): array
     {
         if ($empresaId <= 0) {
@@ -59,6 +90,7 @@ class SuscripcionService
         
         $setupFee = filter_var($payload['setup_fee'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $extraUsers = (int) ($payload['extra_users_count'] ?? 0);
+        $branchCount = (int) ($payload['branch_count'] ?? 2);
 
         if (!in_array($gateway, ['flow', 'paypal'], true)) {
             throw new HttpException('Gateway de pago invalido', 422);
@@ -69,11 +101,14 @@ class SuscripcionService
         $correo = $this->userEmail($usuarioId);
         
         $baseMonto = $gateway === 'flow' ? $plan['price_clp'] : $plan['price_usd'];
+        if ($planId === 'multisucursal') {
+            $baseMonto = $this->growthBasePriceByBranches($branchCount, $gateway);
+        }
         $moneda = $gateway === 'flow' ? 'CLP' : 'USD';
         
         $montoExtraUsers = 0;
         if ($planId === 'multisucursal' && $extraUsers > 0) {
-            $montoExtraUsers = $gateway === 'flow' ? ($extraUsers * 11888) : ($extraUsers * 12.50);
+            $montoExtraUsers = $gateway === 'flow' ? ($extraUsers * 5938) : ($extraUsers * 6.25);
         }
         
         $montoSetup = 0;

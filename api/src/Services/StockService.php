@@ -23,6 +23,14 @@ final class StockService
         'REVERSA_COMPRA',
     ];
 
+    private const TIPOS_UBICACION = [
+        'SUCURSAL_VENTA',
+        'BODEGA',
+        'TRANSITO',
+        'MERMA',
+        'VIRTUAL',
+    ];
+
     private StockRepository $repository;
 
     public function __construct(?StockRepository $repository = null)
@@ -60,6 +68,39 @@ final class StockService
         return ['stock' => $this->repository->listStock($empresaId, $sucursalId, $q)];
     }
 
+    public function listarStockUbicacion(int $empresaId, int $ubicacionId, ?string $q = null): array
+    {
+        if ($empresaId <= 0 || $ubicacionId <= 0) {
+            throw new HttpException('Error de validacion', 422);
+        }
+
+        if ($this->repository->findLocation($empresaId, $ubicacionId) === null) {
+            throw new HttpException('Ubicacion no encontrada', 404);
+        }
+
+        return ['stock' => $this->repository->listStockByLocation($empresaId, $ubicacionId, $q)];
+    }
+
+    /**
+     * Verifica el invariante de integridad de stock para la empresa:
+     * stock_sucursal.cantidad == SUM(stock_ubicacion de la sucursal).
+     * Solo lectura; util para endpoint de monitoreo y cron de reconciliacion.
+     */
+    public function verificarIntegridad(int $empresaId): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('Error de validacion', 422, ['empresa_id' => ['La empresa_id es obligatoria']]);
+        }
+
+        $descuadres = $this->repository->findStockDiscrepancies($empresaId);
+
+        return [
+            'integro' => $descuadres === [],
+            'total_descuadres' => count($descuadres),
+            'descuadres' => $descuadres,
+        ];
+    }
+
     public function listarMovimientos(int $empresaId, int $sucursalId, ?int $productoId = null): array
     {
         if ($empresaId <= 0 || $sucursalId <= 0) {
@@ -71,6 +112,53 @@ final class StockService
         }
 
         return ['movimientos' => $this->repository->listMovements($empresaId, $sucursalId, $productoId)];
+    }
+
+    public function listarUbicaciones(int $empresaId, ?string $tipo = null, ?int $sucursalId = null, bool $includeInactive = false): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('Error de validacion', 422, ['empresa_id' => ['La empresa_id es obligatoria']]);
+        }
+
+        if ($tipo !== null && trim($tipo) !== '' && !in_array(strtoupper(trim($tipo)), self::TIPOS_UBICACION, true)) {
+            throw new HttpException('Tipo de ubicacion invalido', 422);
+        }
+
+        return ['ubicaciones' => $this->repository->listLocations($empresaId, $tipo, $sucursalId, $includeInactive)];
+    }
+
+    public function crearUbicacion(array $data): array
+    {
+        $this->validateLocation($data);
+        $this->validateLocationSucursal($data);
+
+        return ['id' => $this->repository->createLocation($data)];
+    }
+
+    public function actualizarUbicacion(int $id, array $data): array
+    {
+        $empresaId = $this->positiveInt($data, 'empresa_id');
+        $this->validateLocation($data);
+        $this->validateLocationSucursal($data);
+
+        if (!$this->repository->updateLocation($id, $empresaId, $data)) {
+            throw new HttpException('Ubicacion no encontrada', 404);
+        }
+
+        return ['id' => $id];
+    }
+
+    public function desactivarUbicacion(int $empresaId, int $id): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('Error de validacion', 422, ['empresa_id' => ['La empresa_id es obligatoria']]);
+        }
+
+        if (!$this->repository->deactivateLocation($id, $empresaId)) {
+            throw new HttpException('Ubicacion no encontrada', 404);
+        }
+
+        return ['id' => $id, 'activo' => 0];
     }
 
     public function registrarMovimiento(array $data, ?PDO $externalConnection = null): array
@@ -110,9 +198,14 @@ final class StockService
                 throw new HttpException('El producto no controla stock', 422);
             }
 
-            $repository->ensureStockRow($empresaId, $sucursalId, $productoId);
-            $stock = $repository->lockStockRow($empresaId, $sucursalId, $productoId);
-            $stockAnterior = (float) $stock['cantidad'];
+            // stock_ubicacion es la unica fuente de verdad. Toda operacion debe
+            // resolver una ubicacion concreta; stock_sucursal se deriva luego.
+            $ubicacion = $this->resolveLocation($repository, $empresaId, $sucursalId, $tipo, $data);
+            $ubicacionId = (int) $ubicacion['id'];
+
+            $repository->ensureLocationStockRow($empresaId, $ubicacionId, $productoId);
+            $locationStock = $repository->lockLocationStockRow($empresaId, $ubicacionId, $productoId);
+            $stockAnterior = (float) $locationStock['cantidad'];
             $delta = $this->delta($tipo, $cantidad);
             $stockNuevo = $stockAnterior + $delta;
             $config = (new ConfiguracionService())->efectiva($empresaId, $sucursalId);
@@ -163,11 +256,25 @@ final class StockService
             $stockNuevoFormatted = $this->formatQuantity($stockNuevo);
             $deltaFormatted = $this->formatQuantity($delta);
 
-            $repository->updateQuantity((int) $stock['id'], $stockNuevoFormatted);
+            // 1) Escritura autoritativa: el saldo vive en stock_ubicacion.
+            $repository->updateLocationQuantity((int) $locationStock['id'], $stockNuevoFormatted);
+
+            // 2) Saldo derivado: recalcula stock_sucursal (vista de compatibilidad)
+            //    para la sucursal duenha de la ubicacion. Una ubicacion sin
+            //    sucursal (bodega pura) no agrega a ninguna vista legacy.
+            $rollupSucursalId = (int) ($ubicacion['sucursal_id'] ?? 0);
+            if ($rollupSucursalId > 0) {
+                $repository->ensureStockRow($empresaId, $rollupSucursalId, $productoId);
+                $repository->recalcSucursalStock($empresaId, $rollupSucursalId, $productoId);
+            }
+
             $movementId = $repository->insertMovement([
                 'uuid' => $data['uuid'] ?? null,
                 'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursalId,
+                'ubicacion_id' => $ubicacionId,
+                'ubicacion_origen_id' => $data['ubicacion_origen_id'] ?? null,
+                'ubicacion_destino_id' => $data['ubicacion_destino_id'] ?? null,
                 'dispositivo_id' => $data['dispositivo_id'] ?? null,
                 'producto_id' => $productoId,
                 'usuario_id' => $data['usuario_id'] ?? null,
@@ -235,6 +342,118 @@ final class StockService
         return $this->registrarMovimiento($data, $connection);
     }
 
+    public function trasladar(array $data, ?PDO $externalConnection = null): array
+    {
+        $connection = $externalConnection ?? $this->repository->connection();
+        $repository = $externalConnection === null ? $this->repository : new StockRepository($externalConnection);
+        $ownsTransaction = !$connection->inTransaction();
+
+        try {
+            if ($ownsTransaction) {
+                $connection->beginTransaction();
+            }
+
+            $empresaId = $this->positiveInt($data, 'empresa_id');
+            $productoId = $this->positiveInt($data, 'producto_id');
+            $origenId = $this->positiveInt($data, 'ubicacion_origen_id');
+            $destinoId = $this->positiveInt($data, 'ubicacion_destino_id');
+            $cantidad = $this->quantity($data['cantidad'] ?? null);
+
+            if ($cantidad <= 0) {
+                throw new HttpException('La cantidad de traslado debe ser mayor a 0', 422);
+            }
+
+            if ($origenId === $destinoId) {
+                throw new HttpException('Origen y destino deben ser distintos', 422);
+            }
+
+            $origen = $repository->findLocation($empresaId, $origenId);
+            $destino = $repository->findLocation($empresaId, $destinoId);
+
+            if ($origen === null || $destino === null || (int) $origen['activo'] !== 1 || (int) $destino['activo'] !== 1) {
+                throw new HttpException('Ubicacion no encontrada o inactiva', 404);
+            }
+
+            if ($repository->productoStockData($empresaId, $productoId) === null) {
+                throw new HttpException('Producto no encontrado', 404);
+            }
+
+            // El traslado se compone de dos movimientos que pasan por la unica via
+            // registrarMovimiento(): asi heredan auditoria, guarda de stock negativo
+            // y el recalculo derivado de stock_sucursal por cada sucursal afectada.
+            $origenSucursal = (int) ($origen['sucursal_id'] ?? 0) ?: (int) ($data['sucursal_id'] ?? 0);
+            $destinoSucursal = (int) ($destino['sucursal_id'] ?? 0) ?: (int) ($data['sucursal_id'] ?? 0);
+
+            if ($origenSucursal <= 0 || $destinoSucursal <= 0) {
+                throw new HttpException('El traslado requiere sucursal_id cuando las ubicaciones no tienen sucursal asociada', 422);
+            }
+
+            $transferId = $repository->createTransfer([
+                'empresa_id' => $empresaId,
+                'producto_id' => $productoId,
+                'ubicacion_origen_id' => $origenId,
+                'ubicacion_destino_id' => $destinoId,
+                'cantidad' => $this->formatQuantity($cantidad),
+                'usuario_id' => $data['usuario_id'] ?? null,
+                'observacion' => $data['observacion'] ?? null,
+            ]);
+
+            $salida = $this->registrarMovimiento([
+                'empresa_id' => $empresaId,
+                'sucursal_id' => $origenSucursal,
+                'ubicacion_id' => $origenId,
+                'ubicacion_origen_id' => $origenId,
+                'ubicacion_destino_id' => $destinoId,
+                'producto_id' => $productoId,
+                'usuario_id' => $data['usuario_id'] ?? null,
+                'tipo' => 'TRASPASO_SALIDA',
+                'referencia_tipo' => 'STOCK_TRASLADO',
+                'referencia_id' => $transferId,
+                'cantidad' => $cantidad,
+                'observacion' => $data['observacion'] ?? null,
+            ], $connection);
+
+            $entrada = $this->registrarMovimiento([
+                'empresa_id' => $empresaId,
+                'sucursal_id' => $destinoSucursal,
+                'ubicacion_id' => $destinoId,
+                'ubicacion_origen_id' => $origenId,
+                'ubicacion_destino_id' => $destinoId,
+                'producto_id' => $productoId,
+                'usuario_id' => $data['usuario_id'] ?? null,
+                'tipo' => 'TRASPASO_ENTRADA',
+                'referencia_tipo' => 'STOCK_TRASLADO',
+                'referencia_id' => $transferId,
+                'cantidad' => $cantidad,
+                'observacion' => $data['observacion'] ?? null,
+            ], $connection);
+
+            $outMovementId = (int) $salida['movimiento_id'];
+            $inMovementId = (int) $entrada['movimiento_id'];
+            $repository->completeTransfer($transferId, $outMovementId, $inMovementId);
+
+            if ($ownsTransaction) {
+                $connection->commit();
+            }
+
+            return [
+                'traslado_id' => $transferId,
+                'movimiento_salida_id' => $outMovementId,
+                'movimiento_entrada_id' => $inMovementId,
+                'producto_id' => $productoId,
+                'ubicacion_origen_id' => $origenId,
+                'ubicacion_destino_id' => $destinoId,
+                'cantidad' => $this->formatQuantity($cantidad),
+            ];
+        } catch (Throwable $exception) {
+            if ($ownsTransaction && $connection->inTransaction()) {
+                $connection->rollBack();
+            }
+
+            throw $exception;
+        }
+    }
+
     public function sumarPorCompra(array $data, ?PDO $connection = null): array
     {
         $data['tipo'] = 'COMPRA';
@@ -288,6 +507,75 @@ final class StockService
         if ($repository->productoStockData($empresaId, $productoId) === null) {
             throw new HttpException('Producto no encontrado', 404);
         }
+    }
+
+    private function validateLocation(array $data): void
+    {
+        $this->positiveInt($data, 'empresa_id');
+
+        if (trim((string) ($data['codigo'] ?? '')) === '') {
+            throw new HttpException('Error de validacion', 422, ['codigo' => ['El codigo es obligatorio']]);
+        }
+
+        if (trim((string) ($data['nombre'] ?? '')) === '') {
+            throw new HttpException('Error de validacion', 422, ['nombre' => ['El nombre es obligatorio']]);
+        }
+
+        $tipo = strtoupper((string) ($data['tipo'] ?? 'BODEGA'));
+        if (!in_array($tipo, self::TIPOS_UBICACION, true)) {
+            throw new HttpException('Tipo de ubicacion invalido', 422);
+        }
+    }
+
+    private function validateLocationSucursal(array $data): void
+    {
+        $empresaId = (int) $data['empresa_id'];
+        $sucursalId = (int) ($data['sucursal_id'] ?? 0);
+
+        if ($sucursalId > 0 && !$this->repository->sucursalExists($empresaId, $sucursalId)) {
+            throw new HttpException('Sucursal no encontrada', 404);
+        }
+
+        $tipo = strtoupper((string) ($data['tipo'] ?? 'BODEGA'));
+        if ($tipo === 'SUCURSAL_VENTA' && $sucursalId <= 0) {
+            throw new HttpException('La ubicacion de venta requiere sucursal_id', 422);
+        }
+    }
+
+    /**
+     * Resuelve la ubicacion concreta sobre la que se aplica el movimiento.
+     *
+     * Es obligatoria: si el payload no trae ubicacion_id se usa la SUCURSAL_VENTA
+     * principal de la sucursal. Si no existe ninguna, falla en vez de omitir
+     * silenciosamente la escritura en stock_ubicacion (lo que descuadraba el saldo).
+     * Para ventas, exige que la ubicacion permita venta (no se vende desde bodega).
+     *
+     * @return array{id:int,sucursal_id:?int,permite_venta:int,activo:int,tipo:string}
+     */
+    private function resolveLocation(StockRepository $repository, int $empresaId, int $sucursalId, string $tipo, array $data): array
+    {
+        $ubicacionId = (int) ($data['ubicacion_id'] ?? 0);
+
+        if ($ubicacionId > 0) {
+            $location = $repository->findLocation($empresaId, $ubicacionId);
+            if ($location === null || (int) $location['activo'] !== 1) {
+                throw new HttpException('Ubicacion no encontrada o inactiva', 404);
+            }
+        } else {
+            $location = $repository->defaultLocationForSucursal($empresaId, $sucursalId);
+            if ($location === null) {
+                throw new HttpException(
+                    'La sucursal no tiene una ubicacion de venta configurada; indique ubicacion_id',
+                    422
+                );
+            }
+        }
+
+        if ($tipo === 'VENTA' && (int) ($location['permite_venta'] ?? 0) !== 1) {
+            throw new HttpException('La ubicacion no permite ventas', 422);
+        }
+
+        return $location;
     }
 
     private function positiveInt(array $data, string $field): int

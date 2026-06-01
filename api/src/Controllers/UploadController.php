@@ -48,6 +48,14 @@ final class UploadController
         }, 'Certificado válido y procesado correctamente');
     }
 
+    public function vigenciaCertificadoSii(): void
+    {
+        $this->respond(function (): array {
+            $empresaId = $this->requestEmpresaId();
+            return $this->service->verificarVigenciaCertificadoSii($empresaId);
+        });
+    }
+
     public function show(array $params): void
     {
         $this->respond(function () use ($params): array {

@@ -52,6 +52,13 @@ final class StockController
         }, 'Ajuste de stock registrado');
     }
 
+    public function integridad(): void
+    {
+        $this->respond(function (): array {
+            return $this->service->verificarIntegridad($this->queryInt('empresa_id'));
+        });
+    }
+
     public function movimientos(): void
     {
         $this->respond(function (): array {
@@ -61,6 +68,52 @@ final class StockController
 
             return $this->service->listarMovimientos($empresaId, $sucursalId, $productoId);
         });
+    }
+
+    public function porUbicacion(array $params): void
+    {
+        $this->respond(function () use ($params): array {
+            $empresaId = $this->queryInt('empresa_id');
+            $ubicacionId = (int) $params['ubicacion_id'];
+
+            return $this->service->listarStockUbicacion($empresaId, $ubicacionId, $_GET['q'] ?? null);
+        });
+    }
+
+    public function ubicaciones(): void
+    {
+        $this->respond(function (): array {
+            $empresaId = $this->queryInt('empresa_id');
+            $sucursalId = isset($_GET['sucursal_id']) ? (int) $_GET['sucursal_id'] : null;
+            $includeInactive = (int) ($_GET['incluir_inactivas'] ?? 0) === 1;
+
+            return $this->service->listarUbicaciones($empresaId, $_GET['tipo'] ?? null, $sucursalId, $includeInactive);
+        });
+    }
+
+    public function crearUbicacion(): void
+    {
+        $this->respond(fn (): array => $this->service->crearUbicacion(Request::json()), 'Ubicacion de stock creada');
+    }
+
+    public function actualizarUbicacion(array $params): void
+    {
+        $this->respond(fn (): array => $this->service->actualizarUbicacion((int) $params['id'], Request::json()), 'Ubicacion de stock actualizada');
+    }
+
+    public function desactivarUbicacion(array $params): void
+    {
+        $this->respond(fn (): array => $this->service->desactivarUbicacion($this->queryInt('empresa_id'), (int) $params['id']), 'Ubicacion de stock desactivada');
+    }
+
+    public function traslado(): void
+    {
+        $this->respond(function (int $userId): array {
+            $payload = Request::json();
+            $payload['usuario_id'] = $userId;
+
+            return $this->service->trasladar($payload);
+        }, 'Traslado de stock registrado');
     }
 
     private function respond(callable $callback, ?string $message = null): void

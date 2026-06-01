@@ -109,7 +109,29 @@ final class ProductoService
         $this->tenant($userId, $empresaId);
         $this->validateProducto($data);
 
-        return ['id' => $this->guard(fn (): int => $this->productos->create($data))];
+        $productoId = $this->guard(fn (): int => $this->productos->create($data));
+
+        $codigosBarra = $data['codigos_barra'] ?? [];
+        foreach ($codigosBarra as $bc) {
+            $codigoBarraVal = isset($bc['codigo_barra']) ? trim((string)$bc['codigo_barra']) : '';
+            if ($codigoBarraVal !== '') {
+                $imagenUrlVal = isset($bc['imagen_url']) ? trim((string)$bc['imagen_url']) : null;
+                $principalVal = !empty($bc['principal']) ? 1 : 0;
+
+                $this->productos->createBarcode($productoId, [
+                    'empresa_id' => $empresaId,
+                    'codigo_barra' => $codigoBarraVal,
+                    'tipo_codigo' => 'BARRA',
+                    'principal' => $principalVal,
+                    'descripcion' => $principalVal ? 'Código de barra principal' : 'Código de barra adicional',
+                    'imagen_url' => $imagenUrlVal,
+                ]);
+
+                $this->asociarImagenPorCodigoBarra($userId, $empresaId, $productoId, $codigoBarraVal, $imagenUrlVal);
+            }
+        }
+
+        return ['id' => $productoId];
     }
 
     public function showProducto(int $userId, int $id, int $empresaId): array
@@ -130,6 +152,61 @@ final class ProductoService
         $this->tenant($userId, $empresaId);
         $this->validateProducto($data);
         $this->notFoundUnless($this->productos->update($id, $empresaId, $data));
+
+        $codigosBarra = $data['codigos_barra'] ?? [];
+
+        $db = Database::connection();
+        
+        // 1. Desactivar todos los códigos de barra actuales para este producto
+        $db->prepare(
+            'UPDATE productos_codigos_barra SET principal = 0, activo = 0, updated_at = CURRENT_TIMESTAMP WHERE producto_id = :producto_id AND empresa_id = :empresa_id'
+        )->execute(['producto_id' => $id, 'empresa_id' => $empresaId]);
+
+        // 2. Reactivar/crear los códigos de barra provistos en la lista
+        foreach ($codigosBarra as $bc) {
+            $codigoBarraVal = isset($bc['codigo_barra']) ? trim((string)$bc['codigo_barra']) : '';
+            if ($codigoBarraVal === '') {
+                continue;
+            }
+            $imagenUrlVal = isset($bc['imagen_url']) ? trim((string)$bc['imagen_url']) : null;
+            $principalVal = !empty($bc['principal']) ? 1 : 0;
+
+            // Buscamos si ya existía ese código de barra
+            $stmt = $db->prepare(
+                'SELECT id FROM productos_codigos_barra WHERE producto_id = :producto_id AND empresa_id = :empresa_id AND codigo_barra = :codigo_barra LIMIT 1'
+            );
+            $stmt->execute([
+                'producto_id' => $id,
+                'empresa_id' => $empresaId,
+                'codigo_barra' => $codigoBarraVal,
+            ]);
+            $existingId = $stmt->fetchColumn();
+
+            if ($existingId) {
+                // Reactivamos y actualizamos
+                $stmt = $db->prepare(
+                    'UPDATE productos_codigos_barra SET principal = :principal, activo = 1, imagen_url = :imagen_url, updated_at = CURRENT_TIMESTAMP WHERE id = :id'
+                );
+                $stmt->execute([
+                    'principal' => $principalVal,
+                    'imagen_url' => $imagenUrlVal,
+                    'id' => $existingId
+                ]);
+            } else {
+                // Creamos uno nuevo
+                $this->productos->createBarcode($id, [
+                    'empresa_id' => $empresaId,
+                    'codigo_barra' => $codigoBarraVal,
+                    'tipo_codigo' => 'BARRA',
+                    'principal' => $principalVal,
+                    'descripcion' => $principalVal ? 'Código de barra principal' : 'Código de barra adicional',
+                    'imagen_url' => $imagenUrlVal,
+                ]);
+            }
+
+            // Asociar la imagen (local o externa)
+            $this->asociarImagenPorCodigoBarra($userId, $empresaId, $id, $codigoBarraVal, $imagenUrlVal);
+        }
 
         return ['id' => $id];
     }
@@ -162,7 +239,14 @@ final class ProductoService
         $this->validateProductAccess($userId, $productoId, $empresaId);
         $this->requireText($data, 'codigo_barra');
 
-        return ['id' => $this->guard(fn (): int => $this->productos->createBarcode($productoId, $data))];
+        $barcodeData = $data;
+        $barcodeData['imagen_url'] = $data['imagen_url'] ?? null;
+
+        $barcodeId = $this->guard(fn (): int => $this->productos->createBarcode($productoId, $barcodeData));
+
+        $this->asociarImagenPorCodigoBarra($userId, $empresaId, $productoId, $data['codigo_barra'], $data['imagen_url'] ?? null);
+
+        return ['id' => $barcodeId];
     }
 
     public function deleteBarcode(int $userId, int $productoId, int $barcodeId, int $empresaId): array
@@ -365,6 +449,168 @@ final class ProductoService
         if (!$ok) {
             throw new HttpException('Registro no encontrado', 404);
         }
+    }
+
+    private function asociarImagenPorCodigoBarra(int $userId, int $empresaId, int $productoId, string $codigoBarra, ?string $urlDirecta = null): void
+    {
+        $db = Database::connection();
+        
+        $stmt = $db->prepare(
+            'SELECT id, imagen_url FROM productos_codigos_barra WHERE producto_id = :producto_id AND empresa_id = :empresa_id AND codigo_barra = :codigo_barra AND activo = 1 LIMIT 1'
+        );
+        $stmt->execute([
+            'producto_id' => $productoId,
+            'empresa_id' => $empresaId,
+            'codigo_barra' => $codigoBarra,
+        ]);
+        $barcode = $stmt->fetch();
+        if (!$barcode) {
+            return;
+        }
+        $barcodeId = (int) $barcode['id'];
+        $currentImagenUrl = $barcode['imagen_url'] ?? null;
+
+        $sourceUrl = $urlDirecta ?: $currentImagenUrl;
+
+        $stmt = $db->prepare(
+            'SELECT 1 FROM productos_imagenes WHERE producto_id = :producto_id AND empresa_id = :empresa_id AND codigo_barra_id = :codigo_barra_id LIMIT 1'
+        );
+        $stmt->execute([
+            'producto_id' => $productoId,
+            'empresa_id' => $empresaId,
+            'codigo_barra_id' => $barcodeId,
+        ]);
+        $hasImage = (bool) $stmt->fetchColumn();
+        
+        if ($hasImage && !$urlDirecta) {
+            return;
+        }
+
+        $tempFile = null;
+        $fotoNombre = '';
+
+        if ($sourceUrl && (str_starts_with($sourceUrl, 'http://') || str_starts_with($sourceUrl, 'https://'))) {
+            $tempFile = $this->descargarImagenExterna($sourceUrl);
+            $fotoNombre = basename(parse_url($sourceUrl, PHP_URL_PATH) ?: 'foto.jpg');
+        } else {
+            $fotoNombre = $codigoBarra . '.jpg';
+            $fotoPath = dirname(__DIR__, 5) . DIRECTORY_SEPARATOR . 'fotos' . DIRECTORY_SEPARATOR . $fotoNombre;
+            if (file_exists($fotoPath)) {
+                $tempFile = $fotoPath;
+            }
+        }
+
+        if (!$tempFile) {
+            return;
+        }
+
+        $date = new \DateTimeImmutable();
+        $name = bin2hex(random_bytes(16)) . '.jpg';
+        $relativeDir = sprintf('uploads/productos/empresa_%d/%s/%s', $empresaId, $date->format('Y'), $date->format('m'));
+        $absoluteDir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeDir);
+
+        if (!is_dir($absoluteDir) && !mkdir($absoluteDir, 0775, true) && !is_dir($absoluteDir)) {
+            error_log("No se pudo crear el directorio de almacenamiento para la foto: " . $absoluteDir);
+            if ($sourceUrl && (str_starts_with($sourceUrl, 'http://') || str_starts_with($sourceUrl, 'https://'))) {
+                if (file_exists($tempFile)) {
+                    unlink($tempFile);
+                }
+            }
+            return;
+        }
+
+        $targetPath = $absoluteDir . DIRECTORY_SEPARATOR . $name;
+        if (!copy($tempFile, $targetPath)) {
+            error_log("No se pudo copiar la foto de " . $tempFile . " a " . $targetPath);
+            if ($sourceUrl && (str_starts_with($sourceUrl, 'http://') || str_starts_with($sourceUrl, 'https://'))) {
+                if (file_exists($tempFile)) {
+                    unlink($tempFile);
+                }
+            }
+            return;
+        }
+
+        if ($sourceUrl && (str_starts_with($sourceUrl, 'http://') || str_starts_with($sourceUrl, 'https://'))) {
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
+            }
+        }
+
+        $size = filesize($targetPath);
+        $hash = hash_file('sha256', $targetPath);
+        $rutaRelativa = $relativeDir . '/' . $name;
+
+        $imagenUrlParaGuardar = $sourceUrl ?: $rutaRelativa;
+        $stmt = $db->prepare(
+            'UPDATE productos_codigos_barra SET imagen_url = :imagen_url WHERE id = :id'
+        );
+        $stmt->execute([
+            'imagen_url' => $imagenUrlParaGuardar,
+            'id' => $barcodeId,
+        ]);
+
+        $uploadsRepo = new \Mypos\Repositories\UploadRepository($db);
+        $archivoId = $uploadsRepo->insert([
+            'empresa_id' => $empresaId,
+            'sucursal_id' => null,
+            'usuario_id' => $userId,
+            'modulo' => 'PRODUCTOS',
+            'entidad' => 'productos',
+            'entidad_id' => $productoId,
+            'nombre_original' => $fotoNombre,
+            'nombre_storage' => $name,
+            'ruta_relativa' => $rutaRelativa,
+            'mime_type' => 'image/jpeg',
+            'extension' => 'jpg',
+            'size_bytes' => $size,
+            'hash_sha256' => $hash,
+            'estado' => 'ACTIVO',
+            'metadata_json' => json_encode(['producto_id' => $productoId, 'codigo_barra' => $codigoBarra]),
+        ]);
+
+        $db->prepare(
+            'UPDATE productos_imagenes SET principal = 0 WHERE empresa_id = :empresa_id AND producto_id = :producto_id'
+        )->execute(['empresa_id' => $empresaId, 'producto_id' => $productoId]);
+
+        $stmt = $db->prepare(
+            'INSERT INTO productos_imagenes (
+                empresa_id, producto_id, producto_codigo_barra_id, codigo_barra_id, ruta,
+                imagen_url, titulo, descripcion, principal, orden
+             ) VALUES (
+                :empresa_id, :producto_id, :producto_codigo_barra_id, :codigo_barra_id, :ruta, :imagen_url,
+                :titulo, NULL, 1, 1
+             )'
+        );
+        $stmt->execute([
+            'empresa_id' => $empresaId,
+            'producto_id' => $productoId,
+            'producto_codigo_barra_id' => $barcodeId,
+            'codigo_barra_id' => $barcodeId,
+            'ruta' => $rutaRelativa,
+            'imagen_url' => $rutaRelativa,
+            'titulo' => 'Imagen asociada por código de barra: ' . $codigoBarra,
+        ]);
+    }
+
+    private function descargarImagenExterna(string $url): ?string
+    {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        $data = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode === 200 && $data !== false) {
+            $tmpPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'download_' . uniqid() . '.jpg';
+            file_put_contents($tmpPath, $data);
+            return $tmpPath;
+        }
+
+        return null;
     }
 
     private function guard(callable $callback): int

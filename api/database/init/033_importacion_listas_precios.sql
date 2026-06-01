@@ -1,0 +1,51 @@
+CREATE TABLE IF NOT EXISTS proveedor_listas_precios_importaciones (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    empresa_id BIGINT UNSIGNED NOT NULL,
+    proveedor_id BIGINT UNSIGNED NOT NULL,
+    usuario_id BIGINT UNSIGNED NULL,
+    origen VARCHAR(120) NOT NULL DEFAULT 'manual',
+    estado ENUM('CARGADO','VALIDADO','CON_ERRORES','APLICADO','CANCELADO') NOT NULL DEFAULT 'CARGADO',
+    total_items INT UNSIGNED NOT NULL DEFAULT 0,
+    total_validos INT UNSIGNED NOT NULL DEFAULT 0,
+    total_errores INT UNSIGNED NOT NULL DEFAULT 0,
+    metadata_json LONGTEXT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    applied_at TIMESTAMP NULL,
+    PRIMARY KEY (id),
+    KEY idx_proveedor_listas_importaciones_empresa (empresa_id, proveedor_id, estado, created_at),
+    CONSTRAINT fk_proveedor_listas_importaciones_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+    CONSTRAINT fk_proveedor_listas_importaciones_proveedor FOREIGN KEY (proveedor_id) REFERENCES proveedores(id),
+    CONSTRAINT fk_proveedor_listas_importaciones_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS proveedor_listas_precios_items (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    empresa_id BIGINT UNSIGNED NOT NULL,
+    importacion_id BIGINT UNSIGNED NOT NULL,
+    linea INT UNSIGNED NOT NULL,
+    raw_json LONGTEXT NOT NULL,
+    codigo_proveedor VARCHAR(120) NULL,
+    codigo_barra VARCHAR(120) NULL,
+    codigo_interno VARCHAR(80) NULL,
+    nombre_proveedor VARCHAR(190) NULL,
+    precio_compra BIGINT NULL,
+    unidad_compra VARCHAR(30) NULL,
+    factor_conversion DECIMAL(14,4) NULL,
+    producto_id_detectado BIGINT UNSIGNED NULL,
+    proveedor_producto_id_detectado BIGINT UNSIGNED NULL,
+    accion_sugerida ENUM('REGISTRAR_PRECIO','ERROR') NOT NULL DEFAULT 'ERROR',
+    estado ENUM('PENDIENTE','VALIDO','ERROR','APLICADO') NOT NULL DEFAULT 'PENDIENTE',
+    errores_json LONGTEXT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_proveedor_listas_items_linea (importacion_id, linea),
+    KEY idx_proveedor_listas_items_importacion (empresa_id, importacion_id, estado),
+    CONSTRAINT fk_proveedor_listas_items_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+    CONSTRAINT fk_proveedor_listas_items_importacion FOREIGN KEY (importacion_id) REFERENCES proveedor_listas_precios_importaciones(id),
+    CONSTRAINT fk_proveedor_listas_items_producto FOREIGN KEY (producto_id_detectado) REFERENCES productos(id),
+    CONSTRAINT fk_proveedor_listas_items_relacion FOREIGN KEY (proveedor_producto_id_detectado) REFERENCES proveedor_productos(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO schema_migrations (migration) VALUES ('033_importacion_listas_precios');

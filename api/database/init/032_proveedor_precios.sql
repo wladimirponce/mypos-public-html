@@ -1,0 +1,31 @@
+CREATE TABLE IF NOT EXISTS proveedor_precios (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    empresa_id BIGINT UNSIGNED NOT NULL,
+    proveedor_id BIGINT UNSIGNED NOT NULL,
+    producto_id BIGINT UNSIGNED NOT NULL,
+    proveedor_producto_id BIGINT UNSIGNED NULL,
+    precio_compra BIGINT NOT NULL,
+    moneda VARCHAR(10) NOT NULL DEFAULT 'CLP',
+    unidad_compra VARCHAR(30) NOT NULL DEFAULT 'UN',
+    factor_conversion DECIMAL(14,4) NOT NULL DEFAULT 1.0000,
+    fecha_precio DATE NOT NULL,
+    vigente_desde DATE NULL,
+    vigente_hasta DATE NULL,
+    origen ENUM('MANUAL','IMPORTACION','COMPRA') NOT NULL DEFAULT 'MANUAL',
+    compra_id BIGINT UNSIGNED NULL,
+    observacion VARCHAR(255) NULL,
+    activo TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_proveedor_precios_producto_fecha (empresa_id, producto_id, fecha_precio, id),
+    KEY idx_proveedor_precios_proveedor_fecha (empresa_id, proveedor_id, fecha_precio, id),
+    KEY idx_proveedor_precios_relacion (proveedor_producto_id),
+    KEY idx_proveedor_precios_compra (compra_id),
+    CONSTRAINT fk_proveedor_precios_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+    CONSTRAINT fk_proveedor_precios_proveedor FOREIGN KEY (proveedor_id) REFERENCES proveedores(id),
+    CONSTRAINT fk_proveedor_precios_producto FOREIGN KEY (producto_id) REFERENCES productos(id),
+    CONSTRAINT fk_proveedor_precios_relacion FOREIGN KEY (proveedor_producto_id) REFERENCES proveedor_productos(id),
+    CONSTRAINT fk_proveedor_precios_compra FOREIGN KEY (compra_id) REFERENCES compras(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO schema_migrations (migration) VALUES ('032_proveedor_precios');

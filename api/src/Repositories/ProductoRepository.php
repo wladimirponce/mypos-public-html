@@ -18,10 +18,33 @@ final class ProductoRepository
                        p.nombre, p.descripcion, p.unidad_medida, p.precio_costo,
                        p.costo_actual, p.precio_venta, p.controla_stock, p.stock_minimo,
                        p.permite_descuento, p.permite_comision, p.activo,
-                       r.nombre AS rubro, cc.nombre AS centro_costo
+                       r.nombre AS rubro, cc.nombre AS centro_costo,
+                       pi.id AS imagen_principal_id,
+                       pi.imagen_url AS imagen_principal,
+                       a.id AS imagen_principal_archivo_id,
+                       (
+                           SELECT pcb.codigo_barra
+                           FROM productos_codigos_barra pcb
+                           WHERE pcb.producto_id = p.id
+                             AND pcb.empresa_id = p.empresa_id
+                             AND pcb.activo = 1
+                           ORDER BY pcb.principal DESC, pcb.id
+                           LIMIT 1
+                       ) AS codigo_barra_principal,
+                       (
+                           SELECT pcb.imagen_url
+                           FROM productos_codigos_barra pcb
+                           WHERE pcb.producto_id = p.id
+                             AND pcb.empresa_id = p.empresa_id
+                             AND pcb.activo = 1
+                           ORDER BY pcb.principal DESC, pcb.id
+                           LIMIT 1
+                       ) AS codigo_barra_imagen_url
                 FROM productos p
                 LEFT JOIN rubros r ON r.id = p.rubro_id
                 LEFT JOIN centros_costo cc ON cc.id = p.centro_costo_id
+                LEFT JOIN productos_imagenes pi ON pi.producto_id = p.id AND pi.empresa_id = p.empresa_id AND pi.principal = 1
+                LEFT JOIN archivos_subidos a ON a.empresa_id = p.empresa_id AND a.ruta_relativa = pi.imagen_url AND a.estado = \'ACTIVO\'
                 WHERE p.empresa_id = :empresa_id';
         $params = ['empresa_id' => $empresaId];
 
@@ -47,10 +70,33 @@ final class ProductoRepository
                     p.nombre, p.descripcion, p.unidad_medida, p.precio_costo,
                     p.costo_actual, p.precio_venta, p.controla_stock, p.stock_minimo,
                     p.permite_descuento, p.permite_comision, p.activo,
-                    r.nombre AS rubro, cc.nombre AS centro_costo
+                    r.nombre AS rubro, cc.nombre AS centro_costo,
+                    pi.id AS imagen_principal_id,
+                    pi.imagen_url AS imagen_principal,
+                    a.id AS imagen_principal_archivo_id,
+                    (
+                        SELECT pcb.codigo_barra
+                        FROM productos_codigos_barra pcb
+                        WHERE pcb.producto_id = p.id
+                          AND pcb.empresa_id = p.empresa_id
+                          AND pcb.activo = 1
+                        ORDER BY pcb.principal DESC, pcb.id
+                        LIMIT 1
+                    ) AS codigo_barra_principal,
+                    (
+                        SELECT pcb.imagen_url
+                        FROM productos_codigos_barra pcb
+                        WHERE pcb.producto_id = p.id
+                          AND pcb.empresa_id = p.empresa_id
+                          AND pcb.activo = 1
+                        ORDER BY pcb.principal DESC, pcb.id
+                        LIMIT 1
+                    ) AS codigo_barra_imagen_url
              FROM productos p
              LEFT JOIN rubros r ON r.id = p.rubro_id
              LEFT JOIN centros_costo cc ON cc.id = p.centro_costo_id
+             LEFT JOIN productos_imagenes pi ON pi.producto_id = p.id AND pi.empresa_id = p.empresa_id AND pi.principal = 1
+             LEFT JOIN archivos_subidos a ON a.empresa_id = p.empresa_id AND a.ruta_relativa = pi.imagen_url AND a.estado = \'ACTIVO\'
              WHERE p.id = :id AND p.empresa_id = :empresa_id
              LIMIT 1'
         );
@@ -131,7 +177,7 @@ final class ProductoRepository
     public function listBarcodes(int $productoId, int $empresaId): array
     {
         return $this->fetchAll(
-            'SELECT id, empresa_id, producto_id, codigo_barra, tipo_codigo, descripcion, principal, activo
+            'SELECT id, empresa_id, producto_id, codigo_barra, tipo_codigo, descripcion, principal, activo, imagen_url
              FROM productos_codigos_barra
              WHERE producto_id = :producto_id AND empresa_id = :empresa_id
              ORDER BY principal DESC, id',
@@ -146,8 +192,8 @@ final class ProductoRepository
         }
 
         $statement = $this->connection->prepare(
-            'INSERT INTO productos_codigos_barra (empresa_id, producto_id, codigo_barra, tipo_codigo, descripcion, principal, activo)
-             VALUES (:empresa_id, :producto_id, :codigo_barra, :tipo_codigo, :descripcion, :principal, 1)'
+            'INSERT INTO productos_codigos_barra (empresa_id, producto_id, codigo_barra, tipo_codigo, descripcion, principal, activo, imagen_url)
+             VALUES (:empresa_id, :producto_id, :codigo_barra, :tipo_codigo, :descripcion, :principal, 1, :imagen_url)'
         );
         $statement->execute([
             'empresa_id' => $data['empresa_id'],
@@ -156,6 +202,7 @@ final class ProductoRepository
             'tipo_codigo' => $data['tipo_codigo'] ?? 'BARRA',
             'descripcion' => $data['descripcion'] ?? null,
             'principal' => (int) ($data['principal'] ?? 0),
+            'imagen_url' => $data['imagen_url'] ?? null,
         ]);
 
         return (int) $this->connection->lastInsertId();

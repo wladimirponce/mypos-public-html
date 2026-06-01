@@ -28,6 +28,14 @@ final class FolioController
         }, 'CAF registrado correctamente');
     }
 
+    public function uploadCaf(): void
+    {
+        $this->respond(function (int $userId): array {
+            $empresaId = $this->requestEmpresaId();
+            return $this->service->subirYRegistrarCaf($userId, $empresaId, $_FILES['archivo'] ?? []);
+        }, 'CAF subido y registrado correctamente');
+    }
+
     public function listCafs(): void
     {
         $this->respond(fn (): array => $this->service->listarCafs($_GET));

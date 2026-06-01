@@ -33,7 +33,7 @@ final class UploadRepository
     public function productoExists(int $empresaId, int $productoId): bool
     {
         $statement = $this->connection->prepare(
-            'SELECT 1 FROM productos WHERE id = :id AND empresa_id = :empresa_id AND activo = 1 LIMIT 1'
+            'SELECT 1 FROM productos WHERE id = :id AND empresa_id = :empresa_id LIMIT 1'
         );
         $statement->execute(['id' => $productoId, 'empresa_id' => $empresaId]);
 
@@ -111,6 +111,21 @@ final class UploadRepository
         ]);
 
         return (int) $this->connection->lastInsertId();
+    }
+
+    public function findActiveCertificate(int $empresaId): ?array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT id, empresa_id, nombre_original, nombre_storage, ruta_relativa, mime_type, metadata_json, created_at
+             FROM archivos_subidos
+             WHERE empresa_id = :empresa_id AND entidad = \'certificado_sii\' AND estado = \'ACTIVO\'
+             ORDER BY id DESC
+             LIMIT 1'
+        );
+        $statement->execute(['empresa_id' => $empresaId]);
+        $row = $statement->fetch();
+
+        return is_array($row) ? $row : null;
     }
 
     public function updateLogo(int $empresaId, string $rutaRelativa): void

@@ -1,0 +1,52 @@
+CREATE TABLE IF NOT EXISTS importaciones_catalogo (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    empresa_id BIGINT UNSIGNED NOT NULL,
+    usuario_id BIGINT UNSIGNED NOT NULL,
+    origen VARCHAR(120) NOT NULL,
+    tipo ENUM('PRODUCTOS','PRECIOS_PROVEEDOR','CODIGOS_BARRA','ATRIBUTOS','MIXTO') NOT NULL DEFAULT 'PRODUCTOS',
+    estado ENUM('CARGADO','VALIDADO','CON_ERRORES','APLICADO','CANCELADO') NOT NULL DEFAULT 'CARGADO',
+    archivo_subido_id BIGINT UNSIGNED NULL,
+    total_items INT UNSIGNED NOT NULL DEFAULT 0,
+    total_validos INT UNSIGNED NOT NULL DEFAULT 0,
+    total_errores INT UNSIGNED NOT NULL DEFAULT 0,
+    metadata_json LONGTEXT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    applied_at TIMESTAMP NULL,
+    PRIMARY KEY (id),
+    KEY idx_importaciones_catalogo_empresa_estado (empresa_id, estado, created_at),
+    CONSTRAINT fk_importaciones_catalogo_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+    CONSTRAINT fk_importaciones_catalogo_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+    CONSTRAINT fk_importaciones_catalogo_archivo FOREIGN KEY (archivo_subido_id) REFERENCES archivos_subidos(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS importacion_catalogo_items (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    empresa_id BIGINT UNSIGNED NOT NULL,
+    importacion_id BIGINT UNSIGNED NOT NULL,
+    linea INT UNSIGNED NOT NULL,
+    raw_json LONGTEXT NOT NULL,
+    codigo_interno VARCHAR(80) NULL,
+    codigo_barra VARCHAR(80) NULL,
+    nombre VARCHAR(190) NULL,
+    descripcion TEXT NULL,
+    precio_compra BIGINT NULL,
+    precio_venta BIGINT NULL,
+    proveedor_identificado VARCHAR(190) NULL,
+    producto_id_detectado BIGINT UNSIGNED NULL,
+    accion_sugerida ENUM('CREAR','ACTUALIZAR','ASOCIAR_CODIGO','IGNORAR','ERROR') NOT NULL DEFAULT 'IGNORAR',
+    estado ENUM('PENDIENTE','VALIDO','ERROR','APLICADO') NOT NULL DEFAULT 'PENDIENTE',
+    errores_json LONGTEXT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_importacion_catalogo_linea (importacion_id, linea),
+    KEY idx_importacion_catalogo_items_importacion (empresa_id, importacion_id, estado),
+    KEY idx_importacion_catalogo_items_codigo (empresa_id, codigo_interno),
+    KEY idx_importacion_catalogo_items_barra (empresa_id, codigo_barra),
+    CONSTRAINT fk_importacion_catalogo_items_empresa FOREIGN KEY (empresa_id) REFERENCES empresas(id),
+    CONSTRAINT fk_importacion_catalogo_items_importacion FOREIGN KEY (importacion_id) REFERENCES importaciones_catalogo(id),
+    CONSTRAINT fk_importacion_catalogo_items_producto FOREIGN KEY (producto_id_detectado) REFERENCES productos(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO schema_migrations (migration) VALUES ('028_importaciones_catalogo');

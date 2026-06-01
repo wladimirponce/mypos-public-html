@@ -92,7 +92,11 @@ FROM (
     SELECT 'roles.gestionar', 'Gestionar roles', 'Permite administrar roles' UNION ALL
     SELECT 'permisos.ver', 'Ver permisos', 'Permite consultar permisos' UNION ALL
     SELECT 'configuracion.ver', 'Ver configuracion', 'Permite consultar configuracion' UNION ALL
-    SELECT 'configuracion.editar', 'Editar configuracion', 'Permite editar configuracion'
+    SELECT 'configuracion.editar', 'Editar configuracion', 'Permite editar configuracion' UNION ALL
+    SELECT 'stock.ubicaciones.administrar', 'Gestionar ubicaciones de stock', 'Permite crear, actualizar y desactivar bodegas/ubicaciones' UNION ALL
+    SELECT 'compras_inteligentes.ver', 'Ver compras inteligentes', 'Permite consultar sugerencias de compras inteligentes' UNION ALL
+    SELECT 'compras_inteligentes.crear', 'Crear borradores desde compras inteligentes', 'Permite generar borradores de compras automáticos' UNION ALL
+    SELECT 'farmacia.ver', 'Consultar informacion de farmacia', 'Permite buscar medicamentos por principio activo y consultar fichas'
 ) x
 WHERE NOT EXISTS (SELECT 1 FROM permisos p WHERE p.codigo = x.codigo);
 
@@ -112,7 +116,8 @@ FROM roles r
 INNER JOIN permisos p ON p.codigo IN (
     'auth.me','auth.logout','dashboard.ver','ventas.ver','ventas.crear','clientes.ver','clientes.crear',
     'productos.ver','stock.ver','cajas.ver','cajas.abrir','cajas.movimientos','cajas.cerrar',
-    'documentos_tributarios.crear','documentos_tributarios.ver','documentos_tributarios.asignar_folio'
+    'documentos_tributarios.crear','documentos_tributarios.ver','documentos_tributarios.asignar_folio',
+    'farmacia.ver'
 )
 WHERE r.codigo = 'CAJERO'
   AND NOT EXISTS (SELECT 1 FROM rol_permisos rp WHERE rp.rol_id = r.id AND rp.permiso_id = p.id);
@@ -121,7 +126,8 @@ INSERT INTO rol_permisos (rol_id, permiso_id)
 SELECT r.id, p.id
 FROM roles r
 INNER JOIN permisos p ON p.codigo IN (
-    'auth.me','auth.logout','ventas.ver','ventas.crear','clientes.ver','clientes.crear','productos.ver','stock.ver'
+    'auth.me','auth.logout','ventas.ver','ventas.crear','clientes.ver','clientes.crear','productos.ver','stock.ver',
+    'farmacia.ver'
 )
 WHERE r.codigo = 'VENDEDOR'
   AND NOT EXISTS (SELECT 1 FROM rol_permisos rp WHERE rp.rol_id = r.id AND rp.permiso_id = p.id);
@@ -132,7 +138,8 @@ FROM roles r
 INNER JOIN permisos p ON p.codigo IN (
     'auth.me','auth.logout','productos.ver','stock.ver','stock.ajustar','stock.movimientos.ver',
     'compras.ver','compras.crear','compras.confirmar','documentos_ia.ver','documentos_ia.subir',
-    'documentos_ia.procesar','documentos_ia.editar','documentos_ia.generar_compra'
+    'documentos_ia.procesar','documentos_ia.editar','documentos_ia.generar_compra',
+    'stock.ubicaciones.administrar','compras_inteligentes.ver','compras_inteligentes.crear','farmacia.ver'
 )
 WHERE r.codigo = 'BODEGA'
   AND NOT EXISTS (SELECT 1 FROM rol_permisos rp WHERE rp.rol_id = r.id AND rp.permiso_id = p.id);
@@ -142,7 +149,8 @@ SELECT r.id, p.id
 FROM roles r
 INNER JOIN permisos p ON p.codigo IN (
     'auth.me','auth.logout','reportes.ver','libros.ventas.ver','libros.compras.ver','libros.resumen_iva.ver',
-    'documentos_tributarios.ver','compras.ver','ventas.ver','proveedores.ver','clientes.ver'
+    'documentos_tributarios.ver','compras.ver','ventas.ver','proveedores.ver','clientes.ver',
+    'compras_inteligentes.ver','farmacia.ver'
 )
 WHERE r.codigo = 'CONTADOR'
   AND NOT EXISTS (SELECT 1 FROM rol_permisos rp WHERE rp.rol_id = r.id AND rp.permiso_id = p.id);
@@ -152,7 +160,8 @@ SELECT r.id, p.id
 FROM roles r
 INNER JOIN permisos p ON p.codigo IN (
     'auth.me','auth.logout','auditoria.ver','reportes.ver','ventas.ver','compras.ver','stock.movimientos.ver',
-    'libros.ventas.ver','libros.compras.ver','documentos_tributarios.ver'
+    'libros.ventas.ver','libros.compras.ver','documentos_tributarios.ver',
+    'compras_inteligentes.ver','farmacia.ver'
 )
 WHERE r.codigo = 'AUDITOR'
   AND NOT EXISTS (SELECT 1 FROM rol_permisos rp WHERE rp.rol_id = r.id AND rp.permiso_id = p.id);

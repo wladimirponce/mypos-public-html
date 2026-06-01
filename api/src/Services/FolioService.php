@@ -86,6 +86,113 @@ final class FolioService
         ];
     }
 
+    public function subirYRegistrarCaf(int $userId, int $empresaId, array $file): array
+    {
+        $this->validateEmpresa($empresaId);
+        if ($file === [] || !isset($file['tmp_name'])) {
+            throw new HttpException('Archivo XML de CAF obligatorio', 422);
+        }
+
+        $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK) {
+            throw new HttpException('Archivo de CAF inválido o no recibido', 422);
+        }
+
+        // Leer XML
+        $xmlContent = file_get_contents((string) $file['tmp_name']);
+        
+        // Deshabilitar entidades externas por seguridad XML (previene XXE)
+        $disableEntities = libxml_disable_entity_loader(true);
+        $xml = simplexml_load_string($xmlContent);
+        libxml_disable_entity_loader($disableEntities);
+
+        if ($xml === false) {
+            throw new HttpException('El archivo CAF no contiene un XML válido.', 422);
+        }
+
+        // Buscar nodo CAF
+        $da = null;
+        if (isset($xml->CAF->DA)) {
+            $da = $xml->CAF->DA;
+        } else {
+            $cafNode = $xml->xpath('//CAF');
+            if (!empty($cafNode)) {
+                $da = $cafNode[0]->DA;
+            }
+        }
+
+        if ($da === null) {
+            throw new HttpException('El archivo XML no contiene una estructura CAF del SII válida.', 422);
+        }
+
+        $rutEmisor = (string) $da->RE;
+        $razonSocial = (string) $da->RS;
+        $tipoDocSii = (int) $da->TD;
+        $from = (int) $da->RNG->D;
+        $to = (int) $da->RNG->H;
+        $fechaAutorizacion = (string) $da->FA;
+
+        if (!$rutEmisor || !$from || !$to || !$fechaAutorizacion) {
+            throw new HttpException('El archivo XML de CAF tiene campos obligatorios incompletos.', 422);
+        }
+
+        $mapeoTipos = [
+            33 => 'FACTURA',
+            34 => 'FACTURA',
+            39 => 'BOLETA',
+            41 => 'BOLETA',
+            52 => 'GUIA_DESPACHO',
+            61 => 'NOTA_CREDITO'
+        ];
+        $type = $mapeoTipos[$tipoDocSii] ?? null;
+        if ($type === null) {
+            throw new HttpException("Código de documento del SII no soportado: {$tipoDocSii}", 422);
+        }
+
+        // Calcular fecha de vencimiento a 2 años de la fecha de autorización
+        try {
+            $authDate = new DateTimeImmutable($fechaAutorizacion);
+            $expirationDate = $authDate->modify('+730 days')->format('Y-m-d');
+        } catch (Throwable $e) {
+            $expirationDate = null;
+        }
+
+        // Guardar archivo físico en disco
+        $originalName = basename((string) $file['name']);
+        $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+        $storageName = bin2hex(random_bytes(16)) . '.' . $extension;
+        
+        $relativeDir = sprintf('uploads/cafs/empresa_%d/%s/%s', $empresaId, date('Y'), date('m'));
+        $absoluteDir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeDir);
+
+        if (!is_dir($absoluteDir) && !mkdir($absoluteDir, 0775, true) && !is_dir($absoluteDir)) {
+            throw new HttpException('No fue posible crear el directorio de folios', 500);
+        }
+
+        $targetPath = $absoluteDir . DIRECTORY_SEPARATOR . $storageName;
+        if (!move_uploaded_file((string) $file['tmp_name'], $targetPath)) {
+            if (!rename((string) $file['tmp_name'], $targetPath)) {
+                throw new HttpException('No fue posible guardar el archivo CAF en el servidor', 500);
+            }
+        }
+
+        $archivoPath = $relativeDir . '/' . $storageName;
+
+        // Registrar en base de datos
+        return $this->registrarCaf($userId, [
+            'empresa_id' => $empresaId,
+            'tipo_documento' => $type,
+            'rut_emisor' => $rutEmisor,
+            'razon_social_emisor' => $razonSocial,
+            'folio_desde' => $from,
+            'folio_hasta' => $to,
+            'fecha_autorizacion' => $fechaAutorizacion,
+            'fecha_vencimiento' => $expirationDate,
+            'archivo_path' => $archivoPath,
+            'caf_xml' => $xmlContent,
+        ]);
+    }
+
     public function listarCafs(array $filters): array
     {
         $empresaId = $this->positiveInt($filters, 'empresa_id');

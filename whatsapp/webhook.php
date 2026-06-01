@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         file_put_contents($log_file, "Mensaje: " . sanitizeForLog($userMessage) . "\n", FILE_APPEND);
         
         // --- INTERCEPTAR VERIFICACION ONBOARDING ---
-        if (preg_match('/^Verificar MyPOS (WTS-[A-Z0-9]+)$/i', trim($userMessage), $matches)) {
+        if (preg_match('/^Verificar MyPOS (WTS-[A-Z0-9\-]+)$/i', trim($userMessage), $matches)) {
             $token = $matches[1];
             try {
                 $db = \Mypos\Config\Database::connection();

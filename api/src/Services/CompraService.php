@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use Mypos\Config\Database;
 use Mypos\Core\HttpException;
 use Mypos\Repositories\CompraRepository;
+use Mypos\Repositories\ProveedorRepository;
 use Mypos\Repositories\StockRepository;
 use Throwable;
 
@@ -58,6 +59,7 @@ final class CompraService
 
             if ($estado === 'CONFIRMADA') {
                 $this->sumarStock($purchaseId, $empresaId, $sucursalId, $userId, $items, $connection);
+                $this->registrarPreciosObservados($purchaseId, $empresaId, $payload['proveedor_id'] ?? null, $items, $connection);
             }
 
             AuditoriaService::registrarEvento([
@@ -130,6 +132,7 @@ final class CompraService
             $details = $this->repository->details($empresaId, $id);
             $this->repository->markConfirmed($empresaId, $id);
             $this->sumarStock($id, $empresaId, (int) $purchase['sucursal_id'], $userId, $details, $connection);
+            $this->registrarPreciosObservados($id, $empresaId, $purchase['proveedor_id'] ?? null, $details, $connection);
             AuditoriaService::registrarEvento([
                 'empresa_id' => $empresaId,
                 'sucursal_id' => (int) $purchase['sucursal_id'],
@@ -273,6 +276,21 @@ final class CompraService
                 'costo_unitario' => (int) $item['costo_unitario'],
                 'observacion' => 'Compra #' . $purchaseId,
             ], $connection);
+        }
+    }
+
+    private function registrarPreciosObservados(int $purchaseId, int $empresaId, mixed $proveedorId, array $items, $connection): void
+    {
+        $providerId = (int) ($proveedorId ?? 0);
+
+        if ($providerId <= 0) {
+            return;
+        }
+
+        $service = new ProveedorService(new ProveedorRepository($connection));
+
+        foreach ($items as $item) {
+            $service->registrarPrecioObservadoCompra($empresaId, $providerId, $purchaseId, $item);
         }
     }
 

@@ -1,10 +1,3 @@
-<?php
-declare(strict_types=1);
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
-ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/php_errors.log');
-
 use Mypos\Config\Database;
 use Mypos\Controllers\AnulacionController;
 use Mypos\Controllers\AuditoriaController;
@@ -13,8 +6,6 @@ use Mypos\Controllers\CajaController;
 use Mypos\Controllers\CentroCostoController;
 use Mypos\Controllers\CierreDiarioController;
 use Mypos\Controllers\CompraController;
-use Mypos\Controllers\CompraInteligenteController;
-use Mypos\Controllers\FarmaciaController;
 use Mypos\Controllers\ComunicacionVentasController;
 use Mypos\Controllers\ConfiguracionController;
 use Mypos\Controllers\ClienteController;
@@ -27,15 +18,12 @@ use Mypos\Controllers\DispositivoController;
 use Mypos\Controllers\DteController;
 use Mypos\Controllers\FolioController;
 use Mypos\Controllers\IaController;
-use Mypos\Controllers\ImportacionCatalogoController;
 use Mypos\Controllers\LibroController;
 use Mypos\Controllers\OnboardingController;
 use Mypos\Controllers\PermissionController;
-use Mypos\Controllers\ProductoAtributoController;
 use Mypos\Controllers\ProductoController;
 use Mypos\Controllers\ProveedorController;
 use Mypos\Controllers\ReporteController;
-use Mypos\Controllers\RrhhController;
 use Mypos\Controllers\RubroController;
 use Mypos\Controllers\StockController;
 use Mypos\Controllers\SyncController;
@@ -356,12 +344,6 @@ $router->get('/api/v1/rrhh/descuentos-credito', protectedRoute([$rrhhController,
 $proveedorController = new ProveedorController();
 $router->get('/api/v1/proveedores', protectedRoute([$proveedorController, 'index'], 'proveedores.ver'));
 $router->post('/api/v1/proveedores', protectedRoute([$proveedorController, 'store'], 'proveedores.crear'));
-$router->get('/api/v1/proveedores/{id}/productos', protectedRoute([$proveedorController, 'providerProducts'], 'proveedores.ver'));
-$router->get('/api/v1/proveedores/{id}/precios', protectedRoute([$proveedorController, 'providerPrices'], 'proveedores.ver'));
-$router->post('/api/v1/proveedores/{id}/listas-precios/importaciones', protectedRoute([$proveedorController, 'storePriceListImport'], 'proveedores.editar'));
-$router->get('/api/v1/proveedores/{id}/listas-precios/importaciones/{importacion_id}', protectedRoute([$proveedorController, 'showPriceListImport'], 'proveedores.ver'));
-$router->post('/api/v1/proveedores/{id}/listas-precios/importaciones/{importacion_id}/validar', protectedRoute([$proveedorController, 'validatePriceListImport'], 'proveedores.editar'));
-$router->post('/api/v1/proveedores/{id}/listas-precios/importaciones/{importacion_id}/aplicar', protectedRoute([$proveedorController, 'applyPriceListImport'], 'proveedores.editar'));
 $router->get('/api/v1/proveedores/{id}', protectedRoute([$proveedorController, 'show'], 'proveedores.ver'));
 $router->put('/api/v1/proveedores/{id}', protectedRoute([$proveedorController, 'update'], 'proveedores.editar'));
 $router->delete('/api/v1/proveedores/{id}', protectedRoute([$proveedorController, 'destroy'], 'proveedores.eliminar'));
@@ -389,7 +371,6 @@ $router->post('/api/v1/uploads/productos', protectedRoute([$uploadController, 'p
 $router->post('/api/v1/uploads/documentos-ia', protectedRoute([$uploadController, 'documentoIa'], 'uploads.crear'));
 $router->post('/api/v1/uploads/logos', protectedRoute([$uploadController, 'logo'], 'configuracion.editar'));
 $router->post('/api/v1/uploads/certificado-sii', protectedRoute([$uploadController, 'certificadoSii'], 'configuracion.editar'));
-$router->get('/api/v1/uploads/certificado-sii/vigencia', protectedRoute([$uploadController, 'vigenciaCertificadoSii'], 'configuracion.ver'));
 $router->get('/api/v1/uploads/{id}/download', protectedRoute([$uploadController, 'download'], 'uploads.ver'));
 $router->get('/api/v1/uploads/{id}', protectedRoute([$uploadController, 'show'], 'uploads.ver'));
 $router->delete('/api/v1/uploads/{id}', protectedRoute([$uploadController, 'destroy'], 'uploads.crear'));
@@ -425,31 +406,12 @@ $router->put('/api/v1/centros-costo/{id}', protectedRoute([$centroCostoControlle
 $router->delete('/api/v1/centros-costo/{id}', protectedRoute([$centroCostoController, 'destroy'], 'centros_costo.gestionar'));
 
 $productoController = new ProductoController();
-$productoAtributoController = new ProductoAtributoController();
-$importacionCatalogoController = new ImportacionCatalogoController();
-$router->get('/api/v1/importaciones/catalogo', protectedRoute([$importacionCatalogoController, 'index'], 'productos.ver'));
-$router->post('/api/v1/importaciones/catalogo', protectedRoute([$importacionCatalogoController, 'store'], 'productos.editar'));
-$router->get('/api/v1/importaciones/catalogo/{id}', protectedRoute([$importacionCatalogoController, 'show'], 'productos.ver'));
-$router->post('/api/v1/importaciones/catalogo/{id}/validar', protectedRoute([$importacionCatalogoController, 'validate'], 'productos.editar'));
-$router->post('/api/v1/importaciones/catalogo/{id}/aplicar', protectedRoute([$importacionCatalogoController, 'apply'], 'productos.editar'));
 $router->get('/api/v1/productos/buscar', protectedRoute([$productoController, 'search'], 'productos.ver'));
 $router->get('/api/v1/productos', protectedRoute([$productoController, 'index'], 'productos.ver'));
 $router->post('/api/v1/productos', protectedRoute([$productoController, 'store'], 'productos.crear'));
-$router->get('/api/v1/productos/atributos', protectedRoute([$productoAtributoController, 'index'], 'productos.ver'));
-$router->post('/api/v1/productos/atributos', protectedRoute([$productoAtributoController, 'store'], 'productos.editar'));
-$router->put('/api/v1/productos/atributos/{id}', protectedRoute([$productoAtributoController, 'update'], 'productos.editar'));
-$router->delete('/api/v1/productos/atributos/{id}', protectedRoute([$productoAtributoController, 'destroy'], 'productos.editar'));
-$router->get('/api/v1/productos/{producto_id}/proveedores', protectedRoute([$proveedorController, 'productProviders'], 'productos.ver'));
-$router->post('/api/v1/productos/{producto_id}/proveedores', protectedRoute([$proveedorController, 'attachProduct'], 'proveedores.editar'));
-$router->put('/api/v1/productos/{producto_id}/proveedores/{relacion_id}', protectedRoute([$proveedorController, 'updateProductProvider'], 'proveedores.editar'));
-$router->delete('/api/v1/productos/{producto_id}/proveedores/{relacion_id}', protectedRoute([$proveedorController, 'deleteProductProvider'], 'proveedores.editar'));
-$router->get('/api/v1/productos/{producto_id}/precios-proveedor', protectedRoute([$proveedorController, 'productPrices'], 'productos.ver'));
-$router->post('/api/v1/productos/{producto_id}/precios-proveedor', protectedRoute([$proveedorController, 'storeProductPrice'], 'proveedores.editar'));
 $router->get('/api/v1/productos/{id}', protectedRoute([$productoController, 'show'], 'productos.ver'));
 $router->put('/api/v1/productos/{id}', protectedRoute([$productoController, 'update'], 'productos.editar'));
 $router->delete('/api/v1/productos/{id}', protectedRoute([$productoController, 'destroy'], 'productos.eliminar'));
-$router->get('/api/v1/productos/{id}/atributos', protectedRoute([$productoAtributoController, 'productValues'], 'productos.ver'));
-$router->put('/api/v1/productos/{id}/atributos', protectedRoute([$productoAtributoController, 'updateProductValues'], 'productos.editar'));
 $router->get('/api/v1/productos/{id}/codigos-barra', protectedRoute([$productoController, 'listBarcodes'], 'productos.ver'));
 $router->post('/api/v1/productos/{id}/codigos-barra', protectedRoute([$productoController, 'storeBarcode'], 'productos.editar'));
 $router->delete('/api/v1/productos/{id}/codigos-barra/{codigo_barra_id}', protectedRoute([$productoController, 'deleteBarcode'], 'productos.editar'));
@@ -469,17 +431,10 @@ $router->put('/api/v1/productos/{id}/comisiones/{comision_id}', protectedRoute([
 $router->delete('/api/v1/productos/{id}/comisiones/{comision_id}', protectedRoute([$productoController, 'deleteCommission'], 'comisiones.gestionar'));
 
 $stockController = new StockController();
-$router->get('/api/v1/stock/ubicaciones', protectedRoute([$stockController, 'ubicaciones'], 'stock.ver'));
-$router->post('/api/v1/stock/ubicaciones', protectedRoute([$stockController, 'crearUbicacion'], 'stock.ubicaciones.administrar'));
-$router->put('/api/v1/stock/ubicaciones/{id}', protectedRoute([$stockController, 'actualizarUbicacion'], 'stock.ubicaciones.administrar'));
-$router->delete('/api/v1/stock/ubicaciones/{id}', protectedRoute([$stockController, 'desactivarUbicacion'], 'stock.ubicaciones.administrar'));
-$router->get('/api/v1/stock/ubicaciones/{ubicacion_id}/productos', protectedRoute([$stockController, 'porUbicacion'], 'stock.ver'));
-$router->post('/api/v1/stock/traslados', protectedRoute([$stockController, 'traslado'], 'stock.ajustar'));
 $router->get('/api/v1/stock', protectedRoute([$stockController, 'index'], 'stock.ver'));
 $router->get('/api/v1/stock/producto/{producto_id}', protectedRoute([$stockController, 'showProduct'], 'stock.ver'));
 $router->post('/api/v1/stock/ajustes', protectedRoute([$stockController, 'ajuste'], 'stock.ajustar'));
 $router->get('/api/v1/stock/movimientos', protectedRoute([$stockController, 'movimientos'], 'stock.movimientos.ver'));
-$router->get('/api/v1/stock/integridad', protectedRoute([$stockController, 'integridad'], 'stock.movimientos.ver'));
 
 $cajaController = new CajaController();
 $router->get('/api/v1/cajas/estado', protectedRoute([$cajaController, 'status'], 'cajas.ver'));
@@ -513,16 +468,6 @@ $router->get('/api/v1/compras/{id}', protectedRoute([$compraController, 'show'],
 $router->post('/api/v1/compras/{id}/confirmar', protectedRoute([$compraController, 'confirm'], 'compras.confirmar'));
 $router->post('/api/v1/compras/{id}/anular', protectedRoute([$compraController, 'cancel'], 'compras.anular'));
 
-$compraInteligenteController = new CompraInteligenteController();
-$router->get('/api/v1/compras-inteligentes/sugerencias', protectedRoute([$compraInteligenteController, 'sugerencias'], 'compras_inteligentes.ver'));
-$router->post('/api/v1/compras-inteligentes/borrador', protectedRoute([$compraInteligenteController, 'generarBorrador'], 'compras_inteligentes.crear'));
-
-$farmaciaController = new FarmaciaController();
-$router->get('/api/v1/farmacia/atributos', protectedRoute([$farmaciaController, 'atributos'], 'farmacia.ver'));
-$router->get('/api/v1/farmacia/buscar', protectedRoute([$farmaciaController, 'buscar'], 'farmacia.ver'));
-$router->get('/api/v1/farmacia/productos-con-receta', protectedRoute([$farmaciaController, 'productosConReceta'], 'farmacia.ver'));
-$router->get('/api/v1/farmacia/productos/{id}/ficha', protectedRoute([$farmaciaController, 'ficha'], 'farmacia.ver'));
-
 $documentoIaController = new DocumentoIaController();
 $router->get('/api/v1/documentos-ia', protectedRoute([$documentoIaController, 'index'], 'documentos_ia.ver'));
 $router->post('/api/v1/documentos-ia', protectedRoute([$documentoIaController, 'store'], 'documentos_ia.subir'));
@@ -555,7 +500,6 @@ $router->post('/api/v1/documentos-tributarios/{id}/anular', protectedRoute([$doc
 
 $folioController = new FolioController();
 $router->post('/api/v1/folios/caf', protectedRoute([$folioController, 'storeCaf'], 'folios.caf.crear'));
-$router->post('/api/v1/folios/caf/upload', protectedRoute([$folioController, 'uploadCaf'], 'folios.caf.crear'));
 $router->get('/api/v1/folios/caf', protectedRoute([$folioController, 'listCafs'], 'folios.ver'));
 $router->post('/api/v1/folios/asignaciones', protectedRoute([$folioController, 'storeAssignment'], 'folios.asignar'));
 $router->get('/api/v1/folios/asignaciones', protectedRoute([$folioController, 'listAssignments'], 'folios.ver'));

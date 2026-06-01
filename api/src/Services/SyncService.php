@@ -327,6 +327,7 @@ final class SyncService
         $salePayload = [
             'empresa_id' => $empresaId,
             'sucursal_id' => $sucursalId,
+            'ubicacion_id' => isset($eventPayload['ubicacion_id']) ? (int) $eventPayload['ubicacion_id'] : null,
             'cliente_id' => $eventPayload['cliente_id'] ?? null,
             'condicion_pago' => $eventPayload['condicion_pago'] ?? 'CONTADO',
             'caja_apertura_id' => $eventPayload['caja_apertura_id'] ?? null,

@@ -138,22 +138,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Ejecutar datos semilla (seeds) si existen
-            $seed_dir = realpath($database_dir . '/seeds');
-            if ($seed_dir && is_dir($seed_dir)) {
-                $seeds = glob($seed_dir . '/*.sql');
-                sort($seeds);
-                foreach ($seeds as $seed) {
-                    $sql = file_get_contents($seed);
-                    if (!empty(trim($sql))) {
-                        try {
-                            mypos_execute_sql_file($pdo, $seed);
-                            $log .= "<li class='list-group-item list-group-item-info'>🌱 Seed: " . basename($seed) . " instalado.</li>";
-                        } catch (PDOException $e) {
-                            $log .= "<li class='list-group-item list-group-item-warning'>⚠️ Seed " . basename($seed) . " (quizás ya existe): " . $e->getMessage() . "</li>";
+            $soloActualizar = $_POST['solo_actualizar'] ?? '0';
+
+            // Ejecutar datos semilla (seeds) si existen y no es solo actualización
+            if ($soloActualizar !== '1') {
+                $seed_dir = realpath($database_dir . '/seeds');
+                if ($seed_dir && is_dir($seed_dir)) {
+                    $seeds = glob($seed_dir . '/*.sql');
+                    sort($seeds);
+                    foreach ($seeds as $seed) {
+                        $sql = file_get_contents($seed);
+                        if (!empty(trim($sql))) {
+                            try {
+                                mypos_execute_sql_file($pdo, $seed);
+                                $log .= "<li class='list-group-item list-group-item-info'>🌱 Seed: " . basename($seed) . " instalado.</li>";
+                            } catch (PDOException $e) {
+                                $log .= "<li class='list-group-item list-group-item-warning'>⚠️ Seed " . basename($seed) . " (quizás ya existe): " . $e->getMessage() . "</li>";
+                            }
                         }
                     }
                 }
+            } else {
+                $log .= "<li class='list-group-item list-group-item-primary'>ℹ️ Modo de actualización: se omitió la ejecución de seeds.</li>";
             }
 
             $pdo->exec("SET FOREIGN_KEY_CHECKS=1;");
@@ -232,7 +238,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input type="password" name="pass" class="form-control" placeholder="Tu contraseña">
                 </div>
 
-                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">Instalar Tablas y Configurar</button>
+                <div class="mb-4 form-check bg-light p-3 border rounded">
+                    <input type="checkbox" name="solo_actualizar" class="form-check-input ms-1" id="soloActualizar" value="1">
+                    <label class="form-check-label fw-bold text-primary ms-2" for="soloActualizar">
+                        Solo actualizar sistema (Ejecuta nuevas tablas y omite datos iniciales / seeds)
+                    </label>
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">Ejecutar Instalación / Actualización</button>
             </form>
             
             <div class="mt-4 text-center text-muted small">

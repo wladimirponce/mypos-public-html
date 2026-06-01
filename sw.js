@@ -4,6 +4,28 @@ const STATIC_ASSETS = [
   '/index.html',
   '/manifest.webmanifest'
 ];
+const IS_LOCAL_DEV = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
+
+if (IS_LOCAL_DEV) {
+  self.addEventListener('install', (event) => {
+    self.skipWaiting();
+    event.waitUntil(
+      caches.keys().then((cacheNames) => Promise.all(cacheNames.map((name) => caches.delete(name))))
+    );
+  });
+
+  self.addEventListener('activate', (event) => {
+    event.waitUntil(
+      caches.keys()
+        .then((cacheNames) => Promise.all(cacheNames.map((name) => caches.delete(name))))
+        .then(() => self.registration.unregister())
+        .then(() => self.clients.matchAll())
+        .then((clients) => Promise.all(clients.map((client) => client.navigate(client.url))))
+    );
+  });
+
+  self.addEventListener('fetch', () => {});
+} else {
 
 // Instalar y pre-cachear estáticos mínimos
 self.addEventListener('install', (event) => {
@@ -73,3 +95,4 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+}
