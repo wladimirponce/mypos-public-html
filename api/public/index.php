@@ -1,0 +1,698 @@
+<?php
+declare(strict_types=1);
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/php_errors.log');
+
+use Mypos\Config\Database;
+use Mypos\Controllers\AnulacionController;
+use Mypos\Controllers\AuditoriaController;
+use Mypos\Controllers\AuthController;
+use Mypos\Controllers\CajaController;
+use Mypos\Controllers\CentroCostoController;
+use Mypos\Controllers\CierreDiarioController;
+use Mypos\Controllers\CompraController;
+use Mypos\Controllers\CompraInteligenteController;
+use Mypos\Controllers\FarmaciaController;
+use Mypos\Controllers\ComunicacionVentasController;
+use Mypos\Controllers\ConfiguracionController;
+use Mypos\Controllers\ClienteController;
+use Mypos\Controllers\CreditoController;
+use Mypos\Controllers\DocumentoIaController;
+use Mypos\Controllers\EmpresaController;
+use Mypos\Controllers\EmpleadoController;
+use Mypos\Controllers\DocumentoTributarioController;
+use Mypos\Controllers\DispositivoController;
+use Mypos\Controllers\DteController;
+use Mypos\Controllers\FolioController;
+use Mypos\Controllers\IaController;
+use Mypos\Controllers\ImportacionCatalogoController;
+use Mypos\Controllers\LibroController;
+use Mypos\Controllers\OnboardingController;
+use Mypos\Controllers\PermissionController;
+use Mypos\Controllers\ProductoAtributoController;
+use Mypos\Controllers\ProductoController;
+use Mypos\Controllers\ProveedorController;
+use Mypos\Controllers\ReporteController;
+use Mypos\Controllers\RrhhController;
+use Mypos\Controllers\RubroController;
+use Mypos\Controllers\StockController;
+use Mypos\Controllers\SyncController;
+use Mypos\Controllers\UploadController;
+use Mypos\Controllers\VentaController;
+use Mypos\Controllers\SuscripcionController;
+use Mypos\Core\HttpException;
+use Mypos\Core\Request;
+use Mypos\Core\Response;
+use Mypos\Core\Router;
+use Mypos\Middleware\AuthMiddleware;
+use Mypos\Middleware\CorsMiddleware;
+use Mypos\Middleware\PermissionMiddleware;
+use Mypos\Middleware\RateLimitMiddleware;
+use Mypos\Middleware\SecurityHeadersMiddleware;
+use Mypos\Middleware\SubscriptionMiddleware;
+use Mypos\Middleware\TenantMiddleware;
+use Mypos\Support\AppConfig;
+use Mypos\Support\Env;
+use Mypos\Support\SafeLogger;
+
+$vendorAutoload = dirname(__DIR__) . '/vendor/autoload.php';
+
+if (is_file($vendorAutoload)) {
+    require $vendorAutoload;
+} else {
+    spl_autoload_register(static function (string $class): void {
+        $prefix = 'Mypos\\';
+        $baseDir = dirname(__DIR__) . '/src/';
+
+        if (strncmp($prefix, $class, strlen($prefix)) !== 0) {
+            return;
+        }
+
+        $relativeClass = substr($class, strlen($prefix));
+        $file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
+
+        if (is_file($file)) {
+            require $file;
+        }
+    });
+}
+
+$envDir = dirname(__DIR__);
+Env::loadFile($envDir . '/.env');
+
+set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+    SafeLogger::warning('PHP runtime warning', [
+        'severity' => $severity,
+        'message' => $message,
+        'file' => basename($file),
+        'line' => $line,
+    ]);
+
+    return false;
+});
+
+set_exception_handler(static function (Throwable $exception): void {
+    if ($exception instanceof HttpException) {
+        Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());
+    }
+
+    SafeLogger::error('Unhandled exception', [
+        'type' => $exception::class,
+        'message' => $exception->getMessage(),
+        'file' => basename($exception->getFile()),
+        'line' => $exception->getLine(),
+    ]);
+
+    Response::error(
+        'Error interno del servidor.',
+        AppConfig::debug() && !AppConfig::isProduction() ? ['exception' => [$exception->getMessage()]] : null,
+        500
+    );
+});
+
+(new SecurityHeadersMiddleware())->handle();
+(new CorsMiddleware())->handle();
+(new RateLimitMiddleware())->handle();
+
+$router = new Router();
+
+function protectedRoute(callable $handler, string $permission): callable
+{
+    return static function (array $params = []) use ($handler, $permission): void {
+        $claims = (new AuthMiddleware())->handle();
+        $userId = (int) $claims['user_id'];
+        $empresaId = 0;
+
+        if (isset($_GET['empresa_id'])) {
+            $empresaId = (int) $_GET['empresa_id'];
+        }
+
+        if ($empresaId <= 0 && isset($_POST['empresa_id'])) {
+            $empresaId = (int) $_POST['empresa_id'];
+        }
+
+        if ($empresaId <= 0) {
+            $payload = Request::json();
+            $empresaId = (int) ($payload['empresa_id'] ?? 0);
+        }
+
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        (new TenantMiddleware())->handle($userId, $empresaId);
+        (new SubscriptionMiddleware())->handle();
+        (new PermissionMiddleware())->handle($userId, $empresaId, $permission);
+
+        if ($params === []) {
+            $handler();
+            return;
+        }
+
+        $handler($params);
+    };
+}
+
+$router->get('/health', static function (): void {
+    Response::success([
+        'status' => 'ok',
+        'app' => 'MyPOS',
+        'company' => 'Agentika Ingeniería y Soluciones Inteligentes SpA',
+    ]);
+});
+
+$router->get('/api/health', static function (): void {
+    Response::success([
+        'status' => 'ok',
+        'app' => 'MyPOS',
+        'company' => 'Agentika Ingeniería y Soluciones Inteligentes SpA',
+    ]);
+});
+
+$router->get('/health/db', static function (): void {
+    Database::connection()->query('SELECT 1');
+
+    Response::success([
+        'status' => 'ok',
+        'database' => 'connected',
+    ]);
+});
+
+$router->get('/api/health/db', static function (): void {
+    Database::connection()->query('SELECT 1');
+
+    Response::success([
+        'status' => 'ok',
+        'database' => 'connected',
+    ]);
+});
+
+$router->get('/health/config', static function (): void {
+    $envPath = dirname(__DIR__) . '/.env';
+    $dbHost = (string) ($_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: '');
+    $dbName = (string) ($_ENV['DB_DATABASE'] ?? getenv('DB_DATABASE') ?: '');
+    $dbUser = (string) ($_ENV['DB_USERNAME'] ?? getenv('DB_USERNAME') ?: '');
+    $dbPassword = (string) ($_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '');
+
+    Response::success([
+        'env_file_exists' => is_file($envPath),
+        'env_file_readable' => is_readable($envPath),
+        'pdo_loaded' => class_exists(PDO::class),
+        'pdo_mysql_loaded' => in_array('mysql', PDO::getAvailableDrivers(), true),
+        'db_host' => $dbHost,
+        'db_database' => $dbName,
+        'db_username' => $dbUser,
+        'db_password_length' => strlen($dbPassword),
+        'db_password_has_hash' => str_contains($dbPassword, '#'),
+    ]);
+});
+
+$router->get('/api/health/config', static function (): void {
+    $envPath = dirname(__DIR__) . '/.env';
+    $dbHost = (string) ($_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: '');
+    $dbName = (string) ($_ENV['DB_DATABASE'] ?? getenv('DB_DATABASE') ?: '');
+    $dbUser = (string) ($_ENV['DB_USERNAME'] ?? getenv('DB_USERNAME') ?: '');
+    $dbPassword = (string) ($_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '');
+
+    Response::success([
+        'env_file_exists' => is_file($envPath),
+        'env_file_readable' => is_readable($envPath),
+        'pdo_loaded' => class_exists(PDO::class),
+        'pdo_mysql_loaded' => in_array('mysql', PDO::getAvailableDrivers(), true),
+        'db_host' => $dbHost,
+        'db_database' => $dbName,
+        'db_username' => $dbUser,
+        'db_password_length' => strlen($dbPassword),
+        'db_password_has_hash' => str_contains($dbPassword, '#'),
+    ]);
+});
+
+$router->get('/api/health/auth', static function (): void {
+    $connection = Database::connection();
+    $email = 'admin@mypos.cl';
+    $userStatement = $connection->prepare(
+        'SELECT id, nombre, email, password_hash, activo, ultimo_login_at
+         FROM usuarios
+         WHERE email = :email
+         LIMIT 1'
+    );
+    $userStatement->execute(['email' => $email]);
+    $user = $userStatement->fetch();
+
+    $empresaRows = [];
+    if (is_array($user)) {
+        $empresaStatement = $connection->prepare(
+            'SELECT
+                eu.empresa_id,
+                e.razon_social,
+                e.nombre_fantasia,
+                e.onboarding_completado,
+                r.codigo AS rol,
+                eu.sucursal_id,
+                s.nombre AS sucursal_nombre
+             FROM empresa_usuarios eu
+             INNER JOIN empresas e ON e.id = eu.empresa_id
+             INNER JOIN roles r ON r.id = eu.rol_id
+             LEFT JOIN sucursales s ON s.id = eu.sucursal_id
+             WHERE eu.usuario_id = :user_id
+               AND eu.activo = 1
+               AND e.activo = 1'
+        );
+        $empresaStatement->execute(['user_id' => (int) $user['id']]);
+        $empresaRows = $empresaStatement->fetchAll();
+    }
+
+    $jwtSecret = (string) ($_ENV['JWT_SECRET'] ?? getenv('JWT_SECRET') ?: '');
+
+    Response::success([
+        'admin_found' => is_array($user),
+        'admin_active' => is_array($user) ? ((int) $user['activo'] === 1) : false,
+        'admin_password_hash_length' => is_array($user) ? strlen((string) $user['password_hash']) : 0,
+        'admin_password_verify_default' => is_array($user)
+            ? password_verify('Admin123456', (string) $user['password_hash'])
+            : false,
+        'jwt_secret_configured' => $jwtSecret !== '',
+        'jwt_secret_length' => strlen($jwtSecret),
+        'empresa_context_count' => count($empresaRows),
+        'first_empresa_id' => isset($empresaRows[0]['empresa_id']) ? (int) $empresaRows[0]['empresa_id'] : null,
+        'first_empresa_rol' => isset($empresaRows[0]['rol']) ? (string) $empresaRows[0]['rol'] : null,
+    ]);
+});
+
+$authController = new AuthController();
+$router->post('/api/v1/auth/register', [$authController, 'register']);
+$router->post('/api/v1/auth/login', [$authController, 'login']);
+$router->get('/api/v1/auth/me', [$authController, 'me']);
+$router->post('/api/v1/auth/logout', [$authController, 'logout']);
+
+$onboardingController = new OnboardingController();
+$router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);
+
+$whatsappController = new \Mypos\Controllers\WhatsappController();
+$router->post('/api/v1/whatsapp/token', [$whatsappController, 'generateToken']);
+$router->get('/api/v1/whatsapp/status', [$whatsappController, 'status']);
+
+$suscripcionController = new SuscripcionController();
+$comunicacionVentasController = new ComunicacionVentasController();
+$router->post('/api/v1/suscripciones/order', [$suscripcionController, 'createOrder']);
+$router->post('/api/v1/suscripciones/flow-webhook', [$suscripcionController, 'flowWebhook']);
+$router->get('/api/v1/suscripciones/flow-return', [$suscripcionController, 'flowReturn']);
+$router->get('/api/v1/suscripciones/paypal-return', [$suscripcionController, 'paypalReturn']);
+$router->get('/api/v1/suscripciones/status', [$suscripcionController, 'status']);
+$router->get('/api/v1/suscripciones/order-status', [$suscripcionController, 'orderStatus']);
+$router->get('/api/v1/suscripciones/payment-config', [$suscripcionController, 'paymentConfig']);
+
+$permissionController = new PermissionController();
+$router->get('/api/v1/permisos/mis-permisos', [$permissionController, 'myPermissions']);
+$router->get('/api/v1/permisos', [$permissionController, 'permissions']);
+$router->get('/api/v1/roles', [$permissionController, 'roles']);
+$router->get('/api/v1/roles/{id}', [$permissionController, 'showRole']);
+$router->post('/api/v1/roles', [$permissionController, 'storeRole']);
+$router->put('/api/v1/roles/{id}', [$permissionController, 'updateRole']);
+$router->delete('/api/v1/roles/{id}', [$permissionController, 'destroyRole']);
+$router->get('/api/v1/roles/{id}/permisos', [$permissionController, 'rolePermissionsList']);
+$router->put('/api/v1/roles/{id}/permisos', [$permissionController, 'updateRolePermissions']);
+
+$empresaController = new EmpresaController();
+$router->get('/api/v1/empresas', [$empresaController, 'index']);
+$router->get('/api/v1/empresas/{id}', [$empresaController, 'show']);
+$router->post('/api/v1/empresas', [$empresaController, 'store']);
+$router->put('/api/v1/empresas/{id}', [$empresaController, 'update']);
+$router->delete('/api/v1/empresas/{id}', [$empresaController, 'destroy']);
+$router->get('/api/v1/empresas/{id}/sucursales', [$empresaController, 'sucursales']);
+$router->post('/api/v1/empresas/{id}/sucursales', [$empresaController, 'storeSucursal']);
+$router->put('/api/v1/sucursales/{id}', [$empresaController, 'updateSucursal']);
+$router->delete('/api/v1/sucursales/{id}', [$empresaController, 'destroySucursal']);
+$router->get('/api/v1/empresas/{id}/cajas', [$empresaController, 'cajas']);
+$router->post('/api/v1/sucursales/{id}/cajas', [$empresaController, 'storeCaja']);
+$router->put('/api/v1/cajas/{id}', [$empresaController, 'updateCaja']);
+$router->delete('/api/v1/cajas/{id}', [$empresaController, 'destroyCaja']);
+$router->get('/api/v1/empresas/{id}/usuarios', [$empresaController, 'usuarios']);
+$router->get('/api/v1/usuarios/buscar', [$empresaController, 'buscarUsuariosGlobales']);
+$router->post('/api/v1/empresas/{id}/usuarios', [$empresaController, 'asociarUsuario']);
+$router->put('/api/v1/empresas/{id}/usuarios/{usuario_id}', [$empresaController, 'actualizarUsuarioEmpresa']);
+$router->delete('/api/v1/empresas/{id}/usuarios/{usuario_id}', [$empresaController, 'removerUsuarioEmpresa']);
+
+$clienteController = new ClienteController();
+$router->get('/api/v1/clientes', protectedRoute([$clienteController, 'index'], 'clientes.ver'));
+$router->post('/api/v1/clientes', protectedRoute([$clienteController, 'store'], 'clientes.crear'));
+$router->get('/api/v1/clientes/{id}', protectedRoute([$clienteController, 'show'], 'clientes.ver'));
+$router->put('/api/v1/clientes/{id}', protectedRoute([$clienteController, 'update'], 'clientes.editar'));
+$router->delete('/api/v1/clientes/{id}', protectedRoute([$clienteController, 'destroy'], 'clientes.eliminar'));
+$router->get('/api/v1/clientes/{id}/estado-cuenta', protectedRoute([$clienteController, 'accountState'], 'creditos.ver'));
+$router->get('/api/v1/clientes/{id}/historial', protectedRoute([$clienteController, 'history'], 'creditos.ver'));
+
+$empleadoController = new EmpleadoController();
+$router->get('/api/v1/empleados', protectedRoute([$empleadoController, 'index'], 'empleados.ver'));
+$router->post('/api/v1/empleados', protectedRoute([$empleadoController, 'store'], 'empleados.crear'));
+$router->put('/api/v1/empleados/{id}', protectedRoute([$empleadoController, 'update'], 'empleados.editar'));
+$router->get('/api/v1/empleados/buscar', protectedRoute([$empleadoController, 'search'], 'ventas.crear'));
+
+$rrhhController = new RrhhController();
+$router->get('/api/v1/rrhh/descuentos-credito', protectedRoute([$rrhhController, 'descuentosCredito'], 'rrhh.descuentos.ver'));
+
+$proveedorController = new ProveedorController();
+$router->get('/api/v1/proveedores', protectedRoute([$proveedorController, 'index'], 'proveedores.ver'));
+$router->post('/api/v1/proveedores', protectedRoute([$proveedorController, 'store'], 'proveedores.crear'));
+$router->get('/api/v1/proveedores/{id}/productos', protectedRoute([$proveedorController, 'providerProducts'], 'proveedores.ver'));
+$router->get('/api/v1/proveedores/{id}/precios', protectedRoute([$proveedorController, 'providerPrices'], 'proveedores.ver'));
+$router->post('/api/v1/proveedores/{id}/listas-precios/importaciones', protectedRoute([$proveedorController, 'storePriceListImport'], 'proveedores.editar'));
+$router->get('/api/v1/proveedores/{id}/listas-precios/importaciones/{importacion_id}', protectedRoute([$proveedorController, 'showPriceListImport'], 'proveedores.ver'));
+$router->post('/api/v1/proveedores/{id}/listas-precios/importaciones/{importacion_id}/validar', protectedRoute([$proveedorController, 'validatePriceListImport'], 'proveedores.editar'));
+$router->post('/api/v1/proveedores/{id}/listas-precios/importaciones/{importacion_id}/aplicar', protectedRoute([$proveedorController, 'applyPriceListImport'], 'proveedores.editar'));
+$router->get('/api/v1/proveedores/{id}', protectedRoute([$proveedorController, 'show'], 'proveedores.ver'));
+$router->put('/api/v1/proveedores/{id}', protectedRoute([$proveedorController, 'update'], 'proveedores.editar'));
+$router->delete('/api/v1/proveedores/{id}', protectedRoute([$proveedorController, 'destroy'], 'proveedores.eliminar'));
+
+$creditoController = new CreditoController();
+$router->get('/api/v1/creditos/clientes', protectedRoute([$creditoController, 'index'], 'creditos.ver'));
+$router->get('/api/v1/creditos/clientes/{id}', protectedRoute([$creditoController, 'show'], 'creditos.ver'));
+$router->post('/api/v1/creditos/clientes/{id}/pagos', protectedRoute([$creditoController, 'pay'], 'creditos.pagar'));
+
+$auditoriaController = new AuditoriaController();
+$router->get('/api/v1/auditoria', protectedRoute([$auditoriaController, 'index'], 'auditoria.ver'));
+$router->get('/api/v1/auditoria/{id}', protectedRoute([$auditoriaController, 'show'], 'auditoria.ver'));
+
+$configuracionController = new ConfiguracionController();
+$router->get('/api/v1/configuracion/empresa', protectedRoute([$configuracionController, 'empresa'], 'configuracion.ver'));
+$router->put('/api/v1/configuracion/empresa', protectedRoute([$configuracionController, 'updateEmpresa'], 'configuracion.editar'));
+$router->get('/api/v1/configuracion/operacion', protectedRoute([$configuracionController, 'operacion'], 'configuracion.ver'));
+$router->put('/api/v1/configuracion/operacion', protectedRoute([$configuracionController, 'updateOperacion'], 'configuracion.editar'));
+$router->get('/api/v1/configuracion/sucursales/{sucursal_id}', protectedRoute([$configuracionController, 'sucursal'], 'configuracion.ver'));
+$router->put('/api/v1/configuracion/sucursales/{sucursal_id}', protectedRoute([$configuracionController, 'updateSucursal'], 'configuracion.editar'));
+$router->get('/api/v1/configuracion/efectiva', protectedRoute([$configuracionController, 'efectiva'], 'configuracion.ver'));
+
+$uploadController = new UploadController();
+$router->post('/api/v1/uploads/productos', protectedRoute([$uploadController, 'producto'], 'uploads.crear'));
+$router->post('/api/v1/uploads/documentos-ia', protectedRoute([$uploadController, 'documentoIa'], 'uploads.crear'));
+$router->post('/api/v1/uploads/logos', protectedRoute([$uploadController, 'logo'], 'configuracion.editar'));
+$router->post('/api/v1/uploads/certificado-sii', protectedRoute([$uploadController, 'certificadoSii'], 'configuracion.editar'));
+$router->get('/api/v1/uploads/certificado-sii/vigencia', protectedRoute([$uploadController, 'vigenciaCertificadoSii'], 'configuracion.ver'));
+$router->get('/api/v1/uploads/{id}/download', protectedRoute([$uploadController, 'download'], 'uploads.ver'));
+$router->get('/api/v1/uploads/{id}', protectedRoute([$uploadController, 'show'], 'uploads.ver'));
+$router->delete('/api/v1/uploads/{id}', protectedRoute([$uploadController, 'destroy'], 'uploads.crear'));
+
+$iaController = new IaController();
+$router->get('/api/v1/ia/configuracion', protectedRoute([$iaController, 'configuracion'], 'ia.configuracion.ver'));
+
+$dispositivoController = new DispositivoController();
+$router->post('/api/v1/dispositivos/registrar', protectedRoute([$dispositivoController, 'register'], 'dispositivos.registrar'));
+$router->get('/api/v1/dispositivos', protectedRoute([$dispositivoController, 'index'], 'dispositivos.ver'));
+$router->get('/api/v1/dispositivos/{id}', protectedRoute([$dispositivoController, 'show'], 'dispositivos.ver'));
+$router->put('/api/v1/dispositivos/{id}', protectedRoute([$dispositivoController, 'update'], 'dispositivos.editar'));
+$router->post('/api/v1/dispositivos/{id}/bloquear', protectedRoute([$dispositivoController, 'block'], 'dispositivos.bloquear'));
+$router->post('/api/v1/dispositivos/{id}/revocar', protectedRoute([$dispositivoController, 'revoke'], 'dispositivos.bloquear'));
+
+$syncController = new SyncController();
+$router->get('/api/v1/sync/estado', protectedRoute([$syncController, 'status'], 'sync.ver'));
+$router->post('/api/v1/sync/eventos', protectedRoute([$syncController, 'events'], 'sync.enviar'));
+$router->get('/api/v1/sync/eventos', protectedRoute([$syncController, 'listEvents'], 'sync.ver'));
+$router->get('/api/v1/sync/conflictos', protectedRoute([$syncController, 'conflicts'], 'sync.conflictos.ver'));
+$router->post('/api/v1/sync/conflictos/{id}/resolver', protectedRoute([$syncController, 'resolveConflict'], 'sync.conflictos.resolver'));
+
+$rubroController = new RubroController();
+$router->get('/api/v1/rubros', protectedRoute([$rubroController, 'index'], 'productos.ver'));
+$router->post('/api/v1/rubros', protectedRoute([$rubroController, 'store'], 'rubros.gestionar'));
+$router->put('/api/v1/rubros/{id}', protectedRoute([$rubroController, 'update'], 'rubros.gestionar'));
+$router->delete('/api/v1/rubros/{id}', protectedRoute([$rubroController, 'destroy'], 'rubros.gestionar'));
+
+$centroCostoController = new CentroCostoController();
+$router->get('/api/v1/centros-costo', protectedRoute([$centroCostoController, 'index'], 'productos.ver'));
+$router->post('/api/v1/centros-costo', protectedRoute([$centroCostoController, 'store'], 'centros_costo.gestionar'));
+$router->put('/api/v1/centros-costo/{id}', protectedRoute([$centroCostoController, 'update'], 'centros_costo.gestionar'));
+$router->delete('/api/v1/centros-costo/{id}', protectedRoute([$centroCostoController, 'destroy'], 'centros_costo.gestionar'));
+
+$productoController = new ProductoController();
+$productoAtributoController = new ProductoAtributoController();
+$importacionCatalogoController = new ImportacionCatalogoController();
+$router->get('/api/v1/importaciones/catalogo', protectedRoute([$importacionCatalogoController, 'index'], 'productos.ver'));
+$router->post('/api/v1/importaciones/catalogo', protectedRoute([$importacionCatalogoController, 'store'], 'productos.editar'));
+$router->get('/api/v1/importaciones/catalogo/{id}', protectedRoute([$importacionCatalogoController, 'show'], 'productos.ver'));
+$router->post('/api/v1/importaciones/catalogo/{id}/validar', protectedRoute([$importacionCatalogoController, 'validate'], 'productos.editar'));
+$router->post('/api/v1/importaciones/catalogo/{id}/aplicar', protectedRoute([$importacionCatalogoController, 'apply'], 'productos.editar'));
+$router->get('/api/v1/productos/buscar', protectedRoute([$productoController, 'search'], 'productos.ver'));
+$router->get('/api/v1/productos', protectedRoute([$productoController, 'index'], 'productos.ver'));
+$router->post('/api/v1/productos', protectedRoute([$productoController, 'store'], 'productos.crear'));
+$router->get('/api/v1/productos/atributos', protectedRoute([$productoAtributoController, 'index'], 'productos.ver'));
+$router->post('/api/v1/productos/atributos', protectedRoute([$productoAtributoController, 'store'], 'productos.editar'));
+$router->put('/api/v1/productos/atributos/{id}', protectedRoute([$productoAtributoController, 'update'], 'productos.editar'));
+$router->delete('/api/v1/productos/atributos/{id}', protectedRoute([$productoAtributoController, 'destroy'], 'productos.editar'));
+$router->get('/api/v1/productos/{producto_id}/proveedores', protectedRoute([$proveedorController, 'productProviders'], 'productos.ver'));
+$router->post('/api/v1/productos/{producto_id}/proveedores', protectedRoute([$proveedorController, 'attachProduct'], 'proveedores.editar'));
+$router->put('/api/v1/productos/{producto_id}/proveedores/{relacion_id}', protectedRoute([$proveedorController, 'updateProductProvider'], 'proveedores.editar'));
+$router->delete('/api/v1/productos/{producto_id}/proveedores/{relacion_id}', protectedRoute([$proveedorController, 'deleteProductProvider'], 'proveedores.editar'));
+$router->get('/api/v1/productos/{producto_id}/precios-proveedor', protectedRoute([$proveedorController, 'productPrices'], 'productos.ver'));
+$router->post('/api/v1/productos/{producto_id}/precios-proveedor', protectedRoute([$proveedorController, 'storeProductPrice'], 'proveedores.editar'));
+$router->get('/api/v1/productos/{id}', protectedRoute([$productoController, 'show'], 'productos.ver'));
+$router->put('/api/v1/productos/{id}', protectedRoute([$productoController, 'update'], 'productos.editar'));
+$router->delete('/api/v1/productos/{id}', protectedRoute([$productoController, 'destroy'], 'productos.eliminar'));
+$router->get('/api/v1/productos/{id}/atributos', protectedRoute([$productoAtributoController, 'productValues'], 'productos.ver'));
+$router->put('/api/v1/productos/{id}/atributos', protectedRoute([$productoAtributoController, 'updateProductValues'], 'productos.editar'));
+$router->get('/api/v1/productos/{id}/codigos-barra', protectedRoute([$productoController, 'listBarcodes'], 'productos.ver'));
+$router->post('/api/v1/productos/{id}/codigos-barra', protectedRoute([$productoController, 'storeBarcode'], 'productos.editar'));
+$router->delete('/api/v1/productos/{id}/codigos-barra/{codigo_barra_id}', protectedRoute([$productoController, 'deleteBarcode'], 'productos.editar'));
+$router->get('/api/v1/productos/{id}/imagenes', protectedRoute([$productoController, 'listImages'], 'productos.ver'));
+$router->post('/api/v1/productos/{id}/imagenes', protectedRoute([$productoController, 'storeImage'], 'productos.editar'));
+$router->delete('/api/v1/productos/{id}/imagenes/{imagen_id}', protectedRoute([$productoController, 'deleteImage'], 'productos.editar'));
+$router->get('/api/v1/productos/{id}/impuestos', protectedRoute([$productoController, 'listTaxes'], 'productos.ver'));
+$router->post('/api/v1/productos/{id}/impuestos', protectedRoute([$productoController, 'storeTax'], 'impuestos.gestionar'));
+$router->delete('/api/v1/productos/{id}/impuestos/{producto_impuesto_id}', protectedRoute([$productoController, 'deleteTax'], 'impuestos.gestionar'));
+$router->get('/api/v1/productos/{id}/descuentos', protectedRoute([$productoController, 'listDiscounts'], 'productos.ver'));
+$router->post('/api/v1/productos/{id}/descuentos', protectedRoute([$productoController, 'storeDiscount'], 'descuentos.gestionar'));
+$router->put('/api/v1/productos/{id}/descuentos/{descuento_id}', protectedRoute([$productoController, 'updateDiscount'], 'descuentos.gestionar'));
+$router->delete('/api/v1/productos/{id}/descuentos/{descuento_id}', protectedRoute([$productoController, 'deleteDiscount'], 'descuentos.gestionar'));
+$router->get('/api/v1/productos/{id}/comisiones', protectedRoute([$productoController, 'listCommissions'], 'productos.ver'));
+$router->post('/api/v1/productos/{id}/comisiones', protectedRoute([$productoController, 'storeCommission'], 'comisiones.gestionar'));
+$router->put('/api/v1/productos/{id}/comisiones/{comision_id}', protectedRoute([$productoController, 'updateCommission'], 'comisiones.gestionar'));
+$router->delete('/api/v1/productos/{id}/comisiones/{comision_id}', protectedRoute([$productoController, 'deleteCommission'], 'comisiones.gestionar'));
+
+$stockController = new StockController();
+$router->get('/api/v1/stock/ubicaciones', protectedRoute([$stockController, 'ubicaciones'], 'stock.ver'));
+$router->post('/api/v1/stock/ubicaciones', protectedRoute([$stockController, 'crearUbicacion'], 'stock.ubicaciones.administrar'));
+$router->put('/api/v1/stock/ubicaciones/{id}', protectedRoute([$stockController, 'actualizarUbicacion'], 'stock.ubicaciones.administrar'));
+$router->delete('/api/v1/stock/ubicaciones/{id}', protectedRoute([$stockController, 'desactivarUbicacion'], 'stock.ubicaciones.administrar'));
+$router->get('/api/v1/stock/ubicaciones/{ubicacion_id}/productos', protectedRoute([$stockController, 'porUbicacion'], 'stock.ver'));
+$router->post('/api/v1/stock/traslados', protectedRoute([$stockController, 'traslado'], 'stock.ajustar'));
+$router->get('/api/v1/stock', protectedRoute([$stockController, 'index'], 'stock.ver'));
+$router->get('/api/v1/stock/producto/{producto_id}', protectedRoute([$stockController, 'showProduct'], 'stock.ver'));
+$router->post('/api/v1/stock/ajustes', protectedRoute([$stockController, 'ajuste'], 'stock.ajustar'));
+$router->get('/api/v1/stock/movimientos', protectedRoute([$stockController, 'movimientos'], 'stock.movimientos.ver'));
+$router->get('/api/v1/stock/integridad', protectedRoute([$stockController, 'integridad'], 'stock.movimientos.ver'));
+
+$cajaController = new CajaController();
+$router->get('/api/v1/cajas/estado', protectedRoute([$cajaController, 'status'], 'cajas.ver'));
+$router->get('/api/v1/cajas/cierres', protectedRoute([$cajaController, 'closures'], 'cajas.ver'));
+$router->get('/api/v1/cajas/cierres/{id}', protectedRoute([$cajaController, 'closureDetail'], 'cajas.ver'));
+$router->get('/api/v1/cajas', protectedRoute([$cajaController, 'index'], 'cajas.ver'));
+$router->post('/api/v1/cajas', protectedRoute([$cajaController, 'store'], 'cajas.crear'));
+$router->post('/api/v1/cajas/{id}/abrir', protectedRoute([$cajaController, 'open'], 'cajas.abrir'));
+$router->post('/api/v1/cajas/movimientos', protectedRoute([$cajaController, 'movement'], 'cajas.movimientos'));
+$router->get('/api/v1/cajas/{id}/movimientos', protectedRoute([$cajaController, 'movements'], 'cajas.ver'));
+$router->post('/api/v1/cajas/aperturas/{id}/cerrar', protectedRoute([$cajaController, 'close'], 'cajas.cerrar'));
+
+$ventaController = new VentaController();
+$router->post('/api/v1/ventas', protectedRoute([$ventaController, 'store'], 'ventas.crear'));
+
+$anulacionController = new AnulacionController();
+$router->post('/api/v1/ventas/{id}/anular', protectedRoute([$anulacionController, 'cancelSale'], 'ventas.anular'));
+$router->post('/api/v1/compras/{id}/reversar', protectedRoute([$anulacionController, 'reversePurchase'], 'compras.reversar'));
+$router->get('/api/v1/anulaciones', protectedRoute([$anulacionController, 'index'], 'ventas.ver'));
+$router->get('/api/v1/anulaciones/{id}', protectedRoute([$anulacionController, 'show'], 'ventas.ver'));
+
+$cierreDiarioController = new CierreDiarioController();
+$router->get('/api/v1/cierres-diarios', protectedRoute([$cierreDiarioController, 'index'], 'reportes.ver'));
+$router->post('/api/v1/cierres-diarios', protectedRoute([$cierreDiarioController, 'store'], 'cierres.crear'));
+$router->get('/api/v1/cierres-diarios/{id}', protectedRoute([$cierreDiarioController, 'show'], 'reportes.ver'));
+
+$compraController = new CompraController();
+$router->get('/api/v1/compras', protectedRoute([$compraController, 'index'], 'compras.ver'));
+$router->post('/api/v1/compras', protectedRoute([$compraController, 'store'], 'compras.crear'));
+$router->get('/api/v1/compras/{id}', protectedRoute([$compraController, 'show'], 'compras.ver'));
+$router->post('/api/v1/compras/{id}/confirmar', protectedRoute([$compraController, 'confirm'], 'compras.confirmar'));
+$router->post('/api/v1/compras/{id}/anular', protectedRoute([$compraController, 'cancel'], 'compras.anular'));
+
+$compraInteligenteController = new CompraInteligenteController();
+$router->get('/api/v1/compras-inteligentes/sugerencias', protectedRoute([$compraInteligenteController, 'sugerencias'], 'compras_inteligentes.ver'));
+$router->post('/api/v1/compras-inteligentes/borrador', protectedRoute([$compraInteligenteController, 'generarBorrador'], 'compras_inteligentes.crear'));
+
+$farmaciaController = new FarmaciaController();
+$router->get('/api/v1/farmacia/atributos', protectedRoute([$farmaciaController, 'atributos'], 'farmacia.ver'));
+$router->get('/api/v1/farmacia/buscar', protectedRoute([$farmaciaController, 'buscar'], 'farmacia.ver'));
+$router->get('/api/v1/farmacia/productos-con-receta', protectedRoute([$farmaciaController, 'productosConReceta'], 'farmacia.ver'));
+$router->get('/api/v1/farmacia/productos/{id}/ficha', protectedRoute([$farmaciaController, 'ficha'], 'farmacia.ver'));
+
+$documentoIaController = new DocumentoIaController();
+$router->get('/api/v1/documentos-ia', protectedRoute([$documentoIaController, 'index'], 'documentos_ia.ver'));
+$router->post('/api/v1/documentos-ia', protectedRoute([$documentoIaController, 'store'], 'documentos_ia.subir'));
+$router->get('/api/v1/documentos-ia/{id}', protectedRoute([$documentoIaController, 'show'], 'documentos_ia.ver'));
+$router->post('/api/v1/documentos-ia/{id}/procesar', protectedRoute([$documentoIaController, 'process'], 'documentos_ia.procesar'));
+$router->post('/api/v1/documentos-ia/{id}/procesar-gemini', protectedRoute([$documentoIaController, 'processGemini'], 'documentos_ia.procesar_real'));
+$router->post('/api/v1/documentos-ia/{id}/normalizar', protectedRoute([$documentoIaController, 'normalize'], 'documentos_ia.normalizar'));
+$router->get('/api/v1/documentos-ia/{id}/revision', protectedRoute([$documentoIaController, 'revision'], 'documentos_ia.revisar'));
+$router->put('/api/v1/documentos-ia/{id}/revision/cabecera', protectedRoute([$documentoIaController, 'updateRevisionHeader'], 'documentos_ia.revisar'));
+$router->put('/api/v1/documentos-ia/detalles/{detalle_id}/revision', protectedRoute([$documentoIaController, 'updateRevisionDetail'], 'documentos_ia.revisar'));
+$router->get('/api/v1/documentos-ia/{id}/alertas', protectedRoute([$documentoIaController, 'alerts'], 'documentos_ia.alertas.ver'));
+$router->post('/api/v1/documentos-ia/alertas/{alerta_id}/resolver', protectedRoute([$documentoIaController, 'resolveAlert'], 'documentos_ia.alertas.resolver'));
+$router->post('/api/v1/documentos-ia/{id}/aprobar', protectedRoute([$documentoIaController, 'approve'], 'documentos_ia.aprobar'));
+$router->post('/api/v1/documentos-ia/{id}/vincular-proveedor', protectedRoute([$documentoIaController, 'linkProvider'], 'documentos_ia.revisar'));
+$router->put('/api/v1/documentos-ia/{id}/editar', protectedRoute([$documentoIaController, 'edit'], 'documentos_ia.editar'));
+$router->post('/api/v1/documentos-ia/{id}/generar-compra', protectedRoute([$documentoIaController, 'generatePurchase'], 'documentos_ia.generar_compra'));
+$router->post('/api/v1/documentos-ia/{id}/vincular-producto', protectedRoute([$documentoIaController, 'linkProduct'], 'documentos_ia.vincular_producto'));
+
+$documentoTributarioController = new DocumentoTributarioController();
+$router->post('/api/v1/documentos-tributarios/desde-venta', protectedRoute([$documentoTributarioController, 'storeFromSale'], 'documentos_tributarios.crear'));
+$router->get('/api/v1/documentos-tributarios', protectedRoute([$documentoTributarioController, 'index'], 'documentos_tributarios.ver'));
+$router->get('/api/v1/documentos-tributarios/{id}', protectedRoute([$documentoTributarioController, 'show'], 'documentos_tributarios.ver'));
+$router->post('/api/v1/documentos-tributarios/{id}/emitir-dte', protectedRoute([$documentoTributarioController, 'emitDte'], 'dte.emitir'));
+$router->post('/api/v1/documentos-tributarios/{id}/asignar-folio', protectedRoute([$documentoTributarioController, 'assignFolio'], 'documentos_tributarios.asignar_folio'));
+$router->post('/api/v1/documentos-tributarios/{id}/marcar-emitido-interno', protectedRoute([$documentoTributarioController, 'markInternalIssued'], 'documentos_tributarios.emitir_interno'));
+$router->post('/api/v1/documentos-tributarios/{id}/marcar-enviado-sii', protectedRoute([$documentoTributarioController, 'markSentSii'], 'documentos_tributarios.cambiar_estado_sii'));
+$router->post('/api/v1/documentos-tributarios/{id}/marcar-aceptado-sii', protectedRoute([$documentoTributarioController, 'markAcceptedSii'], 'documentos_tributarios.cambiar_estado_sii'));
+$router->post('/api/v1/documentos-tributarios/{id}/marcar-rechazado-sii', protectedRoute([$documentoTributarioController, 'markRejectedSii'], 'documentos_tributarios.cambiar_estado_sii'));
+$router->post('/api/v1/documentos-tributarios/{id}/anular', protectedRoute([$documentoTributarioController, 'cancel'], 'documentos_tributarios.anular'));
+
+$folioController = new FolioController();
+$router->post('/api/v1/folios/caf', protectedRoute([$folioController, 'storeCaf'], 'folios.caf.crear'));
+$router->post('/api/v1/folios/caf/upload', protectedRoute([$folioController, 'uploadCaf'], 'folios.caf.crear'));
+$router->get('/api/v1/folios/caf', protectedRoute([$folioController, 'listCafs'], 'folios.ver'));
+$router->post('/api/v1/folios/asignaciones', protectedRoute([$folioController, 'storeAssignment'], 'folios.asignar'));
+$router->get('/api/v1/folios/asignaciones', protectedRoute([$folioController, 'listAssignments'], 'folios.ver'));
+$router->get('/api/v1/folios/disponibles', protectedRoute([$folioController, 'availability'], 'folios.ver'));
+$router->post('/api/v1/folios/consumir', protectedRoute([$folioController, 'consume'], 'folios.consumir'));
+$router->get('/api/v1/folios/consumidos', protectedRoute([$folioController, 'consumed'], 'folios.ver'));
+$router->get('/api/v1/folios/alertas', protectedRoute([$folioController, 'alerts'], 'folios.alertas.ver'));
+
+$dteController = new DteController();
+$router->get('/api/v1/dte/configuracion', protectedRoute([$dteController, 'config'], 'dte.configuracion.ver'));
+$router->put('/api/v1/dte/configuracion', protectedRoute([$dteController, 'updateConfig'], 'dte.configuracion.editar'));
+$router->get('/api/v1/dte/emisiones', protectedRoute([$dteController, 'emissions'], 'dte.ver'));
+$router->get('/api/v1/dte/emisiones/{id}', protectedRoute([$dteController, 'emissionDetail'], 'dte.ver'));
+$router->post('/api/v1/dte/emisiones/{id}/reintentar', protectedRoute([$dteController, 'retry'], 'dte.reintentar'));
+$router->post('/api/v1/dte/emisiones/{id}/marcar-aceptado', protectedRoute([$dteController, 'markAccepted'], 'dte.emitir'));
+$router->post('/api/v1/dte/emisiones/{id}/marcar-rechazado', protectedRoute([$dteController, 'markRejected'], 'dte.emitir'));
+
+$libroController = new LibroController();
+$router->get('/api/v1/libros/ventas', protectedRoute([$libroController, 'ventas'], 'libros.ventas.ver'));
+$router->get('/api/v1/libros/compras', protectedRoute([$libroController, 'compras'], 'libros.compras.ver'));
+$router->get('/api/v1/libros/resumen-iva', protectedRoute([$libroController, 'resumenIva'], 'libros.resumen_iva.ver'));
+$router->get('/api/v1/libros/ventas/resumen-tipo-documento', protectedRoute([$libroController, 'ventasResumenTipoDocumento'], 'libros.ventas.ver'));
+$router->get('/api/v1/libros/compras/resumen-proveedor', protectedRoute([$libroController, 'comprasResumenProveedor'], 'libros.compras.ver'));
+
+$reporteController = new ReporteController();
+$router->get('/api/v1/reportes/resumen-ventas', protectedRoute([$reporteController, 'resumenVentas'], 'reportes.ver'));
+$router->get('/api/v1/reportes/ventas-por-dia', protectedRoute([$reporteController, 'ventasPorDia'], 'reportes.ver'));
+$router->get('/api/v1/reportes/ventas-por-metodo-pago', protectedRoute([$reporteController, 'ventasPorMetodoPago'], 'reportes.ver'));
+$router->get('/api/v1/reportes/ventas-por-producto', protectedRoute([$reporteController, 'ventasPorProducto'], 'reportes.ver'));
+$router->get('/api/v1/reportes/ventas-por-rubro', protectedRoute([$reporteController, 'ventasPorRubro'], 'reportes.ver'));
+$router->get('/api/v1/reportes/ventas-por-usuario', protectedRoute([$reporteController, 'ventasPorUsuario'], 'reportes.ver'));
+$router->get('/api/v1/reportes/dashboard', protectedRoute([$reporteController, 'dashboard'], 'dashboard.ver'));
+
+$router->post('/api/v1/comunicaciones-ventas', [$comunicacionVentasController, 'store']);
+// Rutas God Mode
+$router->get('/api/v1/god-mode/comunicaciones-ventas', [$comunicacionVentasController, 'godIndex']);
+$router->get('/api/v1/god-mode/empresas', function() {
+    if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
+    $db = \Mypos\Config\Database::connection();
+    $stmt = $db->query('
+        SELECT e.*, s.estado as suscripcion_estado, s.fecha_fin as suscripcion_fin 
+        FROM empresas e 
+        LEFT JOIN empresas_suscripcion s ON e.id = s.empresa_id 
+        ORDER BY e.id DESC
+    ');
+    if ($stmt) {
+        \Mypos\Core\Response::success($stmt->fetchAll());
+    } else {
+        \Mypos\Core\Response::error('Error de SQL', null, 500);
+    }
+});
+$router->post('/api/v1/god-mode/empresas/{id}/toggle-payment', function($params) {
+    if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
+    try {
+        $db = \Mypos\Config\Database::connection();
+        $id = (int)$params['id'];
+        $payload = json_decode(file_get_contents('php://input'), true);
+        $pagado = !empty($payload['pagado']);
+        
+        $estado = $pagado ? 'activa' : 'vencida';
+        $fechaFin = $pagado ? date('Y-m-d H:i:s', strtotime('+1 year')) : date('Y-m-d H:i:s', strtotime('-1 day'));
+        
+        $stmt = $db->prepare('SELECT empresa_id FROM empresas_suscripcion WHERE empresa_id = ?');
+        $stmt->execute([$id]);
+        $exists = $stmt->fetch();
+        
+        if ($exists) {
+            $db->prepare('UPDATE empresas_suscripcion SET estado = ?, fecha_fin = ? WHERE empresa_id = ?')
+               ->execute([$estado, $fechaFin, $id]);
+        } else {
+            $db->prepare('INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado) VALUES (?, "pos", NOW(), ?, ?)')
+               ->execute([$id, $fechaFin, $estado]);
+        }
+        
+        \Mypos\Core\Response::success(['success' => true]);
+    } catch (\Throwable $e) {
+        \Mypos\Core\Response::error($e->getMessage(), null, 500);
+    }
+});
+$router->delete('/api/v1/god-mode/empresas/{id}', function($params) {
+    if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
+    try {
+        $db = \Mypos\Config\Database::connection();
+        $id = (int)$params['id'];
+        $db->exec('SET FOREIGN_KEY_CHECKS = 0');
+        
+        $tablasHijas = [
+            'empresa_usuarios', 
+            'empresas_suscripcion', 
+            'configuracion_empresa', 
+            'cajas', 
+            'sucursales', 
+            'documentos_tributarios', 
+            'ventas', 
+            'productos',
+            'clientes',
+            'proveedores'
+        ];
+        foreach ($tablasHijas as $tabla) {
+            try {
+                $db->prepare("DELETE FROM $tabla WHERE empresa_id = ?")->execute([$id]);
+            } catch (\Throwable $e) {}
+        }
+
+        $db->prepare('DELETE FROM empresas WHERE id = ?')->execute([$id]);
+        $db->exec('SET FOREIGN_KEY_CHECKS = 1');
+        \Mypos\Core\Response::success(['success' => true]);
+    } catch (\Throwable $e) {
+        $db->exec('SET FOREIGN_KEY_CHECKS = 1');
+        \Mypos\Core\Response::error($e->getMessage(), null, 500);
+    }
+});
+$router->get('/api/v1/god-mode/usuarios', function() {
+    if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
+    $db = \Mypos\Config\Database::connection();
+    $stmt = $db->query('SELECT * FROM usuarios ORDER BY id DESC');
+    if ($stmt) {
+        \Mypos\Core\Response::success($stmt->fetchAll());
+    } else {
+        \Mypos\Core\Response::error('Error de SQL', null, 500);
+    }
+});
+$router->delete('/api/v1/god-mode/usuarios/{id}', function($params) {
+    if (!isset($_GET['pwd']) || $_GET['pwd'] !== 'tronador') { http_response_code(403); exit; }
+    try {
+        $db = \Mypos\Config\Database::connection();
+        $id = (int)$params['id'];
+        $db->exec('SET FOREIGN_KEY_CHECKS = 0');
+        $db->prepare('DELETE FROM empresa_usuarios WHERE usuario_id = ?')->execute([$id]);
+        $db->prepare('DELETE FROM sesiones WHERE usuario_id = ?')->execute([$id]);
+        $db->prepare('DELETE FROM usuarios WHERE id = ?')->execute([$id]);
+        $db->exec('SET FOREIGN_KEY_CHECKS = 1');
+        \Mypos\Core\Response::success(['success' => true]);
+    } catch (\Throwable $e) {
+        $db->exec('SET FOREIGN_KEY_CHECKS = 1');
+        \Mypos\Core\Response::error($e->getMessage(), null, 500);
+    }
+});
+
+$router->dispatch($_SERVER['REQUEST_METHOD'] ?? 'GET', $_SERVER['REQUEST_URI'] ?? '/');
