@@ -79,7 +79,14 @@ function mypos_execute_sql_file(PDO $pdo, string $archivo): void
     }
 
     foreach (mypos_sql_statements($sql) as $statement) {
-        $pdo->exec($statement);
+        try {
+            $stmt = $pdo->query($statement);
+            if ($stmt) {
+                $stmt->closeCursor();
+            }
+        } catch (PDOException $e) {
+            throw $e;
+        }
     }
 }
 
