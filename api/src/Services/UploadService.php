@@ -176,10 +176,23 @@ final class UploadService
         $this->validateUpload($file);
         $tmpName = (string) $file['tmp_name'];
         $pfxContent = file_get_contents($tmpName);
-        $certs = $this->readPkcs12($pfxContent, $password, $empresaId);
+        if (!is_string($pfxContent)) {
+            throw new HttpException('No fue posible leer el certificado digital.', 422);
+        }
+        $certificate = $this->readOrNormalizePkcs12($pfxContent, $password, $empresaId);
+        $fileToStore = $file;
+        if ($certificate['normalized_content'] !== null) {
+            $normalizedTmp = tempnam(sys_get_temp_dir(), 'mypos_pfx_normalized_');
+            if ($normalizedTmp === false || file_put_contents($normalizedTmp, $certificate['normalized_content']) === false) {
+                throw new HttpException('No fue posible preparar el certificado digital para guardarlo.', 500);
+            }
+
+            $fileToStore['tmp_name'] = $normalizedTmp;
+            $fileToStore['size'] = filesize($normalizedTmp) ?: strlen($certificate['normalized_content']);
+        }
         
         // Asumiendo que es válido, lo subimos
-        $stored = $this->storeFile($empresaId, $userId, 'certificados', $file, [
+        $stored = $this->storeFile($empresaId, $userId, 'certificados', $fileToStore, [
             'application/x-pkcs12' => ['pfx', 'p12'],
             'application/octet-stream' => ['pfx', 'p12'],
         ], self::MAX_DOCUMENT_BYTES);
@@ -192,7 +205,11 @@ final class UploadService
             'entidad' => 'certificado_sii',
             'entidad_id' => $empresaId,
             'estado' => 'ACTIVO',
-            'metadata_json' => $this->jsonOrNull(['password_certificado' => $password, 'certificado_valido' => true]),
+            'metadata_json' => $this->jsonOrNull([
+                'password_certificado' => $password,
+                'certificado_valido' => true,
+                'normalizado_legacy' => $certificate['normalized_content'] !== null,
+            ]),
         ]));
         
         $this->audit($empresaId, null, $userId, 'upload.crear', 'archivos_subidos', $archivoId, [
@@ -205,6 +222,7 @@ final class UploadService
             'archivo_id' => $archivoId,
             'ruta_relativa' => $stored['ruta_relativa'],
             'valido' => true,
+            'normalizado_legacy' => $certificate['normalized_content'] !== null,
         ];
     }
 
@@ -462,6 +480,27 @@ final class UploadService
      * PFX antiguos del SII suelen venir con RC2/3DES. En OpenSSL 3 eso exige
      * provider legacy; sin el provider, el error real es "unsupported", no clave mala.
      */
+    private function readOrNormalizePkcs12(string $pfxContent, string $password, int $empresaId): array
+    {
+        try {
+            return [
+                'certs' => $this->readPkcs12($pfxContent, $password, $empresaId),
+                'normalized_content' => null,
+            ];
+        } catch (HttpException $exception) {
+            if (!$this->isLegacyPkcs12Exception($exception)) {
+                throw $exception;
+            }
+        }
+
+        $normalizedContent = $this->normalizeLegacyPkcs12($pfxContent, $password, $empresaId);
+
+        return [
+            'certs' => $this->readPkcs12($normalizedContent, $password, $empresaId),
+            'normalized_content' => $normalizedContent,
+        ];
+    }
+
     private function readPkcs12(string $pfxContent, string $password, int $empresaId): array
     {
         $this->configureOpenSslLegacyProvider();
@@ -478,12 +517,191 @@ final class UploadService
 
         if ($this->isOpenSslUnsupportedAlgorithm($errors)) {
             throw new HttpException(
-                'El certificado usa cifrado legacy del SII (RC2/3DES) y el servidor no tiene habilitado el provider legacy de OpenSSL. La clave puede ser correcta; se debe activar OpenSSL legacy en el hosting o reexportar el PFX con cifrado moderno.',
+                'El certificado usa cifrado legacy del SII (RC2/3DES). MyPOS intentara convertirlo automaticamente.',
                 422
             );
         }
 
         throw new HttpException('Contraseña incorrecta o certificado digital inválido.', 422);
+    }
+
+    private function normalizeLegacyPkcs12(string $pfxContent, string $password, int $empresaId): string
+    {
+        $openssl = $this->opensslBinary();
+        if ($openssl === null) {
+            throw new HttpException(
+                'El certificado usa un formato antiguo del SII y este servidor no tiene disponible la herramienta de conversion automatica.',
+                422
+            );
+        }
+
+        $workDir = $this->createTempDirectory();
+        $inputPath = $workDir . DIRECTORY_SEPARATOR . 'original.pfx';
+        $pemPath = $workDir . DIRECTORY_SEPARATOR . 'certificate.pem';
+        $outputPath = $workDir . DIRECTORY_SEPARATOR . 'modern.pfx';
+
+        try {
+            if (file_put_contents($inputPath, $pfxContent) === false) {
+                throw new HttpException('No fue posible preparar el certificado digital para convertirlo.', 500);
+            }
+
+            $env = ['MYPOS_PFX_PASSWORD' => $password];
+            $modulesPath = $this->opensslModulesPath($openssl);
+            if ($modulesPath !== null) {
+                $env['OPENSSL_MODULES'] = $modulesPath;
+            }
+
+            $this->runOpenSsl([
+                $openssl,
+                'pkcs12',
+                '-legacy',
+                '-in',
+                $inputPath,
+                '-nodes',
+                '-out',
+                $pemPath,
+                '-passin',
+                'env:MYPOS_PFX_PASSWORD',
+            ], $env, $workDir, $empresaId);
+
+            $this->runOpenSsl([
+                $openssl,
+                'pkcs12',
+                '-export',
+                '-in',
+                $pemPath,
+                '-out',
+                $outputPath,
+                '-passout',
+                'env:MYPOS_PFX_PASSWORD',
+                '-certpbe',
+                'AES-256-CBC',
+                '-keypbe',
+                'AES-256-CBC',
+                '-macalg',
+                'sha256',
+            ], $env, $workDir, $empresaId);
+
+            $normalized = file_get_contents($outputPath);
+            if (!is_string($normalized) || $normalized === '') {
+                throw new HttpException('No fue posible convertir el certificado digital.', 500);
+            }
+
+            return $normalized;
+        } finally {
+            $this->deleteTempDirectory($workDir);
+        }
+    }
+
+    /**
+     * @param list<string> $command
+     * @param array<string, string> $env
+     */
+    private function runOpenSsl(array $command, array $env, string $workDir, int $empresaId): void
+    {
+        if (!function_exists('proc_open')) {
+            throw new HttpException(
+                'El certificado usa un formato antiguo del SII y este servidor no permite ejecutar la conversion automatica.',
+                422
+            );
+        }
+
+        $descriptors = [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = @proc_open($command, $descriptors, $pipes, $workDir, array_merge($_ENV, $_SERVER, $env));
+        if (!is_resource($process)) {
+            throw new HttpException('No fue posible iniciar la conversion automatica del certificado digital.', 500);
+        }
+
+        $stdout = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        if ($exitCode !== 0) {
+            $error = trim((string) $stderr . "\n" . (string) $stdout);
+            error_log("UploadService: OpenSSL legacy conversion failed for company {$empresaId}. Exit {$exitCode}. Output: " . $error);
+
+            if (stripos($error, 'mac verify failure') !== false || stripos($error, 'invalid password') !== false) {
+                throw new HttpException('ContraseÃ±a incorrecta o certificado digital invÃ¡lido.', 422);
+            }
+
+            if (stripos($error, 'unable to load provider legacy') !== false || stripos($error, 'legacy') !== false) {
+                throw new HttpException(
+                    'El certificado usa un formato antiguo del SII y el servidor no tiene disponible el componente legacy necesario para convertirlo automaticamente.',
+                    422
+                );
+            }
+
+            throw new HttpException('No fue posible convertir automaticamente el certificado digital.', 422);
+        }
+    }
+
+    private function opensslBinary(): ?string
+    {
+        $configured = trim((string) ($_ENV['OPENSSL_BIN'] ?? getenv('OPENSSL_BIN') ?: ''));
+        if ($configured !== '' && is_file($configured) && is_executable($configured)) {
+            return $configured;
+        }
+
+        foreach (['/usr/bin/openssl', '/usr/local/bin/openssl', 'openssl'] as $candidate) {
+            if ($candidate === 'openssl' || (is_file($candidate) && is_executable($candidate))) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function opensslModulesPath(string $openssl): ?string
+    {
+        $configured = trim((string) ($_ENV['OPENSSL_MODULES'] ?? getenv('OPENSSL_MODULES') ?: ''));
+        if ($configured !== '' && is_dir($configured)) {
+            return $configured;
+        }
+
+        $binaryDir = dirname($openssl);
+        if (is_file($binaryDir . DIRECTORY_SEPARATOR . 'legacy.dll')) {
+            return $binaryDir;
+        }
+
+        return null;
+    }
+
+    private function createTempDirectory(): string
+    {
+        $base = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'mypos_pfx_' . bin2hex(random_bytes(8));
+        if (!mkdir($base, 0700, true) && !is_dir($base)) {
+            throw new HttpException('No fue posible crear directorio temporal para el certificado.', 500);
+        }
+
+        return $base;
+    }
+
+    private function deleteTempDirectory(string $path): void
+    {
+        if (!is_dir($path)) {
+            return;
+        }
+
+        foreach (glob($path . DIRECTORY_SEPARATOR . '*') ?: [] as $file) {
+            if (is_file($file)) {
+                @unlink($file);
+            }
+        }
+
+        @rmdir($path);
+    }
+
+    private function isLegacyPkcs12Exception(HttpException $exception): bool
+    {
+        return str_contains($exception->getMessage(), 'formato antiguo')
+            || str_contains($exception->getMessage(), 'cifrado legacy')
+            || str_contains($exception->getMessage(), 'RC2/3DES');
     }
 
     private function configureOpenSslLegacyProvider(): void
