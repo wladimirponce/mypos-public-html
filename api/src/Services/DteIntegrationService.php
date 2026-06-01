@@ -491,7 +491,6 @@ final class DteIntegrationService
         $raw = curl_exec($ch);
         $curlError = curl_error($ch);
         $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
 
         if ($curlError !== '') {
             return ['ok' => false, 'error' => 'Error de red contra admin DTE: ' . $curlError, 'http' => $http];

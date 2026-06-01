@@ -602,7 +602,6 @@ final class ProductoService
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         $data = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
 
         if ($httpCode === 200 && $data !== false) {
             $tmpPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'download_' . uniqid() . '.jpg';

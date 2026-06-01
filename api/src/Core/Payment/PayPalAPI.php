@@ -53,7 +53,6 @@ class PayPalAPI
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
-        curl_close($ch);
 
         if ($resp === false) {
             throw new PayPalException("cURL PayPal token: {$err}");
@@ -126,7 +125,6 @@ class PayPalAPI
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
-        curl_close($ch);
 
         if ($resp === false) {
             throw new PayPalException("cURL PayPal createOrder: {$err}");
@@ -180,7 +178,6 @@ class PayPalAPI
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
-        curl_close($ch);
 
         if ($resp === false) {
             throw new PayPalException("cURL PayPal capture: {$err}");

@@ -75,7 +75,6 @@ class FlowAPI
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
-        curl_close($ch);
 
         if ($resp === false) {
             throw new FlowException("cURL Flow: {$err}");
