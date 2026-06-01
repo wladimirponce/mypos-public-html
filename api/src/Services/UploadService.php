@@ -176,17 +176,7 @@ final class UploadService
         $this->validateUpload($file);
         $tmpName = (string) $file['tmp_name'];
         $pfxContent = file_get_contents($tmpName);
-        
-        $certs = [];
-        if (!openssl_pkcs12_read($pfxContent, $certs, $password)) {
-            $sslErrors = [];
-            while ($err = openssl_error_string()) {
-                $sslErrors[] = $err;
-            }
-            $errorMsg = implode('; ', $sslErrors);
-            error_log("UploadService: openssl_pkcs12_read failed for company {$empresaId}. Errors: " . $errorMsg);
-            throw new HttpException('Contraseña incorrecta, certificado inválido o algoritmo no soportado. Detalles OpenSSL: ' . $errorMsg, 422);
-        }
+        $certs = $this->readPkcs12($pfxContent, $password, $empresaId);
         
         // Asumiendo que es válido, lo subimos
         $stored = $this->storeFile($empresaId, $userId, 'certificados', $file, [
@@ -245,12 +235,13 @@ final class UploadService
         $password = (string) ($metadata['password_certificado'] ?? '');
 
         $pfxContent = file_get_contents($absolutePath);
-        $certs = [];
-        if (!openssl_pkcs12_read($pfxContent, $certs, $password)) {
+        try {
+            $certs = $this->readPkcs12($pfxContent, $password, $empresaId);
+        } catch (HttpException $exception) {
             return [
                 'registrado' => true,
                 'valido' => false,
-                'mensaje' => 'No fue posible abrir el certificado digital (contraseña incorrecta o archivo dañado).',
+                'mensaje' => $exception->getMessage(),
                 'nombre_original' => (string) $file['nombre_original'],
                 'created_at' => (string) $file['created_at'],
             ];
@@ -465,6 +456,68 @@ final class UploadService
         }
 
         return $value;
+    }
+
+    /**
+     * PFX antiguos del SII suelen venir con RC2/3DES. En OpenSSL 3 eso exige
+     * provider legacy; sin el provider, el error real es "unsupported", no clave mala.
+     */
+    private function readPkcs12(string $pfxContent, string $password, int $empresaId): array
+    {
+        $this->configureOpenSslLegacyProvider();
+        $this->drainOpenSslErrors();
+
+        $certs = [];
+        if (openssl_pkcs12_read($pfxContent, $certs, $password)) {
+            return $certs;
+        }
+
+        $errors = $this->drainOpenSslErrors();
+        $errorMsg = implode('; ', $errors);
+        error_log("UploadService: openssl_pkcs12_read failed for company {$empresaId}. Errors: " . $errorMsg);
+
+        if ($this->isOpenSslUnsupportedAlgorithm($errors)) {
+            throw new HttpException(
+                'El certificado usa cifrado legacy del SII (RC2/3DES) y el servidor no tiene habilitado el provider legacy de OpenSSL. La clave puede ser correcta; se debe activar OpenSSL legacy en el hosting o reexportar el PFX con cifrado moderno.',
+                422
+            );
+        }
+
+        throw new HttpException('Contraseña incorrecta o certificado digital inválido.', 422);
+    }
+
+    private function configureOpenSslLegacyProvider(): void
+    {
+        $configPath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'openssl-legacy.cnf';
+        if (is_file($configPath)) {
+            putenv('OPENSSL_CONF=' . $configPath);
+            $_ENV['OPENSSL_CONF'] = $configPath;
+            $_SERVER['OPENSSL_CONF'] = $configPath;
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function drainOpenSslErrors(): array
+    {
+        $errors = [];
+        while (($error = openssl_error_string()) !== false) {
+            $errors[] = $error;
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param list<string> $errors
+     */
+    private function isOpenSslUnsupportedAlgorithm(array $errors): bool
+    {
+        $joined = strtolower(implode(' ', $errors));
+        return str_contains($joined, 'unsupported')
+            || str_contains($joined, 'rc2')
+            || str_contains($joined, 'inner_evp_generic_fetch');
     }
 
     private function storageBase(): string

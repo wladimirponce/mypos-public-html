@@ -11,6 +11,10 @@ RewriteRule ^(src|vendor|storage|database)(/|$) - [F,L]
 # JWT: preservar el header Authorization para que PHP pueda leerlo
 SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
 
+# PFX antiguos del SII pueden venir cifrados con RC2/3DES.
+# OpenSSL 3 requiere activar provider legacy para validarlos.
+SetEnv OPENSSL_CONF "/home/zylajdcb/public_html/api/openssl-legacy.cnf"
+
 # Acceso directo a instalar.php (solo necesario en el primer despliegue,
 # eliminar public/instalar.php del servidor una vez instalada la BD)
 RewriteRule ^instalar\.php$ public/instalar.php [L]
