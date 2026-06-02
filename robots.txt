@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /$
+Allow: /img/
+Allow: /assets/
+Disallow: /app
+Disallow: /admin
+Disallow: /api
+
+Sitemap: https://www.mypos.cl/sitemap.xml

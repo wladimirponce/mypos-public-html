@@ -14,3 +14,5 @@ deployment:
     - /bin/cp manifest.webmanifest $DEPLOYPATH/manifest.webmanifest
     - /bin/cp sw.js $DEPLOYPATH/sw.js
     - /bin/cp vite.svg $DEPLOYPATH/vite.svg
+    - /bin/cp robots.txt $DEPLOYPATH/robots.txt
+    - /bin/cp sitemap.xml $DEPLOYPATH/sitemap.xml

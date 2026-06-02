@@ -17,9 +17,9 @@ if (file_exists($autoloadProd)) {
 
 // Configuración
 $verify_token = 'AGENTIKA-MYPOS';
-$access_token = 'EAAVtlSjFmaoBQ7ekBa03OgsdDB6ZCYiQnERrvLIeRNeSOZCZBwQ3BkmJMZA76cST22aJRV75ydBbbfjzdh1JUwOHdI8kvmhUZCMYFaZAHakVdZBMVZAMySkcvjZAwJnTYZAIy7hwE1KZCeZBUadJiLoySkw30b3ypo0ZBWdcxm0Bcufx7VzsRp7DLmyjTw3o80oogHwZDZD';
-$api_url = 'https://graph.facebook.com/v24.0/958843943971859/messages';
-$gemini_api_key = 'AIzaSyC6FvENHDtsxZ_C6e4lWLH35r7riuAFowE'; // TODO: Reemplazar con la API Key real
+$access_token = 'EAAU0ImqRHX8BRtSZAqZBQXm4z6HAaAFTdUbAZClHUpYtKd7hVgNYLZC05HnFvwN0npJZCL9C89NHuyygMkLhCw1NPY6wgXCpNW3l60ezG2Pze1Y5qy8GKktkrgrJw34oOa2IV8QPHgHslmkctkVXaHrDCYcBSNZAFUQkmh5FJAj0ppceYuczYj21Nuhe4IRZBdZBbskfmcQd4XBC8fP1E5Qce5QrZBGDl4XoqnkUEyLPkjZCqY5GoyA2pPYm2cbF7xbMdhJDSPq9maDvhzRJn27vnysmg0ZBQrZAXJg2JlMZD';
+$api_url = 'https://graph.facebook.com/v25.0/1181492205043206/messages';
+$gemini_api_key = 'AIzaSyDhozy7FKElAl-kkrIAWAZW7r076GEm3O8'; // TODO: Reemplazar con la API Key real
 
 // Manejo de errores global
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
@@ -166,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $gemini_context  = stream_context_create($gemini_options);
             $gemini_response_raw = file_get_contents($gemini_endpoint, false, $gemini_context);
             
-            $aiResponse = "Lo siento, en este momento no puedo procesar tu solicitud. Por favor, intenta de nuevo más tarde www.mypos.cl";
+            $aiResponse = "Lo siento, en este momento no puedo procesar tu solicitud. Por favor, intenta contactarnos más tarde o visítanos en www.mypos.cl";
             
             if ($gemini_response_raw) {
                 $gemini_data = json_decode($gemini_response_raw, true);
