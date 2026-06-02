@@ -27,9 +27,8 @@ $tableExists = static function (PDO $pdo, string $table): bool {
     return (int)$stmt->fetchColumn() > 0;
 };
 
-$hasCentralCafSchema = $tableExists($pdo, 'cafs')
-    && $tableExists($pdo, 'caf_consumos')
-    && $tableExists($pdo, 'caf_consumo_medio');
+$hasCentralCafSchema = ($tableExists($pdo, 'cafs') && $tableExists($pdo, 'caf_consumos') && $tableExists($pdo, 'caf_consumo_medio'))
+    || ($tableExists($pdo, 'caf_archivos') && $tableExists($pdo, 'folios_consumidos') && $tableExists($pdo, 'folios_asignaciones'));
 
 if (!$hasCentralCafSchema) {
     $hasSiiCafSchema = $tableExists($pdo, 'sii_caf') && $tableExists($pdo, 'sii_folio_consumo');
@@ -214,27 +213,93 @@ $historial = $svc->historialConsumo($filtrosHist);
 
 $pdo = Database::getInstance();
 
-$cafsPorTipo = $pdo->query("
-    SELECT id, tipo_dte, rut_emisor, sucursal_id, folio_desde, folio_hasta,
-           folio_actual, agotado, origen, fecha_subida,
-           (folio_hasta - folio_actual + 1) AS restantes
-    FROM cafs
-    ORDER BY tipo_dte, sucursal_id IS NULL DESC, folio_desde
-")->fetchAll(PDO::FETCH_ASSOC);
+$useLegacyTables = ($tableExists($pdo, 'cafs') && $tableExists($pdo, 'caf_consumos') && $tableExists($pdo, 'caf_consumo_medio'));
 
-$sucursales = [];
-try {
-    $sucursales = $pdo->query(
-        "SELECT id_sucursal, nombre FROM dim_sucursal ORDER BY nombre"
-    )->fetchAll(PDO::FETCH_ASSOC);
-} catch (Throwable $_) {
-    $sucursales = $pdo->query("
-        SELECT DISTINCT sucursal_id AS id_sucursal, sucursal_id AS nombre
-        FROM caf_consumos
-        UNION
-        SELECT DISTINCT sucursal_id AS id_sucursal, sucursal_id AS nombre
-        FROM cafs WHERE sucursal_id IS NOT NULL
+if ($useLegacyTables) {
+    $cafsPorTipo = $pdo->query("
+        SELECT id, tipo_dte, rut_emisor, sucursal_id, folio_desde, folio_hasta,
+               folio_actual, agotado, origen, fecha_subida,
+               (folio_hasta - folio_actual + 1) AS restantes
+        FROM cafs
+        ORDER BY tipo_dte, sucursal_id IS NULL DESC, folio_desde
     ")->fetchAll(PDO::FETCH_ASSOC);
+
+    $sucursales = [];
+    try {
+        $sucursales = $pdo->query(
+            "SELECT id_sucursal, nombre FROM dim_sucursal ORDER BY nombre"
+        )->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $_) {
+        $sucursales = $pdo->query("
+            SELECT DISTINCT sucursal_id AS id_sucursal, sucursal_id AS nombre
+            FROM caf_consumos
+            UNION
+            SELECT DISTINCT sucursal_id AS id_sucursal, sucursal_id AS nombre
+            FROM cafs WHERE sucursal_id IS NOT NULL
+        ")->fetchAll(PDO::FETCH_ASSOC);
+    }
+} else {
+    // MyPOS SaaS mode: union allocations and pool central cafs
+    $sqlSaaS = "
+        SELECT fa.id,
+               CASE fa.tipo_documento
+                   WHEN 'FACTURA' THEN 33
+                   WHEN 'BOLETA' THEN 39
+                   WHEN 'GUIA_DESPACHO' THEN 52
+                   WHEN 'NOTA_CREDITO' THEN 61
+                   WHEN 'NOTA_DEBITO' THEN 56
+                   ELSE 39
+               END AS tipo_dte,
+               ca.rut_emisor,
+               s.nombre AS sucursal_id,
+               fa.folio_desde,
+               fa.folio_hasta,
+               fa.folio_actual,
+               CASE WHEN fa.estado = 'AGOTADA' THEN 1 ELSE 0 END AS agotado,
+               'CENTRAL' AS origen,
+               fa.created_at AS fecha_subida,
+               (fa.folio_hasta - fa.folio_actual + 1) AS restantes
+        FROM folios_asignaciones fa
+        INNER JOIN caf_archivos ca ON ca.id = fa.caf_id
+        INNER JOIN sucursales s ON s.id = fa.sucursal_id
+        WHERE ca.estado = 'ACTIVO'
+        
+        UNION ALL
+        
+        SELECT ca.id,
+               CASE ca.tipo_documento
+                   WHEN 'FACTURA' THEN 33
+                   WHEN 'BOLETA' THEN 39
+                   WHEN 'GUIA_DESPACHO' THEN 52
+                   WHEN 'NOTA_CREDITO' THEN 61
+                   WHEN 'NOTA_DEBITO' THEN 56
+                   ELSE 39
+               END AS tipo_dte,
+               ca.rut_emisor,
+               NULL AS sucursal_id,
+               (COALESCE(max_fa.max_hasta, ca.folio_desde - 1) + 1) AS folio_desde,
+               ca.folio_hasta,
+               (COALESCE(max_fa.max_hasta, ca.folio_desde - 1) + 1) AS folio_actual,
+               CASE WHEN ca.estado = 'AGOTADO' THEN 1 ELSE 0 END AS agotado,
+               'CENTRAL' AS origen,
+               ca.created_at AS fecha_subida,
+               (ca.folio_hasta - COALESCE(max_fa.max_hasta, ca.folio_desde - 1)) AS restantes
+        FROM caf_archivos ca
+        LEFT JOIN (
+            SELECT caf_id, MAX(folio_hasta) AS max_hasta
+            FROM folios_asignaciones
+            GROUP BY caf_id
+        ) max_fa ON max_fa.caf_id = ca.id
+        WHERE ca.estado = 'ACTIVO'
+          AND COALESCE(max_fa.max_hasta, ca.folio_desde - 1) < ca.folio_hasta
+          
+        ORDER BY tipo_dte, sucursal_id IS NULL DESC, folio_desde
+    ";
+    $cafsPorTipo = $pdo->query($sqlSaaS)->fetchAll(PDO::FETCH_ASSOC);
+
+    $sucursales = $pdo->query(
+        "SELECT id AS id_sucursal, nombre FROM sucursales WHERE activo = 1 ORDER BY nombre"
+    )->fetchAll(PDO::FETCH_ASSOC);
 }
 
 // Folios en pool central por tipo
