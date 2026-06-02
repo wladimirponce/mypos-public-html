@@ -9,37 +9,67 @@ use Exception;
 
 /**
  * Gestión de la cola de DTEs generados localmente en los POS Android.
- *
- * Flujo:
- *   1. APK genera TED + imprime boleta SIN internet (acción local)
- *   2. APK llama api.php?action=dte_recibir → recibirDte() inserta en cola
- *   3. Cron / api?action=dte_cola_procesar → procesarPendientes() para cada
- *      item llama generateDTE() + sendDTE() en api.php y actualiza estado
- *
- * El servidor usa el mismo CAF (guardado en tabla `cafs`) para reconstruir
- * el DTE XML completo con el folio ya consumido, y lo transmite al SII.
  */
 class DteLocalQueueManager
 {
     private PDO $pdo;
+    private bool $useLegacyTable = false;
 
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? Database::getInstance();
+        try {
+            $stmt = $this->pdo->query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'dte_local_queue' LIMIT 1");
+            $this->useLegacyTable = (bool)$stmt->fetchColumn();
+        } catch (Exception $e) {
+            $this->useLegacyTable = false;
+        }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  RECIBIR — persiste un DTE enviado por un APK
-    // ─────────────────────────────────────────────────────────────────────────
+    private function mapTipoDteToEnum(int $tipo): string
+    {
+        switch ($tipo) {
+            case 33:
+            case 34:
+                return 'FACTURA';
+            case 39:
+            case 41:
+                return 'BOLETA';
+            case 52:
+                return 'GUIA_DESPACHO';
+            case 61:
+                return 'NOTA_CREDITO';
+            case 56:
+                return 'NOTA_DEBITO';
+            default:
+                return 'BOLETA';
+        }
+    }
 
-    /**
-     * @param array $d  Campos del DteLocalRequest del APK:
-     *   tipo (int), folio (int), sucursal_id, fecha_emision, rut_receptor,
-     *   mnt_total (int), ted_xml (string), items (array), maquina_id? (string)
-     * @return array{ok:bool, id?:int, duplicado?:bool, error?:string}
-     */
+    private function mapEnumToTipoDte(string $enum): int
+    {
+        switch (strtoupper($enum)) {
+            case 'FACTURA':
+                return 33;
+            case 'BOLETA':
+                return 39;
+            case 'GUIA_DESPACHO':
+                return 52;
+            case 'NOTA_CREDITO':
+                return 61;
+            case 'NOTA_DEBITO':
+                return 56;
+            default:
+                return 39;
+        }
+    }
+
     public function recibirDte(array $d): array
     {
+        if (!$this->useLegacyTable) {
+            return ['ok' => false, 'error' => 'API de cola local deshabilitada en modo SaaS'];
+        }
+
         $tipo       = (int)($d['tipo']         ?? 0);
         $folio      = (int)($d['folio']        ?? 0);
         $sucursal   = trim((string)($d['sucursal_id']   ?? ''));
@@ -50,7 +80,6 @@ class DteLocalQueueManager
         $items      = $d['items'] ?? [];
         $maquinaId  = trim((string)($d['maquina_id']    ?? '')) ?: null;
 
-        // Validaciones mínimas
         if ($tipo <= 0 || $folio <= 0 || $sucursal === '' || $tedXml === '') {
             return ['ok' => false, 'error' => 'Faltan campos obligatorios: tipo, folio, sucursal_id, ted_xml'];
         }
@@ -58,7 +87,6 @@ class DteLocalQueueManager
             return ['ok' => false, 'error' => 'fecha_emision debe ser YYYY-MM-DD'];
         }
 
-        // Calcular neto/IVA para boletas afectas
         $mntNeto = 0;
         $mntIva  = 0;
         if (in_array($tipo, [39, 33, 34], true) && $mntTotal > 0) {
@@ -85,10 +113,6 @@ class DteLocalQueueManager
             ]);
             $queueId = (int)$this->pdo->lastInsertId();
 
-            // INSERT nuevo (no duplicado): aplicar la venta UNA sola vez —
-            // descuento de stock + asiento en hechos_ventas — dentro de la
-            // misma transacción. La UNIQUE KEY (tipo_dte, folio) garantiza
-            // que un reintento no la vuelva a aplicar.
             $this->aplicarVenta($tipo, $folio, $sucursal, $items);
 
             $this->pdo->commit();
@@ -97,8 +121,6 @@ class DteLocalQueueManager
         } catch (\PDOException $e) {
             if ($this->pdo->inTransaction()) $this->pdo->rollBack();
 
-            // UNIQUE KEY (tipo_dte, folio) → duplicado idempotente:
-            // el documento (y su venta) ya se procesaron en un intento previo.
             if (str_contains($e->getMessage(), 'Duplicate entry')) {
                 $row = $this->pdo->prepare(
                     "SELECT id FROM dte_local_queue WHERE tipo_dte=? AND folio=? LIMIT 1"
@@ -111,17 +133,6 @@ class DteLocalQueueManager
         }
     }
 
-    /**
-     * Descuenta stock y registra el asiento de venta en hechos_ventas.
-     *
-     * Se ejecuta dentro de la transacción de recibirDte(), así que es atómica
-     * con el encolado del DTE. Best-effort por línea: un item con problema
-     * (id inexistente, etc.) se registra en el log y NO aborta el resto ni el
-     * encolado del documento — la emisión nunca se bloquea por un tema de stock.
-     *
-     * Los items llegan con las claves del APK (DteDetalle):
-     *   NmbItem, QtyItem, PrcItem, DescuentoPct, IdProducto
-     */
     private function aplicarVenta(int $tipo, int $folio, string $sucursal, array $items): void
     {
         if (empty($items)) return;
@@ -174,64 +185,108 @@ class DteLocalQueueManager
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  CONSULTAR — estado de la cola
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Resumen de la cola por estado.
-     * Si $sucursalId es null, devuelve totales globales de todas las sucursales.
-     */
     public function estadoCola(?string $sucursalId = null): array
     {
-        $where  = $sucursalId ? "WHERE sucursal_id = ?" : "";
-        $params = $sucursalId ? [$sucursalId] : [];
+        if ($this->useLegacyTable) {
+            $where  = $sucursalId ? "WHERE sucursal_id = ?" : "";
+            $params = $sucursalId ? [$sucursalId] : [];
 
-        $st = $this->pdo->prepare("
-            SELECT estado, COUNT(*) AS cantidad,
-                   MAX(fecha_creacion) AS ultimo,
-                   SUM(mnt_total) AS monto_total
-            FROM dte_local_queue $where
-            GROUP BY estado
-        ");
-        $st->execute($params);
-        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            $st = $this->pdo->prepare("
+                SELECT estado, COUNT(*) AS cantidad,
+                       MAX(fecha_creacion) AS ultimo,
+                       SUM(mnt_total) AS monto_total
+                FROM dte_local_queue $where
+                GROUP BY estado
+            ");
+            $st->execute($params);
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
-        $resumen = ['pendiente' => 0, 'procesando' => 0,
-                    'enviado' => 0, 'error' => 0, 'dropped' => 0];
-        foreach ($rows as $r) {
-            $resumen[$r['estado']] = (int)$r['cantidad'];
+            $resumen = ['pendiente' => 0, 'procesando' => 0,
+                        'enviado' => 0, 'error' => 0, 'dropped' => 0];
+            foreach ($rows as $r) {
+                $resumen[$r['estado']] = (int)$r['cantidad'];
+            }
+
+            $errSt = $this->pdo->prepare("
+                SELECT id, tipo_dte, folio, sucursal_id, ultimo_error, intentos, estado, fecha_proceso
+                FROM dte_local_queue
+                WHERE ultimo_error IS NOT NULL AND ultimo_error <> ''
+                  " . ($sucursalId ? "AND sucursal_id = ?" : "") . "
+                ORDER BY fecha_proceso DESC
+                LIMIT 5
+            ");
+            $errSt->execute($sucursalId ? [$sucursalId] : []);
+            $ultErrores = $errSt->fetchAll(PDO::FETCH_ASSOC);
+
+            return [
+                'ok'         => true,
+                'resumen'    => $resumen,
+                'ult_errores'=> $ultErrores,
+            ];
+        } else {
+            // MyPOS SaaS mode: map to folios_consumidos
+            $where = $sucursalId ? "WHERE fc.sucursal_id = ?" : "";
+            $params = $sucursalId ? [$sucursalId] : [];
+
+            $stPend = $this->pdo->prepare("SELECT COUNT(*) FROM folios_consumidos fc WHERE fc.sync_status = 'PENDING' " . ($sucursalId ? "AND fc.sucursal_id = ?" : ""));
+            $stPend->execute($params);
+            $pendiente = (int)$stPend->fetchColumn();
+
+            $stEnv = $this->pdo->prepare("SELECT COUNT(*) FROM folios_consumidos fc WHERE fc.sync_status = 'SYNCED' AND fc.estado IN ('ENVIADO_SII', 'ACEPTADO_SII') " . ($sucursalId ? "AND fc.sucursal_id = ?" : ""));
+            $stEnv->execute($params);
+            $enviado = (int)$stEnv->fetchColumn();
+
+            $stErr = $this->pdo->prepare("SELECT COUNT(*) FROM folios_consumidos fc WHERE fc.sync_status = 'ERROR' " . ($sucursalId ? "AND fc.sucursal_id = ?" : ""));
+            $stErr->execute($params);
+            $error = (int)$stErr->fetchColumn();
+
+            $stDrop = $this->pdo->prepare("SELECT COUNT(*) FROM folios_consumidos fc WHERE fc.estado = 'ANULADO' " . ($sucursalId ? "AND fc.sucursal_id = ?" : ""));
+            $stDrop->execute($params);
+            $dropped = (int)$stDrop->fetchColumn();
+
+            $resumen = [
+                'pendiente' => $pendiente,
+                'procesando' => 0,
+                'enviado' => $enviado,
+                'error' => $error,
+                'dropped' => $dropped
+            ];
+
+            $ultErrores = [];
+            try {
+                $st = $this->pdo->prepare("
+                    SELECT fc.id,
+                           CASE fc.tipo_documento
+                               WHEN 'FACTURA' THEN 33
+                               WHEN 'BOLETA' THEN 39
+                               WHEN 'GUIA_DESPACHO' THEN 52
+                               WHEN 'NOTA_CREDITO' THEN 61
+                               WHEN 'NOTA_DEBITO' THEN 56
+                               ELSE 39
+                           END AS tipo_dte,
+                           fc.folio, fc.sucursal_id, 'Error de sincronización con SII' AS ultimo_error, 
+                           1 AS intentos, 'error' AS estado, fc.updated_at AS fecha_proceso
+                    FROM folios_consumidos fc
+                    WHERE fc.sync_status = 'ERROR'
+                      " . ($sucursalId ? "AND fc.sucursal_id = ?" : "") . "
+                    ORDER BY fc.updated_at DESC LIMIT 5
+                ");
+                $st->execute($params);
+                $ultErrores = $st->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Exception $_) {}
+
+            return [
+                'ok' => true,
+                'resumen' => $resumen,
+                'ult_errores' => $ultErrores
+            ];
         }
-
-        // Últimos errores para diagnóstico.
-        // Incluye los documentos que fallaron y volvieron a 'pendiente' para
-        // reintento (marcarError los deja en 'pendiente' hasta agotar intentos):
-        // se filtra por ultimo_error presente, no por estado.
-        $errSt = $this->pdo->prepare("
-            SELECT id, tipo_dte, folio, sucursal_id, ultimo_error, intentos, estado, fecha_proceso
-            FROM dte_local_queue
-            WHERE ultimo_error IS NOT NULL AND ultimo_error <> ''
-              " . ($sucursalId ? "AND sucursal_id = ?" : "") . "
-            ORDER BY fecha_proceso DESC
-            LIMIT 5
-        ");
-        $errSt->execute($sucursalId ? [$sucursalId] : []);
-        $ultErrores = $errSt->fetchAll(PDO::FETCH_ASSOC);
-
-        return [
-            'ok'         => true,
-            'resumen'    => $resumen,
-            'ult_errores'=> $ultErrores,
-        ];
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  PROCESAR — usado por api.php?action=dte_cola_procesar
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /** Devuelve hasta $max items pendientes listos para procesar */
     public function getPendientes(int $max = 20): array
     {
+        if (!$this->useLegacyTable) return [];
+
         $st = $this->pdo->prepare("
             SELECT * FROM dte_local_queue
             WHERE estado = 'pendiente' AND intentos < 5
@@ -244,6 +299,7 @@ class DteLocalQueueManager
 
     public function marcarProcesando(int $id): void
     {
+        if (!$this->useLegacyTable) return;
         $this->pdo->prepare(
             "UPDATE dte_local_queue SET estado='procesando', fecha_proceso=NOW() WHERE id=?"
         )->execute([$id]);
@@ -251,6 +307,7 @@ class DteLocalQueueManager
 
     public function marcarEnviado(int $id, string $trackId): void
     {
+        if (!$this->useLegacyTable) return;
         $this->pdo->prepare(
             "UPDATE dte_local_queue SET estado='enviado', track_id=?, fecha_proceso=NOW() WHERE id=?"
         )->execute([$trackId, $id]);
@@ -258,9 +315,7 @@ class DteLocalQueueManager
 
     public function marcarError(int $id, string $error): void
     {
-        // 5 intentos → dropped; menos → pendiente (se reintenta).
-        // NO se trunca el mensaje: la columna `ultimo_error` es TEXT (64KB)
-        // y los mensajes completos del SII son necesarios para diagnosticar.
+        if (!$this->useLegacyTable) return;
         $this->pdo->prepare("
             UPDATE dte_local_queue
             SET estado     = IF(intentos >= 4, 'dropped', 'pendiente'),
@@ -271,22 +326,18 @@ class DteLocalQueueManager
         ")->execute([$error, $id]);
     }
 
-    /** Devuelve un item específico de la cola por id, o null si no existe. */
     public function getById(int $id): ?array
     {
+        if (!$this->useLegacyTable) return null;
         $st = $this->pdo->prepare("SELECT * FROM dte_local_queue WHERE id = ? LIMIT 1");
         $st->execute([$id]);
         $row = $st->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
     }
 
-    /**
-     * Resetea contador de intentos y vuelve a 'pendiente' un documento.
-     * Usado en reenvío manual desde la UI: el operador interviene
-     * conscientemente, así que se ignora el límite de intentos automático.
-     */
     public function resetParaReintento(int $id): void
     {
+        if (!$this->useLegacyTable) return;
         $this->pdo->prepare("
             UPDATE dte_local_queue
             SET estado='pendiente', intentos=0, ultimo_error=NULL, fecha_proceso=NULL
@@ -294,35 +345,53 @@ class DteLocalQueueManager
         ")->execute([$id]);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  REPORTE — usado por el módulo pos_urgencia
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Resumen global para el dashboard: cola + distribución por sucursal.
-     */
     public function resumenGlobal(): array
     {
-        $estado = $this->estadoCola();
+        if ($this->useLegacyTable) {
+            $estado = $this->estadoCola();
 
-        $porSucursal = $this->pdo->query("
-            SELECT sucursal_id,
-                   SUM(CASE WHEN estado='pendiente'   THEN 1 ELSE 0 END) AS pendiente,
-                   SUM(CASE WHEN estado='error'       THEN 1 ELSE 0 END) AS con_error,
-                   SUM(CASE WHEN estado='dropped'     THEN 1 ELSE 0 END) AS dropped,
-                   SUM(CASE WHEN estado='enviado'     THEN 1 ELSE 0 END) AS enviado,
-                   COUNT(*) AS total,
-                   MAX(fecha_creacion) AS ultimo_recibido
-            FROM dte_local_queue
-            GROUP BY sucursal_id
-            ORDER BY sucursal_id
-        ")->fetchAll(PDO::FETCH_ASSOC);
+            $porSucursal = $this->pdo->query("
+                SELECT sucursal_id,
+                       SUM(CASE WHEN estado='pendiente'   THEN 1 ELSE 0 END) AS pendiente,
+                       SUM(CASE WHEN estado='error'       THEN 1 ELSE 0 END) AS con_error,
+                       SUM(CASE WHEN estado='dropped'     THEN 1 ELSE 0 END) AS dropped,
+                       SUM(CASE WHEN estado='enviado'     THEN 1 ELSE 0 END) AS enviado,
+                       COUNT(*) AS total,
+                       MAX(fecha_creacion) AS ultimo_recibido
+                FROM dte_local_queue
+                GROUP BY sucursal_id
+                ORDER BY sucursal_id
+            ")->fetchAll(PDO::FETCH_ASSOC);
 
-        return [
-            'ok'          => true,
-            'resumen'     => $estado['resumen'],
-            'por_sucursal'=> $porSucursal,
-            'ult_errores' => $estado['ult_errores'],
-        ];
+            return [
+                'ok'          => true,
+                'resumen'     => $estado['resumen'],
+                'por_sucursal'=> $porSucursal,
+                'ult_errores' => $estado['ult_errores'],
+            ];
+        } else {
+            $estado = $this->estadoCola();
+            
+            // Group by sucursal
+            $porSucursal = $this->pdo->query("
+                SELECT fc.sucursal_id,
+                       SUM(CASE WHEN fc.sync_status='PENDING' THEN 1 ELSE 0 END) AS pendiente,
+                       SUM(CASE WHEN fc.sync_status='ERROR'   THEN 1 ELSE 0 END) AS con_error,
+                       SUM(CASE WHEN fc.estado='ANULADO'      THEN 1 ELSE 0 END) AS dropped,
+                       SUM(CASE WHEN fc.sync_status='SYNCED' AND fc.estado IN ('ENVIADO_SII', 'ACEPTADO_SII') THEN 1 ELSE 0 END) AS enviado,
+                       COUNT(*) AS total,
+                       MAX(fc.created_at) AS ultimo_recibido
+                FROM folios_consumidos fc
+                GROUP BY fc.sucursal_id
+                ORDER BY fc.sucursal_id
+            ")->fetchAll(PDO::FETCH_ASSOC);
+
+            return [
+                'ok'          => true,
+                'resumen'     => $estado['resumen'],
+                'por_sucursal'=> $porSucursal,
+                'ult_errores' => $estado['ult_errores'],
+            ];
+        }
     }
 }

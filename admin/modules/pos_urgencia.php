@@ -53,21 +53,27 @@ if ($dbOk) {
     try {
         $pdo = Database::getInstance();
 
-        if ($tableExists($pdo, 'dte_local_queue')) {
+        $hasLegacyQueue = $tableExists($pdo, 'dte_local_queue');
+        $hasSaaSQueue   = $tableExists($pdo, 'folios_consumidos');
+        if ($hasLegacyQueue || $hasSaaSQueue) {
             $queueMgr = new \App\Services\DteLocalQueueManager();
             $queueData = $queueMgr->resumenGlobal();
         } else {
             $schemaWarnings[] = 'Falta dte_local_queue: la cola local POS se muestra en cero.';
         }
 
-        if ($tableExists($pdo, 'folios_alerta')) {
+        $hasLegacyAlerta = $tableExists($pdo, 'folios_alerta');
+        $hasSaaSAlerta   = $tableExists($pdo, 'folios_asignaciones');
+        if ($hasLegacyAlerta || $hasSaaSAlerta) {
             $alertaMgr = new \App\Services\FoliosAlertaManager();
             $alertaData = $alertaMgr->urgenciaGlobal();
         } else {
             $schemaWarnings[] = 'Falta folios_alerta: no hay reportes de stock POS para mostrar.';
         }
 
-        if ($tableExists($pdo, 'cafs') && $tableExists($pdo, 'caf_consumos')) {
+        $hasLegacyCaf = $tableExists($pdo, 'cafs') && $tableExists($pdo, 'caf_consumos');
+        $hasSaaSCaf   = $tableExists($pdo, 'caf_archivos');
+        if ($hasLegacyCaf || $hasSaaSCaf) {
             $cafMgr = new \App\Services\CafCentralManager();
             $pedidoOpt = $cafMgr->calcularPedidoOptimo(60, 1.3);
         } else {
