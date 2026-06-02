@@ -14,6 +14,128 @@
 use App\Services\CafCentralManager;
 use App\Core\Database;
 
+$pdo = Database::getInstance();
+
+$tableExists = static function (PDO $pdo, string $table): bool {
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*)
+         FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = ?'
+    );
+    $stmt->execute([$table]);
+    return (int)$stmt->fetchColumn() > 0;
+};
+
+$hasCentralCafSchema = $tableExists($pdo, 'cafs')
+    && $tableExists($pdo, 'caf_consumos')
+    && $tableExists($pdo, 'caf_consumo_medio');
+
+if (!$hasCentralCafSchema) {
+    $hasSiiCafSchema = $tableExists($pdo, 'sii_caf') && $tableExists($pdo, 'sii_folio_consumo');
+    $foliosSii = [];
+
+    if ($hasSiiCafSchema) {
+        $foliosSii = $pdo->query(
+            "SELECT
+                c.id,
+                c.empresa_id,
+                e.rut,
+                e.razon_social,
+                c.tipo_dte,
+                c.folio_desde,
+                c.folio_hasta,
+                c.ambiente_sii,
+                c.fecha_autorizacion,
+                c.activo,
+                COALESCE(fc.consumidos, 0) AS consumidos,
+                GREATEST(c.folio_hasta - c.folio_desde + 1 - COALESCE(fc.consumidos, 0), 0) AS disponibles
+             FROM sii_caf c
+             LEFT JOIN sii_empresa e ON e.id = c.empresa_id
+             LEFT JOIN (
+                SELECT caf_id, COUNT(*) AS consumidos
+                FROM sii_folio_consumo
+                GROUP BY caf_id
+             ) fc ON fc.caf_id = c.id
+             ORDER BY c.creado_en DESC, c.id DESC"
+        )->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    $tiposNombre = [
+        33 => 'Factura', 34 => 'Factura Exenta', 39 => 'Boleta',
+        41 => 'Boleta Exenta', 52 => 'Guia Despacho', 56 => 'Nota Debito', 61 => 'Nota Credito',
+    ];
+
+    $totalDisponibles = 0;
+    foreach ($foliosSii as $folio) {
+        if ((int)$folio['activo'] === 1) $totalDisponibles += (int)$folio['disponibles'];
+    }
+    ?>
+    <div class="d-alert warning">
+        <i class="bi bi-exclamation-triangle"></i>
+        El panel centralizado por sucursal necesita las tablas legacy <strong>cafs</strong>,
+        <strong>caf_consumos</strong> y <strong>caf_consumo_medio</strong>. No se crean tablas automaticamente desde admin.
+        <?php if ($hasSiiCafSchema): ?>
+            Se muestra una vista de solo lectura usando <strong>sii_caf</strong>.
+        <?php endif; ?>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="d-card"><div class="d-card-body"><div class="text-muted small">CAFs SII</div><div class="h3 mb-0"><?= count($foliosSii) ?></div></div></div>
+        </div>
+        <div class="col-md-4">
+            <div class="d-card"><div class="d-card-body"><div class="text-muted small">Folios disponibles</div><div class="h3 mb-0"><?= number_format($totalDisponibles, 0, ',', '.') ?></div></div></div>
+        </div>
+        <div class="col-md-4">
+            <div class="d-card"><div class="d-card-body"><div class="text-muted small">Modo</div><div class="h5 mb-0">Solo lectura</div></div></div>
+        </div>
+    </div>
+
+    <div class="d-card">
+        <div class="d-card-header"><i class="bi bi-ticket-perforated"></i> CAFs registrados en SII</div>
+        <div class="d-card-body" style="padding:0">
+            <?php if (!$hasSiiCafSchema): ?>
+                <div style="padding:32px" class="text-muted">No existe el esquema SII de folios en esta base: faltan sii_caf o sii_folio_consumo.</div>
+            <?php elseif (!$foliosSii): ?>
+                <div style="padding:32px" class="text-muted">No hay CAFs registrados en sii_caf.</div>
+            <?php else: ?>
+                <table class="d-table">
+                    <thead>
+                        <tr>
+                            <th>Empresa</th>
+                            <th>Tipo DTE</th>
+                            <th>Rango</th>
+                            <th>Consumidos</th>
+                            <th>Disponibles</th>
+                            <th>Ambiente</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($foliosSii as $folio): ?>
+                            <tr>
+                                <td>
+                                    <strong><?= htmlspecialchars((string)($folio['razon_social'] ?? 'Sin razon social')) ?></strong><br>
+                                    <span class="text-muted small"><?= htmlspecialchars((string)($folio['rut'] ?? 'Sin RUT')) ?></span>
+                                </td>
+                                <td><?= htmlspecialchars($tiposNombre[(int)$folio['tipo_dte']] ?? ('DTE ' . $folio['tipo_dte'])) ?></td>
+                                <td><?= number_format((int)$folio['folio_desde'], 0, ',', '.') ?> - <?= number_format((int)$folio['folio_hasta'], 0, ',', '.') ?></td>
+                                <td><?= number_format((int)$folio['consumidos'], 0, ',', '.') ?></td>
+                                <td><?= number_format((int)$folio['disponibles'], 0, ',', '.') ?></td>
+                                <td><?= htmlspecialchars((string)$folio['ambiente_sii']) ?></td>
+                                <td><?= ((int)$folio['activo'] === 1) ? '<span class="d-badge prod">Activo</span>' : '<span class="d-badge danger">Inactivo</span>' ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+    return;
+}
+
 $svc = new CafCentralManager();
 $msg = $error = null;
 
