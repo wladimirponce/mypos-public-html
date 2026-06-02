@@ -161,8 +161,17 @@ if (isset($_POST['action']) && $_POST['action'] === 'desactivar' && $dbOk) {
 $dispositivos = [];
 $sucursales   = [];
 if ($dbOk) {
+    $hasDimSucursal = false;
+    try {
+        $stCheck = $db->query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'dim_sucursal' LIMIT 1");
+        $hasDimSucursal = (bool)$stCheck->fetchColumn();
+    } catch (Throwable $_) {}
+
     $empresaId = $_SESSION['active_empresa_id'] ?? null;
     if ($empresaId) {
+        $sucTable = $hasDimSucursal ? 'dim_sucursal' : 'sucursales';
+        $sucJoinCol = $hasDimSucursal ? 'id_sucursal' : 'id';
+
         $stDisp = $db->prepare(
             "SELECT d.id, d.sucursal_id, d.nombre, d.tipo,
                     d.token_activacion, d.token_usado, d.token_expira,
@@ -170,7 +179,7 @@ if ($dbOk) {
                     d.enrolado_en, d.ultimo_contacto, d.activo, d.creado_en,
                     COALESCE(s.nombre, CONCAT('Sucursal ', d.sucursal_id)) AS sucursal_nombre
                FROM sii_dispositivo d
-          LEFT JOIN dim_sucursal s ON s.id_sucursal = d.sucursal_id
+          LEFT JOIN {$sucTable} s ON s.{$sucJoinCol} = d.sucursal_id
               WHERE d.empresa_id = ?
               ORDER BY d.creado_en DESC"
         );
@@ -179,9 +188,19 @@ if ($dbOk) {
     }
 
     try {
-        $sucursales = $db->query(
-            "SELECT id_sucursal AS id, nombre FROM dim_sucursal ORDER BY nombre ASC"
-        )->fetchAll(PDO::FETCH_ASSOC);
+        if ($hasDimSucursal) {
+            $sucursales = $db->query(
+                "SELECT id_sucursal AS id, nombre FROM dim_sucursal ORDER BY nombre ASC"
+            )->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            if ($empresaId) {
+                $stSuc = $db->prepare("SELECT id, nombre FROM sucursales WHERE empresa_id = ? AND activo = 1 ORDER BY nombre ASC");
+                $stSuc->execute([$empresaId]);
+                $sucursales = $stSuc->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                $sucursales = $db->query("SELECT id, nombre FROM sucursales WHERE activo = 1 ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+            }
+        }
     } catch (Exception $_) {}
 }
 
