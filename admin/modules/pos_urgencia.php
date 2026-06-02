@@ -15,16 +15,64 @@ $queueData   = null;
 $alertaData  = null;
 $pedidoOpt   = null;
 $dbError     = null;
+$schemaWarnings = [];
+
+$queueData = [
+    'resumen' => ['pendiente' => 0, 'enviado' => 0, 'error' => 0, 'dropped' => 0],
+    'por_sucursal' => [],
+    'ult_errores' => [],
+];
+$alertaData = [
+    'urgencia_global' => 'desconocido',
+    'machines_critico' => 0,
+    'machines_bajo' => 0,
+    'machines_ok' => 0,
+    'machines_stale' => 0,
+    'alertas' => [],
+    'pedido_recomendado' => [],
+];
+$pedidoOpt = [
+    'ok' => true,
+    'sugerencias' => [],
+    'dias_proyeccion' => 60,
+    'factor_seguridad' => 1.3,
+];
+
+$tableExists = static function (PDO $pdo, string $table): bool {
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*)
+         FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = ?'
+    );
+    $stmt->execute([$table]);
+    return (int)$stmt->fetchColumn() > 0;
+};
 
 if ($dbOk) {
     try {
-        $queueMgr   = new \App\Services\DteLocalQueueManager();
-        $alertaMgr  = new \App\Services\FoliosAlertaManager();
-        $cafMgr     = new \App\Services\CafCentralManager();
+        $pdo = Database::getInstance();
 
-        $queueData  = $queueMgr->resumenGlobal();
-        $alertaData = $alertaMgr->urgenciaGlobal();
-        $pedidoOpt  = $cafMgr->calcularPedidoOptimo(60, 1.3);
+        if ($tableExists($pdo, 'dte_local_queue')) {
+            $queueMgr = new \App\Services\DteLocalQueueManager();
+            $queueData = $queueMgr->resumenGlobal();
+        } else {
+            $schemaWarnings[] = 'Falta dte_local_queue: la cola local POS se muestra en cero.';
+        }
+
+        if ($tableExists($pdo, 'folios_alerta')) {
+            $alertaMgr = new \App\Services\FoliosAlertaManager();
+            $alertaData = $alertaMgr->urgenciaGlobal();
+        } else {
+            $schemaWarnings[] = 'Falta folios_alerta: no hay reportes de stock POS para mostrar.';
+        }
+
+        if ($tableExists($pdo, 'cafs') && $tableExists($pdo, 'caf_consumos')) {
+            $cafMgr = new \App\Services\CafCentralManager();
+            $pedidoOpt = $cafMgr->calcularPedidoOptimo(60, 1.3);
+        } else {
+            $schemaWarnings[] = 'Faltan tablas CAF legacy: la recomendacion automatica de pedido queda desactivada.';
+        }
     } catch (\Exception $e) {
         $dbError = $e->getMessage();
     }
@@ -76,7 +124,15 @@ $labelNivel = fn(string $n) => match($n) {
 </div>
 
 <?php if ($dbError): ?>
-<div class="d--alert danger"><i class="bi bi-database-x"></i> Error DB: <?= htmlspecialchars($dbError) ?></div>
+<div class="d-alert danger"><i class="bi bi-database-x"></i> Error DB: <?= htmlspecialchars($dbError) ?></div>
+<?php endif; ?>
+
+<?php if ($schemaWarnings): ?>
+<div class="d-alert warning">
+    <i class="bi bi-exclamation-triangle"></i>
+    <?= htmlspecialchars(implode(' ', $schemaWarnings)) ?>
+    No se crean tablas automaticamente desde admin.
+</div>
 <?php endif; ?>
 
 <div class="row g-4">
