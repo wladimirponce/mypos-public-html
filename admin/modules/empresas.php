@@ -6,6 +6,12 @@ $empMsg = '';
 $empError = '';
 $empNewKey = '';
 
+$useSiiTables = false;
+try {
+    $stmt = $db->query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sii_empresa' LIMIT 1");
+    $useSiiTables = (bool)$stmt->fetchColumn();
+} catch (Exception $e) {}
+
 // Procesar creación
 if (isset($_POST['action']) && $_POST['action'] === 'create_empresa' && $dbOk) {
     try {
@@ -13,20 +19,51 @@ if (isset($_POST['action']) && $_POST['action'] === 'create_empresa' && $dbOk) {
         $rut = trim($_POST['rut']);
         $rs  = trim($_POST['razon_social']);
         
-        $stmt = $db->prepare("INSERT INTO sii_empresa (rut, razon_social, giro, acteco, direccion_origen, comuna_origen, ciudad_origen, fecha_resolucion, numero_resolucion, ambiente_default) VALUES (?, ?, ?, '[]', ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$rut, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '', $_POST['fecha_resol'] ?? '2014-01-01', $_POST['num_resol'] ?? '0', $_POST['ambiente']]);
-        $empresaId = $db->lastInsertId();
-        
-        $rawKey = 'sk_' . bin2hex(random_bytes(16));
-        $hash = hash('sha256', $rawKey);
-        $db->prepare("INSERT INTO sii_api_key (empresa_id, nombre, clave_hash) VALUES (?, 'Default', ?)")->execute([$empresaId, $hash]);
+        if ($useSiiTables) {
+            $stmt = $db->prepare("INSERT INTO sii_empresa (rut, razon_social, giro, acteco, direccion_origen, comuna_origen, ciudad_origen, fecha_resolucion, numero_resolucion, ambiente_default) VALUES (?, ?, ?, '[]', ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$rut, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '', $_POST['fecha_resol'] ?? '2014-01-01', $_POST['num_resol'] ?? '0', $_POST['ambiente']]);
+            $empresaId = $db->lastInsertId();
+            
+            $rawKey = 'sk_' . bin2hex(random_bytes(16));
+            $hash = hash('sha256', $rawKey);
+            $db->prepare("INSERT INTO sii_api_key (empresa_id, nombre, clave_hash) VALUES (?, 'Default', ?)")->execute([$empresaId, $hash]);
+            $empNewKey = $rawKey;
+        } else {
+            // Para MyPOS SaaS:
+            $stmt = $db->prepare("INSERT INTO empresas (rut, razon_social, nombre_fantasia, giro, direccion, comuna, ciudad, activo) VALUES (?, ?, ?, ?, ?, ?, ?, 1)");
+            $stmt->execute([$rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '']);
+            $empresaId = $db->lastInsertId();
+
+            // Insertar configuraciones necesarias de MyPOS
+            $stmtConf = $db->prepare("INSERT INTO empresa_configuracion (empresa_id, rut_empresa, razon_social, nombre_fantasia, giro, direccion, comuna, ciudad) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmtConf->execute([$empresaId, $rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '']);
+
+            $db->prepare("INSERT INTO empresa_configuracion_operativa (empresa_id) VALUES (?)")->execute([$empresaId]);
+
+            // Configuración DTE
+            $stmtDte = $db->prepare("INSERT INTO dte_configuracion (empresa_id, modo, ambiente, activo) VALUES (?, 'REAL', ?, 1)");
+            $stmtDte->execute([$empresaId, strtoupper($_POST['ambiente'])]);
+
+            $empNewKey = ''; // No se requiere API key en la tabla sii_api_key para MyPOS SaaS
+        }
         
         $db->commit();
         $empMsg = "Empresa '$rs' creada con éxito.";
-        $empNewKey = $rawKey;
         
         // Refrescar lista
-        $empresas = $db->query("SELECT id, rut, razon_social, ambiente_default, activo FROM sii_empresa WHERE activo = 1 ORDER BY razon_social")->fetchAll(PDO::FETCH_ASSOC);
+        if ($useSiiTables) {
+            $empresas = $db->query("SELECT id, rut, razon_social, ambiente_default, activo FROM sii_empresa WHERE activo = 1 ORDER BY razon_social")->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            $empresas = $db->query("
+                SELECT e.id, e.rut, e.razon_social,
+                       COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default,
+                       e.activo
+                FROM empresas e
+                LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id
+                WHERE e.activo = 1
+                ORDER BY e.razon_social
+            ")->fetchAll(PDO::FETCH_ASSOC);
+        }
     } catch (Exception $e) {
         $db->rollBack();
         $empError = $e->getMessage();

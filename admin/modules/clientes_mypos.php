@@ -29,11 +29,22 @@ $requiredMyposTables = [
     'documentos_emitidos',
 ];
 
-$requiredSiiTables = [
+$useSiiTables = false;
+try {
+    $stmt = $db->query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sii_empresa' LIMIT 1");
+    $useSiiTables = (bool)$stmt->fetchColumn();
+} catch (Exception $e) {}
+
+$requiredSiiTables = $useSiiTables ? [
     'sii_empresa',
     'sii_certificado',
     'sii_caf',
     'sii_folio_consumo',
+] : [
+    'empresas',
+    'archivos_subidos',
+    'caf_archivos',
+    'folios_consumidos',
 ];
 
 $missingMyposTables = [];
@@ -54,41 +65,80 @@ if ($missingMyposTables) {
     return;
 }
 
-$siiSelect = $hasSiiSchema
-    ? "se.id AS sii_empresa_id,
-        se.ambiente_default,
-        COALESCE(cert.certificados_activos, 0) AS certificados_activos,
-        COALESCE(caf.cafs_activos, 0) AS cafs_activos,
-        COALESCE(caf.folios_disponibles, 0) AS folios_disponibles,"
-    : "NULL AS sii_empresa_id,
-        NULL AS ambiente_default,
-        0 AS certificados_activos,
-        0 AS cafs_activos,
-        0 AS folios_disponibles,";
+if ($useSiiTables) {
+    $siiSelect = $hasSiiSchema
+        ? "se.id AS sii_empresa_id,
+            se.ambiente_default,
+            COALESCE(cert.certificados_activos, 0) AS certificados_activos,
+            COALESCE(caf.cafs_activos, 0) AS cafs_activos,
+            COALESCE(caf.folios_disponibles, 0) AS folios_disponibles,"
+        : "NULL AS sii_empresa_id,
+            NULL AS ambiente_default,
+            0 AS certificados_activos,
+            0 AS cafs_activos,
+            0 AS folios_disponibles,";
 
-$siiJoins = $hasSiiSchema
-    ? "LEFT JOIN sii_empresa se ON REPLACE(REPLACE(UPPER(se.rut), '.', ''), ' ', '') = REPLACE(REPLACE(UPPER(e.rut), '.', ''), ' ', '')
-     LEFT JOIN (
-        SELECT empresa_id, COUNT(*) AS certificados_activos
-        FROM sii_certificado
-        WHERE activo = 1
-        GROUP BY empresa_id
-     ) cert ON cert.empresa_id = se.id
-     LEFT JOIN (
-        SELECT
-            c.empresa_id,
-            COUNT(*) AS cafs_activos,
-            SUM(GREATEST(c.folio_hasta - c.folio_desde + 1 - COALESCE(fc.consumidos, 0), 0)) AS folios_disponibles
-        FROM sii_caf c
-        LEFT JOIN (
-            SELECT caf_id, COUNT(*) AS consumidos
-            FROM sii_folio_consumo
-            GROUP BY caf_id
-        ) fc ON fc.caf_id = c.id
-        WHERE c.activo = 1
-        GROUP BY c.empresa_id
-     ) caf ON caf.empresa_id = se.id"
-    : "";
+    $siiJoins = $hasSiiSchema
+        ? "LEFT JOIN sii_empresa se ON REPLACE(REPLACE(UPPER(se.rut), '.', ''), ' ', '') = REPLACE(REPLACE(UPPER(e.rut), '.', ''), ' ', '')
+         LEFT JOIN (
+            SELECT empresa_id, COUNT(*) AS certificados_activos
+            FROM sii_certificado
+            WHERE activo = 1
+            GROUP BY empresa_id
+         ) cert ON cert.empresa_id = se.id
+         LEFT JOIN (
+            SELECT
+                c.empresa_id,
+                COUNT(*) AS cafs_activos,
+                SUM(GREATEST(c.folio_hasta - c.folio_desde + 1 - COALESCE(fc.consumidos, 0), 0)) AS folios_disponibles
+            FROM sii_caf c
+            LEFT JOIN (
+                SELECT caf_id, COUNT(*) AS consumidos
+                FROM sii_folio_consumo
+                GROUP BY caf_id
+            ) fc ON fc.caf_id = c.id
+            WHERE c.activo = 1
+            GROUP BY c.empresa_id
+         ) caf ON caf.empresa_id = se.id"
+        : "";
+} else {
+    // Para MyPOS SaaS usando tablas nativas
+    $siiSelect = $hasSiiSchema
+        ? "e.id AS sii_empresa_id,
+            COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default,
+            COALESCE(cert.certificados_activos, 0) AS certificados_activos,
+            COALESCE(caf.cafs_activos, 0) AS cafs_activos,
+            COALESCE(caf.folios_disponibles, 0) AS folios_disponibles,"
+        : "e.id AS sii_empresa_id,
+            'CERTIFICACION' AS ambiente_default,
+            0 AS certificados_activos,
+            0 AS cafs_activos,
+            0 AS folios_disponibles,";
+
+    $siiJoins = $hasSiiSchema
+        ? "LEFT JOIN dte_configuracion dc ON dc.empresa_id = e.id
+         LEFT JOIN (
+            SELECT empresa_id, COUNT(*) AS certificados_activos
+            FROM archivos_subidos
+            WHERE entidad = 'certificado_sii' AND estado = 'ACTIVO'
+            GROUP BY empresa_id
+         ) cert ON cert.empresa_id = e.id
+         LEFT JOIN (
+            SELECT
+                c.empresa_id,
+                COUNT(*) AS cafs_activos,
+                SUM(GREATEST(c.folio_hasta - c.folio_desde + 1 - COALESCE(fc.consumidos, 0), 0)) AS folios_disponibles
+            FROM caf_archivos c
+            LEFT JOIN (
+                SELECT caf_archivo_id, COUNT(*) AS consumidos
+                FROM folios_consumidos
+                GROUP BY caf_archivo_id
+            ) fc ON fc.caf_archivo_id = c.id
+            WHERE c.estado = 'ACTIVO'
+            GROUP BY c.empresa_id
+         ) caf ON caf.empresa_id = e.id"
+        : "";
+}
 
 $clientes = $db->query(
     "SELECT

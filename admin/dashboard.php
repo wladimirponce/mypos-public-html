@@ -51,7 +51,26 @@ $empresaProd = null;   // empresa de producción (selección por defecto)
 try {
     $db = Database::getInstance();
     $dbOk = true;
-    $empresas = $db->query("SELECT id, rut, razon_social, ambiente_default, activo FROM sii_empresa WHERE activo = 1 ORDER BY razon_social")->fetchAll(PDO::FETCH_ASSOC);
+
+    $useSiiTables = false;
+    try {
+        $stmt = $db->query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sii_empresa' LIMIT 1");
+        $useSiiTables = (bool)$stmt->fetchColumn();
+    } catch (Exception $e) {}
+
+    if ($useSiiTables) {
+        $empresas = $db->query("SELECT id, rut, razon_social, ambiente_default, activo FROM sii_empresa WHERE activo = 1 ORDER BY razon_social")->fetchAll(PDO::FETCH_ASSOC);
+    } else {
+        $empresas = $db->query("
+            SELECT e.id, e.rut, e.razon_social,
+                   COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default,
+                   e.activo
+            FROM empresas e
+            LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id
+            WHERE e.activo = 1
+            ORDER BY e.razon_social
+        ")->fetchAll(PDO::FETCH_ASSOC);
+    }
 
     // Empresa de producción: selección por defecto cuando no hay una activa.
     // Elimina el antiguo modo "Legacy": siempre operamos sobre una empresa real.
@@ -265,12 +284,10 @@ $pageSubtitle = $titles[$module][1] ?? '';
                 <i class="bi bi-journal-text"></i> Libros & RCOF
             </a>
 
-            <?php if ($ambiente !== 'PRODUCCION'): ?>
             <div class="dash-nav-section">4. Zona de Certificación</div>
             <a href="dashboard.php?module=certificacion" class="dash-nav-item <?= $module === 'certificacion' ? 'active' : '' ?>">
                 <i class="bi bi-shield-check"></i> Certificación SII
             </a>
-            <?php endif; ?>
         </nav>
 
         <!-- Footer -->
