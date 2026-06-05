@@ -161,13 +161,25 @@ class CertificationManager
         $tmpDir = $this->context->getTmpPath() . 'cert_basico/';
         if (!is_dir($tmpDir)) @mkdir($tmpDir, 0755, true);
 
+        // Folios FIJOS y REUTILIZABLES: cada caso usa SIEMPRE el mismo folio,
+        // determinado por su posición FIJA dentro del set completo (no por el
+        // lote que se reintente). Así un reintento parcial reutiliza exactamente
+        // los mismos folios, sin consumirlos ni perderlos.
+        $offsetMap   = $this->certFolioOffsetMap(); // caseId => offset dentro de su tipo
+        $desdeByTipo = [];
+
         foreach ($caseIds as $caseId) {
             try {
                 $caseData = $this->getUploadedCertCaseData($caseId, $state) ?? getCertCaseData($caseId);
-                $fixedFolio = $this->folioForRetry($caseId, $state);
-                if ($fixedFolio > 0) {
-                    $caseData['folio'] = $fixedFolio;
+                $tipoCaso = (int)($caseData['tipoDTE'] ?? $caseData['tipo'] ?? 33);
+                if (!isset($desdeByTipo[$tipoCaso])) {
+                    $cafInfo = loadCAF($tipoCaso, 0); // lanza si no hay CAF de ese tipo
+                    $desdeByTipo[$tipoCaso] = (int)$cafInfo['desde'];
                 }
+                $offset = $offsetMap[$caseId]['offset'] ?? 0;
+                $caseData['folio']         = $desdeByTipo[$tipoCaso] + $offset;
+                $caseData['certNoConsume'] = true; // certificación: no consumir folios
+
                 $dte = generateDTE($caseData);
                 if (empty($dte['ok'])) {
                     throw new Exception($dte['error'] ?? 'Error generando DTE');
@@ -248,10 +260,45 @@ class CertificationManager
         return $results;
     }
 
-    private function folioForRetry(string $caseId, array $state): int
+    /**
+     * Mapa determinista de folios para el set básico: caseId => offset dentro de
+     * su tipo de DTE, calculado por la posición FIJA del caso en el set completo
+     * (no por el lote reintentado). Garantiza que cada caso reutilice siempre el
+     * mismo folio (desde[tipo] + offset), incluso en reintentos parciales.
+     *
+     * @return array<string,array{tipo:int,offset:int}>
+     */
+    private function certFolioOffsetMap(): array
     {
-        $folio = (int)($state['pruebas'][$caseId]['folio'] ?? 0);
-        return $folio > 0 ? $folio : 0;
+        // Orden completo de casos: num => tipoDTE. Del set subido si existe.
+        $orden  = [];
+        $setMgr = new CertSetManager($this->context);
+        $casos  = $setMgr->getFacturas();
+        if (!empty($casos)) {
+            foreach ($casos as $c) {
+                if (preg_match('/-(\d+)$/', (string)($c['caso'] ?? ''), $m)) {
+                    $orden[(int)$m[1]] = (int)($c['tipoDTE'] ?? 33);
+                }
+            }
+        } else {
+            // Fallback al set hardcodeado (4832043): 1-4 factura(33), 5-7 NC(61), 8 ND(56)
+            foreach (range(1, 8) as $n) {
+                try {
+                    $data = getCertCaseData('F-4832043-' . $n);
+                    $orden[$n] = (int)($data['tipoDTE'] ?? 33);
+                } catch (\Throwable $e) { /* caso inexistente: omitir */ }
+            }
+        }
+        ksort($orden);
+
+        $map = [];
+        $offsetByTipo = [];
+        foreach ($orden as $num => $tipo) {
+            $offsetByTipo[$tipo] = $offsetByTipo[$tipo] ?? 0;
+            $map['F-4832043-' . $num] = ['tipo' => $tipo, 'offset' => $offsetByTipo[$tipo]];
+            $offsetByTipo[$tipo]++;
+        }
+        return $map;
     }
 
     private function runOneCase(string $caseId, array &$state): array

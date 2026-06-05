@@ -1487,6 +1487,10 @@ function generateDTE(array $data): array {
     $tipo    = (int)($data['tipoDTE'] ?? $data['tipo'] ?? 0);
     $folio   = (int)($data['folio']   ?? 0);
     $fecha   = $data['fecha']   ?? date('Y-m-d');
+    // Modo certificación: NO consumir folios (no registrar DTE ni consumo en BD)
+    // para poder REUTILIZAR siempre los mismos primeros folios del CAF en cada
+    // reintento, sin perderlos. El XML igual se guarda en tmp/ para las muestras.
+    $certNoConsume = !empty($data['certNoConsume']);
     $items   = $data['items']   ?? [];
     $recep   = $data['receptor'] ?? [];
 
@@ -1571,7 +1575,9 @@ function generateDTE(array $data): array {
     file_put_contents($tmpFile, $xmlFirmado);
 
     // PERSISTENCIA EN BASE DE DATOS CENTRAL
-    if ($globalContext) {
+    // En certificación con folios reutilizables se omite: no se registra el DTE
+    // ni se marca el folio como consumido (así el mismo folio se reusa al reintentar).
+    if ($globalContext && !$certNoConsume) {
         $repo = new EmpresaRepository();
         $dteId = $repo->registrarDTE([
             'empresa_id'     => $globalContext->getEmpresaId(),
