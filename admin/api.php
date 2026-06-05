@@ -87,6 +87,15 @@ function certBundleForTipo(?int $tipo = null): array {
     global $actualCertPfx;
     $dir     = dirname($actualCertPfx);
     $defConf = $dir . '/cert.conf';
+
+    // En certificacion se debe usar exactamente el certificado visible de la
+    // empresa. Los perfiles legados/certs.json pueden apuntar a otro PFX y
+    // causar ENV-3-6 aunque RutEnvia parezca correcto.
+    $ctx = $GLOBALS['globalContext'] ?? null;
+    if ($ctx && method_exists($ctx, 'getAmbiente') && $ctx->getAmbiente() === 'CERTIFICACION') {
+        return ['pfx' => $actualCertPfx, 'conf' => $defConf, 'rut' => null, 'kind' => 'cert-default'];
+    }
+
     $cfg     = loadCertConfig();
 
     // Resuelve un perfil del config a rutas absolutas
@@ -115,13 +124,6 @@ function certBundleForTipo(?int $tipo = null): array {
         if (!empty($cfg['default'])) return $mk($cfg['default'], 'cfg:default');
     } elseif (!empty($cfg['default'])) {
         return $mk($cfg['default'], 'cfg:default');
-    }
-
-    // En certificacion no se debe caer a perfiles legados ocultos. Si no hay
-    // certs.json explicito, todos los DTE usan el certificado visible de la empresa.
-    $ctx = $GLOBALS['globalContext'] ?? null;
-    if ($ctx && method_exists($ctx, 'getAmbiente') && $ctx->getAmbiente() === 'CERTIFICACION') {
-        return ['pfx' => $actualCertPfx, 'conf' => $defConf, 'rut' => null, 'kind' => 'cert-default'];
     }
 
     // ── Fallback seguro SIN config: comportamiento previo (un solo cert) ──
