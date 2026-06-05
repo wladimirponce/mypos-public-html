@@ -162,24 +162,25 @@ class CertificationManager
         $tmpDir = $this->context->getTmpPath() . 'cert_basico/';
         if (!is_dir($tmpDir)) @mkdir($tmpDir, 0755, true);
 
-        // Folios FIJOS y REUTILIZABLES: cada caso usa SIEMPRE el mismo folio,
-        // determinado por su posición FIJA dentro del set completo (no por el
-        // lote que se reintente). Así un reintento parcial reutiliza exactamente
-        // los mismos folios, sin consumirlos ni perderlos.
-        $offsetMap   = $this->certFolioOffsetMap(); // caseId => offset dentro de su tipo
-        $desdeByTipo = [];
+        // Folios NUEVOS en cada corrida. El SII deja "quemado" todo (Tipo, Folio)
+        // que ya recibió: reenviar el mismo folio devuelve "DTE Repetido" (3-100)
+        // o "Folio ya recibido" (3-101). Por eso ya NO se reutiliza: se calcula un
+        // folio base por tipo = primer folio LIBRE (más alto ya usado + 1, tomado
+        // de sii_dte y del state de pruebas) y se consume de verdad, avanzando en
+        // cada corrida sin colisionar con envíos anteriores.
+        $offsetMap  = $this->certFolioOffsetMap(); // caseId => offset dentro de su tipo
+        $baseByTipo = [];
 
         foreach ($caseIds as $caseId) {
             try {
                 $caseData = $this->getUploadedCertCaseData($caseId, $state) ?? getCertCaseData($caseId);
                 $tipoCaso = (int)($caseData['tipoDTE'] ?? $caseData['tipo'] ?? 33);
-                if (!isset($desdeByTipo[$tipoCaso])) {
-                    $desdeByTipo[$tipoCaso] = $this->certFolioDesde($tipoCaso);
+                if (!isset($baseByTipo[$tipoCaso])) {
+                    $baseByTipo[$tipoCaso] = $this->certFolioBaseLibre($tipoCaso, $state);
                 }
                 $offset = $offsetMap[$caseId]['offset'] ?? 0;
-                $folioPrevio = (int)($state['pruebas'][$caseId]['folio'] ?? 0);
-                $caseData['folio']         = $folioPrevio > 0 ? $folioPrevio : ($desdeByTipo[$tipoCaso] + $offset);
-                $caseData['certNoConsume'] = true; // certificación: no consumir folios
+                $caseData['folio']         = $baseByTipo[$tipoCaso] + $offset;
+                $caseData['certNoConsume'] = false; // consumir de verdad: registra el folio para no reutilizarlo
 
                 $dte = generateDTE($caseData);
                 if (empty($dte['ok'])) {
@@ -261,21 +262,54 @@ class CertificationManager
         return $results;
     }
 
-    private function certFolioDesde(int $tipoDte): int
+    /**
+     * Primer folio LIBRE para un tipo de DTE en certificación: el más alto ya
+     * usado + 1. "Ya usado" combina MAX(folio) en sii_dte (durable: sobrevive a
+     * "Reiniciar") con el folio más alto registrado en el state de pruebas (cubre
+     * la primera corrida tras activar el consumo, cuando sii_dte todavía no tiene
+     * los folios viejos). Así nunca se repite un (Tipo, Folio) que el SII ya recibió.
+     */
+    private function certFolioBaseLibre(int $tipoDte, array $state): int
     {
         $repo = new EmpresaRepository();
         $cafs = $repo->getCAFsActivos($this->context->getEmpresaId(), $tipoDte, $this->context->getAmbiente());
         if (empty($cafs)) {
             throw new Exception("No hay CAF activo para tipo $tipoDte en ambiente " . $this->context->getAmbiente() . '. Cargue el CAF correspondiente en Configuracion.');
         }
-        return (int)$cafs[0]['folio_desde'];
+        $desde = (int)$cafs[0]['folio_desde'];
+        $hasta = (int)$cafs[0]['folio_hasta'];
+
+        // Folio más alto ya emitido (durable) dentro del rango del CAF.
+        $hw = $repo->getUltimoFolioUsadoEnRango(
+            $this->context->getEmpresaId(), $tipoDte, $this->context->getAmbiente(), $desde, $hasta
+        );
+
+        // Folio más alto que este flujo ya asignó en corridas previas (incluye los
+        // reutilizados antes de activar el consumo real, que aún no están en sii_dte).
+        foreach (($state['pruebas'] ?? []) as $prueba) {
+            if ((int)($prueba['tipo'] ?? 0) === $tipoDte) {
+                $f = (int)($prueba['folio'] ?? 0);
+                if ($f >= $desde && $f <= $hasta) {
+                    $hw = max($hw, $f);
+                }
+            }
+        }
+
+        $base = max($desde, $hw + 1);
+        if ($base > $hasta) {
+            throw new Exception(
+                "CAF de certificación tipo $tipoDte agotado (rango $desde-$hasta, último usado $hw). "
+                . 'Cargue un nuevo CAF de certificación para continuar.'
+            );
+        }
+        return $base;
     }
 
     /**
-     * Mapa determinista de folios para el set básico: caseId => offset dentro de
+     * Mapa determinista de offsets para el set básico: caseId => offset dentro de
      * su tipo de DTE, calculado por la posición FIJA del caso en el set completo
-     * (no por el lote reintentado). Garantiza que cada caso reutilice siempre el
-     * mismo folio (desde[tipo] + offset), incluso en reintentos parciales.
+     * (no por el lote reintentado). El folio final = certFolioBaseLibre(tipo) +
+     * offset, recalculado en cada corrida para tomar folios nuevos sin repetir.
      *
      * @return array<string,array{tipo:int,offset:int}>
      */
