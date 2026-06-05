@@ -2907,11 +2907,22 @@ function generateTimbre(
 function signDTE(string $xml, string $certPem, $privKey, string $idToSign): string {
     // Reemplazar placeholder de ACTECO
     $xml = str_replace('ACTECO_VAL', ACTECO, $xml);
-
-    $dom = new DOMDocument('1.0', 'ISO-8859-1');
-    if (preg_match('/<\?xml[^>]+encoding=["\']ISO-8859-1["\']/i', $xml)) {
-        $xml = mb_convert_encoding($xml, 'ISO-8859-1', 'UTF-8');
+    $xml = preg_replace('/^\xEF\xBB\xBF/', '', $xml) ?? $xml;
+    if (!preg_match('//u', $xml)) {
+        $xml = mb_convert_encoding($xml, 'UTF-8', 'ISO-8859-1');
     }
+    $xml = preg_replace(
+        '/<\?xml([^>]*?)encoding=["\'][^"\']+["\']([^>]*?)\?>/i',
+        '<?xml$1encoding="UTF-8"$2?>',
+        $xml,
+        1,
+        $encCount
+    ) ?? $xml;
+    if (empty($encCount)) {
+        $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . ltrim($xml);
+    }
+
+    $dom = new DOMDocument('1.0', 'UTF-8');
     @$dom->loadXML($xml);
     $xpath = new DOMXPath($dom);
 
