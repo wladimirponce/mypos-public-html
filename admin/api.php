@@ -187,18 +187,7 @@ if (!function_exists('normalizeCafXmlContent')) {
                 : iconv($enc, 'UTF-8//IGNORE', $content);
         }
 
-        $updated = preg_replace(
-            '/<\?xml([^>]*?)encoding=["\'][^"\']+["\']([^>]*?)\?>/i',
-            '<?xml$1encoding="UTF-8"$2?>',
-            $content,
-            1,
-            $count
-        );
-
-        if ($count > 0 && $updated !== null) {
-            return ltrim($updated);
-        }
-
+        $content = preg_replace('/<\?xml[^>]*\?>/i', '', $content) ?? $content;
         return '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . ltrim($content);
     }
 }
@@ -2141,15 +2130,8 @@ if (!function_exists('normalizeCafXmlContent')) {
                 : iconv($enc, 'UTF-8//IGNORE', $content);
         }
 
-        $updated = preg_replace(
-            '/<\?xml([^>]*?)encoding=["\'][^"\']+["\']([^>]*?)\?>/i',
-            '<?xml$1encoding="UTF-8"$2?>',
-            $content,
-            1,
-            $count
-        );
-
-        return ltrim($count > 0 && $updated !== null ? $updated : $content);
+        $content = preg_replace('/<\?xml[^>]*\?>/i', '', $content) ?? $content;
+        return '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . ltrim($content);
     }
 }
 
