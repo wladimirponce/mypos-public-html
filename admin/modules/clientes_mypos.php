@@ -79,7 +79,7 @@ if ($useSiiTables) {
             0 AS folios_disponibles,";
 
     $siiJoins = $hasSiiSchema
-        ? "LEFT JOIN sii_empresa se ON REPLACE(REPLACE(UPPER(se.rut), '.', ''), ' ', '') = REPLACE(REPLACE(UPPER(e.rut), '.', ''), ' ', '')
+        ? "LEFT JOIN sii_empresa se ON REPLACE(REPLACE(UPPER(se.rut), '.', ''), ' ', '') COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(UPPER(e.rut), '.', ''), ' ', '') COLLATE utf8mb4_unicode_ci
          LEFT JOIN (
             SELECT empresa_id, COUNT(*) AS certificados_activos
             FROM sii_certificado
