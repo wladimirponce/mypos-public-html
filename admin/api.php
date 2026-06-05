@@ -117,6 +117,13 @@ function certBundleForTipo(?int $tipo = null): array {
         return $mk($cfg['default'], 'cfg:default');
     }
 
+    // En certificacion no se debe caer a perfiles legados ocultos. Si no hay
+    // certs.json explicito, todos los DTE usan el certificado visible de la empresa.
+    $ctx = $GLOBALS['globalContext'] ?? null;
+    if ($ctx && method_exists($ctx, 'getAmbiente') && $ctx->getAmbiente() === 'CERTIFICACION') {
+        return ['pfx' => $actualCertPfx, 'conf' => $defConf, 'rut' => null, 'kind' => 'cert-default'];
+    }
+
     // ── Fallback seguro SIN config: comportamiento previo (un solo cert) ──
     if ($tipo === null || in_array($tipo, [39, 41], true)) {
         return ['pfx' => $actualCertPfx, 'conf' => $defConf, 'rut' => null, 'kind' => 'default'];
