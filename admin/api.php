@@ -3051,7 +3051,8 @@ function generateRCOF(array $data): array {
     $correlativo  = isset($data['correlativo']) ? (int)$data['correlativo'] : null;
     $xmlCorrelativo = $correlativo !== null ? "\n  <Correlativo>$correlativo</Correlativo>" : '';
 
-    [$cert, $privKey] = loadCertificate();
+    $GLOBALS['SII_CERT_TIPO'] = 39;
+    [$cert, $privKey] = loadCertificate(39);
     
     $rutE = RUT_EMISOR;
     $rutEnvia = getRutCertificadoSeguro($cert);
@@ -4580,7 +4581,8 @@ function validateXmlAgainstXSD(string $xml, ?string $xsdPath = null): array {
 function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array {
     global $actualTmpDir;
 
-    [$cert, $privKey] = loadCertificate();
+    $GLOBALS['SII_CERT_TIPO'] = 39;
+    [$cert, $privKey] = loadCertificate(39);
 
     // -- Intento 1: REST boleta.electronica.consumo --
     try {
