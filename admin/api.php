@@ -2644,11 +2644,11 @@ function buildDocumentoXML(
 $xmlRecep
 $xmlTrans
 $xmlTot
-$xmlDscGlb
 </Encabezado>
 $xmlDet
-$ted
+$xmlDscGlb
 $xmlRef
+$ted
 <TmstFirma>$tmstFirma</TmstFirma>
 </Documento>
 </DTE>
