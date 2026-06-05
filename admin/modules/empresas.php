@@ -399,7 +399,6 @@ $ambActual = strtolower($editEmp['ambiente_default'] ?? 'certificacion');
                                 <a href="?module=empresas&edit=<?= (int)$emp['id'] ?>" class="d-btn d-btn-sm d-btn-outline" title="Editar">
                                     <i class="bi bi-pencil"></i>
                                 </a>
-                                <?php if ($emp['activo']): ?>
                                 <form method="POST" style="display:inline" onsubmit="return confirm('¿Eliminar definitivamente la empresa <?= htmlspecialchars(addslashes($emp['razon_social'])) ?>? Se borrarán sus certificados, CAF, set de certificación y registros asociados.');">
                                     <input type="hidden" name="action" value="delete_empresa">
                                     <input type="hidden" name="empresa_id" value="<?= (int)$emp['id'] ?>">
@@ -407,7 +406,6 @@ $ambActual = strtolower($editEmp['ambiente_default'] ?? 'certificacion');
                                         <i class="bi bi-trash3"></i>
                                     </button>
                                 </form>
-                                <?php endif; ?>
                             </td>
                         </tr>
                         <?php endforeach; ?>
