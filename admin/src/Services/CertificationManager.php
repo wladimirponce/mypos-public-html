@@ -164,6 +164,10 @@ class CertificationManager
         foreach ($caseIds as $caseId) {
             try {
                 $caseData = $this->getUploadedCertCaseData($caseId, $state) ?? getCertCaseData($caseId);
+                $fixedFolio = $this->folioForRetry($caseId, $state);
+                if ($fixedFolio > 0) {
+                    $caseData['folio'] = $fixedFolio;
+                }
                 $dte = generateDTE($caseData);
                 if (empty($dte['ok'])) {
                     throw new Exception($dte['error'] ?? 'Error generando DTE');
@@ -242,6 +246,12 @@ class CertificationManager
 
         $this->saveState($state);
         return $results;
+    }
+
+    private function folioForRetry(string $caseId, array $state): int
+    {
+        $folio = (int)($state['pruebas'][$caseId]['folio'] ?? 0);
+        return $folio > 0 ? $folio : 0;
     }
 
     private function runOneCase(string $caseId, array &$state): array
