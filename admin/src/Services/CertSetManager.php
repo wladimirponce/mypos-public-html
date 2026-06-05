@@ -97,6 +97,9 @@ class CertSetManager
             'origen_boletas'   => !empty($boletas) ? $origen : ($actual['origen_boletas'] ?? null),
             'origen_basico'    => !empty($facturas) ? $origen : ($actual['origen_basico'] ?? null),
             'atencion_basico'  => $this->extraerAtencion($txt, 'SET BASICO') ?? ($actual['atencion_basico'] ?? null),
+            'atencion_ventas'  => $this->extraerAtencion($txt, 'SET LIBRO DE VENTAS') ?? ($actual['atencion_ventas'] ?? null),
+            'atencion_compras' => $this->extraerAtencion($txt, 'SET LIBRO DE COMPRAS') ?? ($actual['atencion_compras'] ?? null),
+            'atencion_guias'   => $this->extraerAtencion($txt, 'SET GUIA DE DESPACHO') ?? ($actual['atencion_guias'] ?? null),
             'boletas'          => !empty($boletas) ? $boletas : ($actual['boletas'] ?? []),
             'facturas'         => !empty($facturas) ? $facturas : ($actual['facturas'] ?? []),
         ];
@@ -107,6 +110,8 @@ class CertSetManager
             'boletas'         => count($boletas),
             'facturas'        => count($facturas),
             'atencion_basico' => $set['atencion_basico'],
+            'atencion_ventas' => $set['atencion_ventas'],
+            'atencion_compras'=> $set['atencion_compras'],
             'origen'          => $origen,
         ];
     }

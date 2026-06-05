@@ -294,11 +294,11 @@ $certCases = [
           <div class="d-card-body" style="padding:12px">
             <div style="font-weight:700; font-size:.82rem; margin-bottom:4px">
               Libro de Ventas
-              <span style="font-size:.68rem; color:var(--c-text-muted); font-weight:400">N° At. 4832044</span>
+              <span id="libro-ventas-at" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400"></span>
             </div>
             <div style="font-size:.74rem; color:var(--c-text-muted); margin-bottom:10px">
               Construido con los 8 casos del Set Básico (facturas, NC, ND).
-              Requiere tener todos los casos F-4832043-* generados.
+              Requiere tener generados todos los casos del Set Básico vinculado.
             </div>
             <div style="display:flex; align-items:center; gap:8px">
               <button class="d-btn d-btn-sm d-btn-success flex-fill" onclick="certLibro('ventas')">
@@ -317,7 +317,7 @@ $certCases = [
           <div class="d-card-body" style="padding:12px">
             <div style="font-weight:700; font-size:.82rem; margin-bottom:4px">
               Libro de Compras
-              <span style="font-size:.68rem; color:var(--c-text-muted); font-weight:400">N° At. 4832045</span>
+              <span id="libro-compras-at" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400"></span>
             </div>
             <div style="font-size:.74rem; color:var(--c-text-muted); margin-bottom:6px">
               Documentos en papel y electrónicos según el set oficial.<br>
@@ -395,10 +395,17 @@ function applyState(estado) {
       badge.className = 'cert-badge cb-ok'; badge.textContent = '✓ OK'; ok++;
       if (folioEl) folioEl.textContent = 'Folio ' + c.folio + (c.trackId ? ' · TRK '+String(c.trackId).substring(0,8) : '');
     } else if (c.status === 'failed') {
-      badge.className = 'cert-badge cb-failed'; badge.textContent = '✗ Error'; fail++;
+      const errMsg = c.error || 'Error desconocido';
+      // Errores transitorios del SII (maullin caído/saturado), NO del documento:
+      // se muestran como reintentables, no como rechazo de fondo.
+      const transitorio = /\b503\b|unexpected eof|SSL_read|HTML en lugar|p[áa]gina HTML|no disponible|Error de red|timeout|Service Unavailable/i.test(errMsg);
+      fail++;
+      badge.className = 'cert-badge ' + (transitorio ? 'cb-running' : 'cb-failed');
+      badge.textContent = transitorio ? '⏳ SII' : '✗ Error';
       if (folioEl) {
-        const errTxt = (c.error || 'Error desconocido').substring(0, 120);
-        folioEl.innerHTML = `<span class="cert-error-tip" title="${(c.error||'').replace(/"/g,'&quot;')}">${errTxt}</span>`;
+        const errTxt = errMsg.substring(0, 120);
+        const tip = (transitorio ? 'SII no disponible (transitorio), reintente. ' : '') + errMsg;
+        folioEl.innerHTML = `<span class="cert-error-tip" title="${tip.replace(/"/g,'&quot;')}">${transitorio ? '⏳ ' : ''}${errTxt}</span>`;
       }
     } else if (c.status === 'running') {
       badge.className = 'cert-badge cb-running'; badge.textContent = '⟳ Env...';
@@ -480,12 +487,17 @@ async function certLoadSetInfo() {
     const res = await api('cert_set_get');
     if (res.ok && res.set) {
       const s = res.set;
-      const origenBoletas = s.origen_boletas ? ` � Boletas: <em>${s.origen_boletas}</em>` : '';
-      const origenBasico = s.origen_basico ? ` � General: <em>${s.origen_basico}</em>` : '';
+      const origenBoletas = s.origen_boletas ? ` � Boletas: <em>${s.origen_boletas}</em>` : '';
+      const origenBasico = s.origen_basico ? ` � General: <em>${s.origen_basico}</em>` : '';
       el.innerHTML = `<span style="color:#27ae60"><i class="bi bi-check-circle"></i> Set vinculado:</span> `
         + `${(s.boletas||[]).length} boleta(s)` + (s.facturas?.length ? `, ${s.facturas.length} caso(s) set basico` : '')
-        + (s.atencion_basico ? ` � N� atencion ${s.atencion_basico}` : '')
+        + (s.atencion_basico ? ` &middot; Atencion ${s.atencion_basico}` : '')
         + origenBoletas + origenBasico;
+      // Atenciones reales de los libros desde el set vinculado (no hardcodear)
+      const vAt = document.getElementById('libro-ventas-at');
+      const cAt = document.getElementById('libro-compras-at');
+      if (vAt) vAt.textContent = s.atencion_ventas ? ('At. ' + s.atencion_ventas) : '';
+      if (cAt) cAt.textContent = s.atencion_compras ? ('At. ' + s.atencion_compras) : '';
     } else {
       el.innerHTML = '<span style="color:#e67e22"><i class="bi bi-exclamation-triangle"></i> Sin set vinculado. Suba el .txt del SII.</span>';
     }

@@ -701,8 +701,13 @@ const DTE = {
      * Renderiza un LOTE de documentos (muestras de certificación) reutilizando
      * el mismo renderer de la impresión real — única fuente de verdad. Cada
      * documento lleva su propio timbre PDF417.
+     *
+     * El SII exige adjuntar ejemplar TRIBUTARIO **y** CEDIBLE para Factura (33),
+     * Factura Exenta (34), Guía de Despacho (52) y Factura de Compra (46)
+     * (+ Liquidación 43). Para esos tipos se emiten DOS páginas: tributario y
+     * cedible (con Acuse de Recibo, Ley 19.983). Boletas y NC/ND: solo tributario.
      * @param {Array<{xml:string,label?:string}>} list
-     * @param {object} opts  { format, cedible, unidadSII, resolNum, resolFch, ambiente }
+     * @param {object} opts  { format, unidadSII, resolNum, resolFch, ambiente }
      */
     renderMuestras(list, opts = {}) {
         if (!Array.isArray(list) || !list.length) {
@@ -710,16 +715,31 @@ const DTE = {
             return;
         }
         const format = opts.format || 'letter';
+        const tiposConCedible = [33, 34, 46, 43, 52];
         const zona = this.getPrintZone();
         let allHtml = '';
         const barcodes = [];
-        list.forEach((it, i) => {
-            const cid = 'ted-cv-' + i;
-            const built = this.buildDocHtml(it.xml, format, { ...opts, canvasId: cid });
-            if (!built) return;
+        let idx = 0;
+
+        const agregar = (xml, cedible) => {
+            const cid = 'ted-cv-' + (idx++);
+            const built = this.buildDocHtml(xml, format, { ...opts, cedible, canvasId: cid });
+            if (!built) return null;
             allHtml += `<div style="page-break-after:always">${built.html}</div>`;
             if (built.ted) barcodes.push({ cid, ted: built.ted });
+            return built;
+        };
+
+        list.forEach((it) => {
+            // 1) Ejemplar tributario (todos los documentos)
+            const trib = agregar(it.xml, false);
+            if (!trib) return;
+            // 2) Ejemplar cedible (solo tipos que lo requieren — Manual SII §1.4)
+            if (tiposConCedible.includes(trib.tipo)) {
+                agregar(it.xml, true);
+            }
         });
+
         if (!allHtml) { alert('No se pudo construir ninguna muestra.'); return; }
         zona.innerHTML = allHtml;
         zona.style.display = 'block';
