@@ -547,14 +547,6 @@ class EmpresaRepository extends BaseRepository
 
         // Para MyPOS SaaS:
         $tipoEnum = $this->mapTipoDteToEnum((int)$data['tipo_dte']);
-        $sqlOff = "UPDATE caf_archivos SET estado = 'ANULADO'
-                   WHERE empresa_id = ? AND tipo_documento = ?
-                     AND folio_desde = ? AND folio_hasta = ?";
-        $stmtOff = $this->db->prepare($sqlOff);
-        $stmtOff->execute([
-            $data['empresa_id'], $tipoEnum, $data['desde'], $data['hasta']
-        ]);
-
         $xmlContent = '';
         if (file_exists($data['xml_path'])) {
             $xmlContent = file_get_contents($data['xml_path']);
@@ -568,7 +560,14 @@ class EmpresaRepository extends BaseRepository
         $sql = "INSERT INTO caf_archivos (
                     empresa_id, tipo_documento, folio_desde, folio_hasta,
                     fecha_autorizacion, fecha_vencimiento, caf_xml, archivo_path, estado, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', NOW())";
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', NOW())
+                ON DUPLICATE KEY UPDATE
+                    id = LAST_INSERT_ID(id),
+                    fecha_autorizacion = VALUES(fecha_autorizacion),
+                    fecha_vencimiento = VALUES(fecha_vencimiento),
+                    caf_xml = VALUES(caf_xml),
+                    archivo_path = VALUES(archivo_path),
+                    estado = 'ACTIVO'";
         
         $stmt = $this->db->prepare($sql);
         $stmt->execute([
