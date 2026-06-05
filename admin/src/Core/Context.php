@@ -47,7 +47,19 @@ class Context
      */
     public function getCertPath(): string 
     { 
-        return "{$this->basePath}/cert/{$this->getRut()}/firma.pfx"; 
+        $dir = "{$this->basePath}/cert/{$this->getRut()}";
+        $conf = $dir . '/cert.conf';
+        if (is_file($conf)) {
+            $data = json_decode((string)file_get_contents($conf), true);
+            $file = is_array($data) ? (string)($data['pfx_file'] ?? '') : '';
+            if ($file !== '') {
+                $path = preg_match('#^(/|[A-Za-z]:[\\\\/])#', $file) ? $file : ($dir . '/' . $file);
+                if (is_file($path)) {
+                    return $path;
+                }
+            }
+        }
+        return $dir . "/firma.pfx"; 
     }
     
     /**

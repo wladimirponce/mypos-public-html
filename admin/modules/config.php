@@ -55,25 +55,41 @@ if (isset($_POST['action'])) {
             if ($converted || !empty($certs)) {
                 $dir = dirname($cCertPfx);
                 if (!is_dir($dir)) mkdir($dir, 0755, true);
-                if (!copy($tmp, $cCertPfx)) throw new Exception("No se pudo copiar el certificado a $cCertPfx");
+
+                $data = openssl_x509_parse($certs['cert']);
+                $rutTitular = "";
+                if (preg_match('/(\d{7,8})-([0-9Kk])/', $data['subject']['serialNumber'] ?? '', $m)) {
+                    $rutTitular = $m[1].'-'.strtoupper($m[2]);
+                }
+
+                $originalName = basename((string)$_FILES['cert_file']['name']);
+                $targetName = $rutTitular !== ''
+                    ? ($rutTitular . '.pfx')
+                    : preg_replace('/[^A-Za-z0-9._-]+/', '_', $originalName);
+                if (!$targetName || !preg_match('/\.(pfx|p12)$/i', $targetName)) {
+                    $targetName = 'certificado_' . date('Ymd_His') . '.pfx';
+                }
+
+                $destPfx = $dir . DIRECTORY_SEPARATOR . $targetName;
+                if (!copy($tmp, $destPfx)) throw new Exception("No se pudo copiar el certificado a $destPfx");
+                $cCertPfx = $destPfx;
                 
-                file_put_contents(dirname($cCertPfx) . '/cert.conf', json_encode([
-                    'pass' => $pass, 'uploaded' => date('Y-m-d H:i:s'), 'original' => $_FILES['cert_file']['name']
+                file_put_contents($dir . '/cert.conf', json_encode([
+                    'pass' => $pass,
+                    'uploaded' => date('Y-m-d H:i:s'),
+                    'original' => $_FILES['cert_file']['name'],
+                    'pfx_file' => $targetName,
+                    'rut_titular' => $rutTitular,
                 ]));
 
                 // Registrar en BD
                 if ($globalContext) {
                     $repo = new \App\Repositories\EmpresaRepository();
-                    $data = openssl_x509_parse($certs['cert']);
-                    $rutTitular = "";
-                    if (preg_match('/(\d{7,8})-([0-9Kk])/', $data['subject']['serialNumber'] ?? '', $m)) {
-                        $rutTitular = $m[1].'-'.strtoupper($m[2]);
-                    }
                     
                     $repo->registrarCertificado([
                         'empresa_id' => $globalContext->getEmpresaId(),
                         'original'   => $_FILES['cert_file']['name'],
-                        'ruta_pfx'   => $cCertPfx,
+                        'ruta_pfx'   => $destPfx,
                         'pass'       => $pass,
                         'rut'        => $rutTitular,
                         'nombre'     => $data['subject']['CN'] ?? 'Titular',
