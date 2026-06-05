@@ -54,8 +54,11 @@ try {
 
     $useSiiTables = false;
     try {
-        $stmt = $db->query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sii_empresa' LIMIT 1");
-        $useSiiTables = (bool)$stmt->fetchColumn();
+        $stmt = $db->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sii_empresa'");
+        if ((int)$stmt->fetchColumn() > 0) {
+            $stmt = $db->query("SELECT COUNT(*) FROM sii_empresa WHERE activo = 1");
+            $useSiiTables = ((int)$stmt->fetchColumn()) > 0;
+        }
     } catch (Exception $e) {}
 
     if ($useSiiTables) {
