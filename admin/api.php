@@ -2818,8 +2818,8 @@ function generateTimbre(
     $h   = fn($s) => htmlspecialchars((string)$s, ENT_XML1, 'UTF-8');
     global $globalContext;
     $rE  = $h($globalContext ? $globalContext->getRut() : RUT_EMISOR);
-    $rN  = $h(substr($rNom, 0, 40));
-    $it  = $h(substr($it1, 0, 40));
+    $rN  = $h(mb_substr($rNom, 0, 40, 'UTF-8'));
+    $it  = $h(mb_substr($it1, 0, 40, 'UTF-8'));
     $ts  = date('Y-m-d\TH:i:s');
 
     // Extraer el bloque <CAF> y limpiarlo (quitar saltos de línea y espacios entre etiquetas)
@@ -2855,6 +2855,9 @@ function signDTE(string $xml, string $certPem, $privKey, string $idToSign): stri
     $xml = str_replace('ACTECO_VAL', ACTECO, $xml);
 
     $dom = new DOMDocument('1.0', 'ISO-8859-1');
+    if (preg_match('/<\?xml[^>]+encoding=["\']ISO-8859-1["\']/i', $xml)) {
+        $xml = mb_convert_encoding($xml, 'ISO-8859-1', 'UTF-8');
+    }
     @$dom->loadXML($xml);
     $xpath = new DOMXPath($dom);
 
