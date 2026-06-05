@@ -9,6 +9,15 @@ if (!function_exists('normalizeCafXmlContent')) {
     function normalizeCafXmlContent(string $content): string
     {
         $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
+        $content = ltrim($content);
+
+        $xmlPos = stripos($content, '<?xml');
+        $autPos = stripos($content, '<AUTORIZACION');
+        if ($xmlPos !== false && ($autPos === false || $xmlPos < $autPos)) {
+            $content = substr($content, $xmlPos);
+        } elseif ($autPos !== false) {
+            $content = substr($content, $autPos);
+        }
 
         if (!preg_match('//u', $content)) {
             $enc = function_exists('mb_detect_encoding')
@@ -27,7 +36,7 @@ if (!function_exists('normalizeCafXmlContent')) {
             $count
         );
 
-        return $count > 0 ? $updated : $content;
+        return ltrim($count > 0 && $updated !== null ? $updated : $content);
     }
 }
 
