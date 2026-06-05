@@ -122,12 +122,125 @@ class CertificationManager
             ? array_filter(self::PRUEBAS_CASES, fn($id) => ($state['pruebas'][$id]['status'] ?? 'pending') !== 'ok')
             : $caseIds;
 
+        if ($this->isSetBasicoRun($toRun)) {
+            return $this->runSetBasico($state, $toRun);
+        }
+
         $results = [];
         foreach ($toRun as $caseId) {
             $results[$caseId] = $this->runOneCase($caseId, $state);
             $this->saveState($state);
         }
 
+        return $results;
+    }
+
+    private function isSetBasicoRun(array $caseIds): bool
+    {
+        if (count($caseIds) < 2) {
+            return false;
+        }
+        foreach ($caseIds as $caseId) {
+            if (!preg_match('/^F-\d+-\d+$/', (string)$caseId)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function runSetBasico(array &$state, array $caseIds): array
+    {
+        usort($caseIds, function ($a, $b) {
+            preg_match('/-(\d+)$/', (string)$a, $ma);
+            preg_match('/-(\d+)$/', (string)$b, $mb);
+            return ((int)($ma[1] ?? 0)) <=> ((int)($mb[1] ?? 0));
+        });
+
+        $results = [];
+        $dtes = [];
+        $tmpDir = $this->context->getTmpPath() . 'cert_basico/';
+        if (!is_dir($tmpDir)) @mkdir($tmpDir, 0755, true);
+
+        foreach ($caseIds as $caseId) {
+            try {
+                $caseData = $this->getUploadedCertCaseData($caseId, $state) ?? getCertCaseData($caseId);
+                $dte = generateDTE($caseData);
+                if (empty($dte['ok'])) {
+                    throw new Exception($dte['error'] ?? 'Error generando DTE');
+                }
+
+                $dtes[] = ['xml' => $dte['xml'], 'tipo' => (int)$dte['tipo'], 'folio' => (int)$dte['folio']];
+                file_put_contents($tmpDir . "dte_T{$dte['tipo']}F{$dte['folio']}.xml", $dte['xml']);
+
+                $results[$caseId] = [
+                    'status' => 'generated',
+                    'tipo'   => (int)$dte['tipo'],
+                    'folio'  => (int)$dte['folio'],
+                    'ts'     => date('Y-m-d\TH:i:s'),
+                ];
+                $state['pruebas'][$caseId] = $results[$caseId];
+            } catch (\Throwable $e) {
+                $results[$caseId] = [
+                    'status' => 'failed',
+                    'tipo'   => null,
+                    'folio'  => null,
+                    'error'  => $e->getMessage(),
+                    'ts'     => date('Y-m-d\TH:i:s'),
+                ];
+                $state['pruebas'][$caseId] = $results[$caseId];
+                $this->saveState($state);
+                return $results;
+            }
+        }
+
+        try {
+            $GLOBALS['SII_CERT_TIPO'] = 33;
+            [$cert, $privKey] = loadCertificate(33);
+            $sobre = buildEnvioDTESet($dtes, $cert);
+            $sobreFirmado = signDTE($sobre, $cert, $privKey, 'SetDoc');
+            file_put_contents($tmpDir . 'envio_set_basico.xml', $sobreFirmado);
+
+            $val = validateXmlAgainstXSD($sobreFirmado);
+            if (empty($val['valid']) && empty($val['skipped'])) {
+                throw new Exception('El sobre no paso XSD local: ' . implode('; ', array_slice($val['errors'] ?? [], 0, 5)));
+            }
+
+            $semilla = getSemilla();
+            $token = getToken($semilla, $cert, $privKey);
+            $send = uploadDTE($sobreFirmado, $token);
+
+            foreach ($caseIds as $i => $caseId) {
+                $dte = $dtes[$i] ?? ['tipo' => null, 'folio' => null];
+                if (!empty($dte['tipo']) && !empty($dte['folio'])) {
+                    saveTrackingId((int)$dte['tipo'], (int)$dte['folio'], $send['trackId'] ?? null, $send, [
+                        'certificacion_set' => 'basico',
+                    ]);
+                }
+                $results[$caseId] = [
+                    'status'  => !empty($send['ok']) ? 'ok' : 'failed',
+                    'tipo'    => $dte['tipo'],
+                    'folio'   => $dte['folio'],
+                    'trackId' => $send['trackId'] ?? null,
+                    'error'   => !empty($send['ok']) ? null : ($send['error'] ?? $send['mensaje'] ?? 'Error en envio SII'),
+                    'ts'      => date('Y-m-d\TH:i:s'),
+                ];
+                $state['pruebas'][$caseId] = $results[$caseId];
+            }
+        } catch (\Throwable $e) {
+            foreach ($caseIds as $i => $caseId) {
+                $dte = $dtes[$i] ?? ['tipo' => null, 'folio' => null];
+                $results[$caseId] = [
+                    'status' => 'failed',
+                    'tipo'   => $dte['tipo'] ?? null,
+                    'folio'  => $dte['folio'] ?? null,
+                    'error'  => $e->getMessage(),
+                    'ts'     => date('Y-m-d\TH:i:s'),
+                ];
+                $state['pruebas'][$caseId] = $results[$caseId];
+            }
+        }
+
+        $this->saveState($state);
         return $results;
     }
 

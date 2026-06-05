@@ -593,27 +593,22 @@ async function certRunSet(setKey) {
     log('Boletas no se envian por casos. Use Paso 1: Boletas (sobre SII).', 'warn');
     return;
   }
-  const caseMaps = <?= json_encode($certCases) ?>;
-  const caseIds = Object.keys(caseMaps[setKey]?.casos || {});
-  log(`Ejecutando set ${setKey} (${caseIds.length} casos)...`, 'info');
-  for (const cid of caseIds) {
-    const badge = document.getElementById('badge-'+cid);
-    if (badge?.textContent === '✓ OK') { log(`${cid}: ya OK, omitido.`, 'ok'); continue; }
-    if (badge) { badge.className='cert-badge cb-running'; badge.textContent='⟳ Env...'; }
-    try {
-      const res = await api('cert_case', { cid });
-      const envio = res.envio || {};
-      const st = envio.ok ? 'ok' : 'failed';
-      if (badge) {
-        badge.className = 'cert-badge ' + (st==='ok'?'cb-ok':'cb-failed');
-        badge.textContent = st==='ok' ? '✓ OK' : '✗ Error';
-      }
-      log(`${cid}: ${st} — folio ${res.folio} ${envio.error?'| '+envio.error:''}`, st==='ok'?'ok':'error');
-    } catch(e) {
-      if (badge) { badge.className='cert-badge cb-failed'; badge.textContent='✗ Error'; }
-      log(`${cid}: error — ${e.message}`, 'error');
-    }
-    await loadState();
+  log('Ejecutando set de facturacion en un solo sobre SII...', 'info');
+  const status = document.getElementById('cert-run-status');
+  if (status) status.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Enviando set de facturacion en un solo sobre...</div>';
+  try {
+    const res = await api('cert_run_pruebas', { skip_boletas: 1 });
+    applyState(res.estado);
+    const r = res.resultados || {};
+    Object.entries(r).forEach(([cid, cr]) => {
+      if (!cr || typeof cr !== 'object') return;
+      const st = cr.status || '?';
+      log(`${cid}: ${st} - folio ${cr.folio||'-'} ${cr.trackId?'| TRK '+cr.trackId:''} ${cr.error?'| '+cr.error:''}`, st === 'ok' ? 'ok' : 'error');
+    });
+    if (status) status.innerHTML = '<div class="d-alert success"><i class="bi bi-check-circle"></i> Set enviado. Revise TrackID y estado final SII.</div>';
+  } catch(e) {
+    log('Error set facturacion: '+e.message, 'error');
+    if (status) status.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
   }
 }
 

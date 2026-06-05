@@ -2995,6 +2995,66 @@ XML;
  * @param array  $dtesXml  Lista de XML de <Documento> ya firmados (tipo 39/41).
  * @param string $certPem  Certificado para extraer el RUT que envía.
  */
+/**
+ * Arma UN sobre EnvioDTE con multiples DTE firmados, usado para reportar el
+ * Set de Pruebas completo de facturacion en el orden entregado por el SII.
+ *
+ * @param array<int,array{xml:string,tipo:int,folio:int}> $dtes
+ */
+function buildEnvioDTESet(array $dtes, string $certPem): string {
+    global $globalContext;
+    $rutEmisor = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
+    $rutEnvia  = getRutCertificadoSeguro($certPem);
+
+    if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
+        $nroResol = 0;
+        $fchResol = '2021-01-04';
+    } else {
+        $emp = $globalContext ? $globalContext->getEmpresa() : [];
+        $nroResol = $emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL;
+        $fchResol = $emp['fecha_resolucion']  ?? $emp['fch_resol'] ?? FCH_RESOL;
+    }
+    $tmst = date('Y-m-d\TH:i:s');
+
+    $counts = [];
+    $docs = '';
+    foreach ($dtes as $dte) {
+        $tipo = (int)($dte['tipo'] ?? 0);
+        if ($tipo <= 0 || empty($dte['xml'])) {
+            continue;
+        }
+        $counts[$tipo] = ($counts[$tipo] ?? 0) + 1;
+        $docs .= preg_replace('/<\?xml.*?\?>\s*/i', '', (string)$dte['xml']) . "\n";
+    }
+    ksort($counts);
+
+    $subTot = '';
+    foreach ($counts as $tipo => $count) {
+        $subTot .= "  <SubTotDTE>\n"
+            . "    <TpoDTE>$tipo</TpoDTE>\n"
+            . "    <NroDTE>$count</NroDTE>\n"
+            . "  </SubTotDTE>\n";
+    }
+
+    return <<<XML
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<EnvioDTE version="1.0"
+  xmlns="http://www.sii.cl/SiiDte"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.sii.cl/SiiDte EnvioDTE_v10.xsd">
+<SetDTE ID="SetDoc">
+<Caratula version="1.0">
+  <RutEmisor>$rutEmisor</RutEmisor>
+  <RutEnvia>$rutEnvia</RutEnvia>
+  <RutReceptor>60803000-K</RutReceptor>
+  <FchResol>$fchResol</FchResol>
+  <NroResol>$nroResol</NroResol>
+  <TmstFirmaEnv>$tmst</TmstFirmaEnv>
+$subTot</Caratula>
+$docs</SetDTE>
+</EnvioDTE>
+XML;
+}
 function buildEnvioBoletaSet(array $dtesXml, string $certPem): string {
     global $globalContext;
     $rutEmisor = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
@@ -5979,27 +6039,46 @@ function uploadDTE(string $envioDTE, string $token): array {
     $body .= "Content-Type: text/xml\r\n\r\n" . $envioDTE . "\r\n";
     $body .= "--$boundary--\r\n";
 
-    $ch = curl_init("https://{$host}/cgi_dte/UPL/DTEUpload");
-    curl_setopt_array($ch, [
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => $body,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_SSL_VERIFYPEER => SII_SSL_VERIFY,
-        CURLOPT_SSLVERSION     => SII_MIN_TLS,
-        CURLOPT_TIMEOUT        => 45,
-        CURLOPT_CONNECTTIMEOUT => 15,
-        CURLOPT_HTTPHEADER     => [
-            "Cookie: TOKEN=$token",
-            "Content-Type: multipart/form-data; boundary=$boundary",
-            "Accept: image/gif, image/x-xbitmap, image/jpeg, image/pjpeg, application/vnd.ms-powerpoint, application/vnd.ms-excel, application/msword, */*",
-            "User-Agent: Mozilla/4.0 (compatible; PROG 1.0; Windows NT 5.0; YComp 5.0.2.4)"
-        ],
-    ]);
-    $resp = curl_exec($ch);
-    $err  = curl_error($ch);
-    curl_close($ch);
+    $resp = null;
+    $err = '';
+    $http = 0;
+    for ($attempt = 1; $attempt <= 3; $attempt++) {
+        $ch = curl_init("https://{$host}/cgi_dte/UPL/DTEUpload");
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $body,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_SSL_VERIFYPEER => SII_SSL_VERIFY,
+            CURLOPT_SSLVERSION     => SII_MIN_TLS,
+            CURLOPT_TIMEOUT        => 60,
+            CURLOPT_CONNECTTIMEOUT => 15,
+            CURLOPT_HTTPHEADER     => [
+                "Cookie: TOKEN=$token",
+                "Content-Type: multipart/form-data; boundary=$boundary",
+                "Accept: image/gif, image/x-xbitmap, image/jpeg, image/pjpeg, application/vnd.ms-powerpoint, application/vnd.ms-excel, application/msword, */*",
+                "Connection: close",
+                "User-Agent: Mozilla/4.0 (compatible; PROG 1.0; Windows NT 5.0; YComp 5.0.2.4)"
+            ],
+        ]);
+        $resp = curl_exec($ch);
+        $err  = curl_error($ch);
+        $http = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
 
-    if ($err) throw new Exception("Error de red enviando al SII: $err");
+        $transient = $err
+            || $http === 503
+            || stripos((string)$resp, 'Error 503') !== false
+            || stripos((string)$resp, 'Service Temporarily Unavailable') !== false;
+        if (!$transient) {
+            break;
+        }
+        saveSiiLog('uploadDTE', "Intento $attempt fallido contra $host HTTP $http: " . ($err ?: substr(strip_tags((string)$resp), 0, 160)), 'WARNING');
+        if ($attempt < 3) {
+            sleep($attempt);
+        }
+    }
+
+    if ($err) throw new Exception("Error de red enviando al SII tras reintentos: $err");
 
     preg_match('/<TRACKID>(\d+)<\/TRACKID>/', $resp ?? '', $mT);
     preg_match('/<ESTADO>([^<]+)<\/ESTADO>/',  $resp ?? '', $mE);

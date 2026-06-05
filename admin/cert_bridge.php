@@ -89,7 +89,6 @@ try {
             $caseIds = [
                 'F-4832043-1','F-4832043-2','F-4832043-3','F-4832043-4',
                 'F-4832043-5','F-4832043-6','F-4832043-7','F-4832043-8',
-                'G-4820753-1','G-4820753-2','G-4820753-3',
             ];
             $log = [
                 'pruebas' => $mgr->runPruebas($state, $caseIds),
@@ -115,7 +114,6 @@ try {
                 $caseIds = [
                     'F-4832043-1','F-4832043-2','F-4832043-3','F-4832043-4',
                     'F-4832043-5','F-4832043-6','F-4832043-7','F-4832043-8',
-                    'G-4820753-1','G-4820753-2','G-4820753-3',
                 ];
             }
             echo json_encode(['ok' => true, 'resultados' => $mgr->runPruebas($state, $caseIds), 'estado' => $mgr->loadState()]);
@@ -148,12 +146,20 @@ try {
                 ]);
                 break;
             }
-            $data = getCertCaseData($cid);
-            $dte  = generateDTE($data);
-            if (empty($dte['ok'])) throw new \Exception($dte['error'] ?? 'Error generando DTE');
-            $send = sendDTE(['xml' => $dte['xml'], 'tipo' => $dte['tipo'], 'folio' => $dte['folio']]);
             ob_clean();
-            echo json_encode(array_merge($dte, ['envio' => $send]));
+            $state = [];
+            $resultados = $mgr->runPruebas($state, [$cid]);
+            $resCaso = $resultados[$cid] ?? ['status' => 'failed', 'error' => 'Sin resultado'];
+            echo json_encode([
+                'ok'    => ($resCaso['status'] ?? '') === 'ok',
+                'tipo'  => $resCaso['tipo'] ?? null,
+                'folio' => $resCaso['folio'] ?? null,
+                'envio' => [
+                    'ok'      => ($resCaso['status'] ?? '') === 'ok',
+                    'trackId' => $resCaso['trackId'] ?? null,
+                    'error'   => $resCaso['error'] ?? null,
+                ],
+            ]);
             break;
 
         // ── Simulación legacy ────────────────────────────────────
