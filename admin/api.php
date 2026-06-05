@@ -2522,7 +2522,7 @@ function buildDocumentoXML(
         if ($desc) $xmlDet .= "  <DscItem>$desc</DscItem>\n";
         $xmlDet .= "  <QtyItem>" . number_format($qty, 6, '.', '') . "</QtyItem>\n";
         if ($uMed) $xmlDet .= "  <UnmdItem>$uMed</UnmdItem>\n";
-        $xmlDet .= "  <PrcItem>$prc</PrcItem>\n";
+        if ($prc > 0) $xmlDet .= "  <PrcItem>$prc</PrcItem>\n";
         if ($dp > 0) $xmlDet .= "  <DescuentoPct>$dp</DescuentoPct>\n";
         $xmlDet .= "  <MontoItem>$mnt</MontoItem>\n</Detalle>\n";
     }
@@ -2723,7 +2723,7 @@ function buildLiquidacionXML(
         if ($desc) $xmlDet .= "  <DscItem>$desc</DscItem>\n";
         $xmlDet .= "  <QtyItem>" . number_format($qty, 6, '.', '') . "</QtyItem>\n";
         if ($uMed) $xmlDet .= "  <UnmdItem>$uMed</UnmdItem>\n";
-        $xmlDet .= "  <PrcItem>$prc</PrcItem>\n";
+        if ($prc > 0) $xmlDet .= "  <PrcItem>$prc</PrcItem>\n";
         if ($dp > 0) $xmlDet .= "  <DescuentoPct>$dp</DescuentoPct>\n";
         $xmlDet .= "  <MontoItem>$mnt</MontoItem>\n</Detalle>\n";
     }
