@@ -1,5 +1,6 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) session_start();
+date_default_timezone_set('America/Santiago');
 ini_set('display_errors', '1'); error_reporting(E_ALL);
 if (file_exists(__DIR__ . '/openssl_legacy.cnf')) {
     putenv('OPENSSL_CONF=' . __DIR__ . '/openssl_legacy.cnf');

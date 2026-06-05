@@ -4,6 +4,7 @@
  * Sistema profesional de facturación electrónica
  */
 session_start();
+date_default_timezone_set('America/Santiago');
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
 

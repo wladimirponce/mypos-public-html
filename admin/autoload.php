@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+date_default_timezone_set('America/Santiago');
+
 /**
  * Carga variables del archivo .env en el directorio raíz del proyecto.
  * Solo aplica claves que aún no estén definidas en el entorno del sistema.
