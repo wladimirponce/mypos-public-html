@@ -3004,16 +3004,39 @@ function signDTE(string $xml, string $certPem, $privKey, string $idToSign): stri
 // ────────────────────────────────────────────────────────────
 // SOBRE DE ENVÍO (EnvioDTE)
 // ────────────────────────────────────────────────────────────
+function siiFormatDate(string $date, string $fallback = '2026-06-04'): string {
+    $date = trim($date);
+    if ($date === '') return $fallback;
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return $date;
+    if (preg_match('/^(\d{2})-(\d{2})-(\d{4})$/', $date, $m)) {
+        return "{$m[3]}-{$m[2]}-{$m[1]}";
+    }
+    $ts = strtotime($date);
+    return $ts ? date('Y-m-d', $ts) : $fallback;
+}
+
+function siiCaratulaResolucion(): array {
+    global $globalContext;
+    $emp = $globalContext ? $globalContext->getEmpresa() : [];
+    $fecha = (string)($emp['fecha_resolucion'] ?? $emp['fch_resol'] ?? FCH_RESOL);
+    if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
+        return [0, siiFormatDate($fecha)];
+    }
+
+    $numero = $emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL;
+    return [(int)$numero, siiFormatDate($fecha, (string)FCH_RESOL)];
+}
+
 function buildEnvioDTE(string $dteXml, int $tipo, int $folio, string $certPem): string {
     global $globalContext;
     $rutEmisor  = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
     $rutEnvia   = getRutCertificadoSeguro($certPem);
-    // En certificación el SII exige NroResol=0 y FchResol=2021-01-04
+    // En certificacion el SII exige NroResol=0 y la fecha de resolucion asignada al contribuyente.
     // Los campos en DB son: numero_resolucion y fecha_resolucion
     $emp = $globalContext ? $globalContext->getEmpresa() : [];
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $nroResol = 0;
-        $fchResol = '2021-01-04';
+        $fchResol = '2026-06-04';
     } else {
         $nroResol = $emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL;
         $fchResol = $emp['fecha_resolucion']  ?? $emp['fch_resol'] ?? FCH_RESOL;
@@ -3074,7 +3097,7 @@ function buildEnvioDTESet(array $dtes, string $certPem): string {
 
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $nroResol = 0;
-        $fchResol = '2021-01-04';
+        $fchResol = '2026-06-04';
     } else {
         $emp = $globalContext ? $globalContext->getEmpresa() : [];
         $nroResol = $emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL;
@@ -3128,7 +3151,7 @@ function buildEnvioBoletaSet(array $dtesXml, string $certPem): string {
 
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $nroResol = 0;
-        $fchResol = '2021-01-04';
+        $fchResol = '2026-06-04';
     } else {
         $emp = $globalContext ? $globalContext->getEmpresa() : [];
         $nroResol = $emp['numero_resolucion'] ?? NRO_RESOL;
