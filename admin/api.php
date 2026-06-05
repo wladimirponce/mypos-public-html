@@ -574,7 +574,7 @@ function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
             $result = sendBoletaREST($envioFirmado, $tipo, $folio, $tok);
             $via = 'REST';
         } else {
-            $result = uploadDTE($envioFirmado, $tok);
+            $result = uploadDTE($envioFirmado, $tok, $cert);
             $via = 'SOAP';
         }
 
@@ -1710,7 +1710,7 @@ function sendDTE(array $data): array {
     // ── Facturas, Guías y otros: flujo SOAP (semilla + token SOAP) ──
     $semilla  = getSemilla();
     $token    = getToken($semilla, $cert, $privKey);
-    $resultado = uploadDTE($envioFirmado, $token);
+    $resultado = uploadDTE($envioFirmado, $token, $cert);
 
     saveTrackingId($tipo, $folio, $resultado['trackId'] ?? null, $resultado);
 
@@ -4804,7 +4804,7 @@ function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array
         $semilla = getSemilla();
         $tokSoap = getToken($semilla, $cert, $privKey);
         $t0 = microtime(true);
-        $resp = uploadDTE($xmlFirmado, $tokSoap);
+        $resp = uploadDTE($xmlFirmado, $tokSoap, $cert);
         $ms = (int)((microtime(true) - $t0) * 1000);
         @unlink($tmpFile);
 
@@ -5293,7 +5293,7 @@ function sendLibro(array $data): array {
     [$cert, $privKey] = loadCertificate();
     $semilla = getSemilla();
     $token   = getToken($semilla, $cert, $privKey);
-    $resp    = uploadDTE($gen['xml'], $token);
+    $resp    = uploadDTE($gen['xml'], $token, $cert);
 
     $tipoLibro = strtoupper($data['tipoLibro'] ?? 'VENTA');
     $periodo   = $data['periodo'] ?? date('Y-m');
@@ -6073,13 +6073,15 @@ function getToken(string $semilla, string $certPem, $privKey): string {
     throw new Exception("Error SII en getToken tras $maxRetries reintentos. Último error: $lastError");
 }
 
-function uploadDTE(string $envioDTE, string $token): array {
+function uploadDTE(string $envioDTE, string $token, ?string $certPem = null): array {
     $host = siiHost();
     // Vía SOAP = guías/facturas (nunca boletas). Cert de David por defecto.
-    [$cert, $privKey] = loadCertificate($GLOBALS['SII_CERT_TIPO'] ?? 52);
+    if ($certPem === null) {
+        [$certPem] = loadCertificate($GLOBALS['SII_CERT_TIPO'] ?? 52);
+    }
     
     // Extraer y separar RUT/DV del Remitente (Certificado)
-    $rutSFull = getRutCertificadoSeguro($cert);
+    $rutSFull = getRutCertificadoSeguro($certPem);
     $rsParts  = explode('-', $rutSFull);
     $rutSender = $rsParts[0];
     $dvSender  = $rsParts[1];

@@ -224,7 +224,7 @@ class CertificationManager
 
             $semilla = getSemilla();
             $token = getToken($semilla, $cert, $privKey);
-            $send = uploadDTE($sobreFirmado, $token);
+            $send = uploadDTE($sobreFirmado, $token, $cert);
 
             foreach ($caseIds as $i => $caseId) {
                 $dte = $dtes[$i] ?? ['tipo' => null, 'folio' => null];
@@ -687,7 +687,7 @@ XML;
 
         $semilla = getSemilla();
         $token   = getToken($semilla, $cert, $privKey);
-        $upload  = uploadDTE($xmlFirmado, $token);
+        $upload  = uploadDTE($xmlFirmado, $token, $cert);
 
         $state['intercambio'] = [
             'status'   => $upload['ok'] ? 'responded' : 'failed',
