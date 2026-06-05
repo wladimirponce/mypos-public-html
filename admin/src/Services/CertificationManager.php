@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Core\Context;
+use App\Repositories\EmpresaRepository;
 use Exception;
 use DOMDocument;
 
@@ -173,11 +174,11 @@ class CertificationManager
                 $caseData = $this->getUploadedCertCaseData($caseId, $state) ?? getCertCaseData($caseId);
                 $tipoCaso = (int)($caseData['tipoDTE'] ?? $caseData['tipo'] ?? 33);
                 if (!isset($desdeByTipo[$tipoCaso])) {
-                    $cafInfo = loadCAF($tipoCaso, 0); // lanza si no hay CAF de ese tipo
-                    $desdeByTipo[$tipoCaso] = (int)$cafInfo['desde'];
+                    $desdeByTipo[$tipoCaso] = $this->certFolioDesde($tipoCaso);
                 }
                 $offset = $offsetMap[$caseId]['offset'] ?? 0;
-                $caseData['folio']         = $desdeByTipo[$tipoCaso] + $offset;
+                $folioPrevio = (int)($state['pruebas'][$caseId]['folio'] ?? 0);
+                $caseData['folio']         = $folioPrevio > 0 ? $folioPrevio : ($desdeByTipo[$tipoCaso] + $offset);
                 $caseData['certNoConsume'] = true; // certificación: no consumir folios
 
                 $dte = generateDTE($caseData);
@@ -213,7 +214,7 @@ class CertificationManager
             $GLOBALS['SII_CERT_TIPO'] = 33;
             [$cert, $privKey] = loadCertificate(33);
             $sobre = buildEnvioDTESet($dtes, $cert);
-            $sobreFirmado = signDTE($sobre, $cert, $privKey, 'SetDoc');
+            $sobreFirmado = signDTE($sobre, $cert, $privKey, 'FENV010');
             file_put_contents($tmpDir . 'envio_set_basico.xml', $sobreFirmado);
 
             $val = validateXmlAgainstXSD($sobreFirmado);
@@ -258,6 +259,16 @@ class CertificationManager
 
         $this->saveState($state);
         return $results;
+    }
+
+    private function certFolioDesde(int $tipoDte): int
+    {
+        $repo = new EmpresaRepository();
+        $cafs = $repo->getCAFsActivos($this->context->getEmpresaId(), $tipoDte, $this->context->getAmbiente());
+        if (empty($cafs)) {
+            throw new Exception("No hay CAF activo para tipo $tipoDte en ambiente " . $this->context->getAmbiente() . '. Cargue el CAF correspondiente en Configuracion.');
+        }
+        return (int)$cafs[0]['folio_desde'];
     }
 
     /**

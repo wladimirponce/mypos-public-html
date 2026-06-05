@@ -3048,7 +3048,7 @@ function buildEnvioDTESet(array $dtes, string $certPem): string {
   xmlns="http://www.sii.cl/SiiDte"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://www.sii.cl/SiiDte EnvioDTE_v10.xsd">
-<SetDTE ID="SetDoc">
+<SetDTE ID="FENV010">
 <Caratula version="1.0">
   <RutEmisor>$rutEmisor</RutEmisor>
   <RutEnvia>$rutEnvia</RutEnvia>
