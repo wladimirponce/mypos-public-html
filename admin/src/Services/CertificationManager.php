@@ -288,7 +288,8 @@ class CertificationManager
         if (!empty($casos)) {
             foreach ($casos as $c) {
                 if (preg_match('/-(\d+)$/', (string)($c['caso'] ?? ''), $m)) {
-                    $orden[(int)$m[1]] = (int)($c['tipoDTE'] ?? 33);
+                    $n = (int)$m[1];
+                    $orden[$n] = $this->tipoDteForSetBasicoCase($n, (int)($c['tipoDTE'] ?? 33));
                 }
             }
         } else {
@@ -310,6 +311,14 @@ class CertificationManager
             $offsetByTipo[$tipo]++;
         }
         return $map;
+    }
+
+    private function tipoDteForSetBasicoCase(int $caseNumber, int $detected): int
+    {
+        if ($caseNumber >= 1 && $caseNumber <= 4) return 33;
+        if ($caseNumber >= 5 && $caseNumber <= 7) return 61;
+        if ($caseNumber === 8) return 56;
+        return $detected > 0 ? $detected : 33;
     }
 
     private function runOneCase(string $caseId, array &$state): array
@@ -378,7 +387,7 @@ class CertificationManager
             return null;
         }
 
-        $tipoDte = (int)($caso['tipoDTE'] ?? 33);
+        $tipoDte = $this->tipoDteForSetBasicoCase($num, (int)($caso['tipoDTE'] ?? 33));
         $items   = $caso['items'] ?? [];
         $data = [
             'tipoDTE'  => $tipoDte,
@@ -394,7 +403,7 @@ class CertificationManager
             $ref = $this->buildUploadedReference($caso, $casos, $state);
             $data['referencias'] = [$ref];
 
-            if (empty($data['items'])) {
+            if (empty($data['items']) || $this->itemsRequireReferencePrices($data['items'], $ref)) {
                 $data['items'] = $this->itemsForUploadedReference($ref, $caso, $casos);
             }
         }
@@ -419,6 +428,14 @@ class CertificationManager
         $refInfo = $caso['referencia'] ?? [];
         $casoRef = (string)($refInfo['caso_ref'] ?? '');
         $razon = trim((string)($refInfo['razon'] ?? 'REFERENCIA SET DE PRUEBAS'));
+        if (preg_match('/-(\d+)$/', (string)($caso['caso'] ?? ''), $mCaso)) {
+            $numCaso = (int)$mCaso[1];
+            if (in_array($numCaso, [5, 6, 7], true)) {
+                $casoRef = preg_replace('/-\d+$/', '-' . ($numCaso - 4), (string)($caso['caso'] ?? '')) ?: $casoRef;
+            } elseif ($numCaso === 8) {
+                $casoRef = preg_replace('/-\d+$/', '-5', (string)($caso['caso'] ?? '')) ?: $casoRef;
+            }
+        }
         $tipoRef = $this->tipoForUploadedCase($casoRef, $casos);
         $folioRef = $this->folioForUploadedCase($casoRef, $state);
 
@@ -465,7 +482,10 @@ class CertificationManager
         if (str_contains($r, 'CORRIGE') || str_contains($r, 'GIRO') || str_contains($r, 'TEXTO')) {
             return 2;
         }
-        return 3;
+        if (str_contains($r, 'DEVOLUCION') || str_contains($r, 'DEVOLUCIÓN') || str_contains($r, 'MERCADERIA') || str_contains($r, 'MERCADERÍA')) {
+            return 3;
+        }
+        return 2;
     }
 
     private function itemsForUploadedReference(array $ref, array $caso, array $casos): array
@@ -482,6 +502,21 @@ class CertificationManager
         $casoRef = (string)(($caso['referencia'] ?? [])['caso_ref'] ?? '');
         foreach ($casos as $candidate) {
             if ((string)($candidate['caso'] ?? '') === $casoRef && !empty($candidate['items'])) {
+                $currentItems = $caso['items'] ?? [];
+                if (!empty($currentItems)) {
+                    $priced = [];
+                    foreach (array_values($currentItems) as $idx => $item) {
+                        $refItem = $candidate['items'][$idx] ?? [];
+                        $priced[] = array_merge($item, [
+                            'precio' => (int)($item['precio'] ?? 0) > 0
+                                ? (int)$item['precio']
+                                : (int)($refItem['precio'] ?? 0),
+                            'descuento' => $item['descuento'] ?? 0,
+                            'exento' => $item['exento'] ?? ($refItem['exento'] ?? false),
+                        ]);
+                    }
+                    return $priced;
+                }
                 return $candidate['items'];
             }
         }
@@ -492,6 +527,19 @@ class CertificationManager
             'precio'   => 0,
             'exento'   => true,
         ]];
+    }
+
+    private function itemsRequireReferencePrices(array $items, array $ref): bool
+    {
+        if ((int)($ref['codigo'] ?? 0) === 2) {
+            return false;
+        }
+        foreach ($items as $item) {
+            if ((float)($item['precio'] ?? 0) <= 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // =========================================================

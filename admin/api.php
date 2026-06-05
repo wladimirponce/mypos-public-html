@@ -1590,7 +1590,7 @@ function generateDTE(array $data): array {
         throw new Exception("Folio $folio fuera del rango CAF ({$caf['desde']} - {$caf['hasta']})");
     }
 
-    $montos = calcularMontos($items, $tipo);
+    $montos = aplicarDescuentoGlobalMontos(calcularMontos($items, $tipo), $descuentoGlobal);
     $idDte  = "T{$tipo}F{$folio}";
 
     if (in_array($tipo, [110, 111, 112], true)) {
@@ -2566,7 +2566,9 @@ function buildDocumentoXML(
         $prc  = (float)($it['precio']    ?? 0);
         $dp   = (float)($it['descuento'] ?? 0);
         $uMed = $h($it['unidadMedida'] ?? '');
-        $mnt  = round($qty * $prc * (1 - $dp / 100));
+        $bruto = round($qty * $prc);
+        $dscMonto = $dp > 0 ? (int)round($bruto * ($dp / 100)) : 0;
+        $mnt  = $bruto - $dscMonto;
         $lin  = $i + 1;
 
         // Orden requerido por XSD: NroLinDet → IndExe → NmbItem → DscItem
@@ -2577,7 +2579,10 @@ function buildDocumentoXML(
         $xmlDet .= "  <QtyItem>" . number_format($qty, 6, '.', '') . "</QtyItem>\n";
         if ($uMed) $xmlDet .= "  <UnmdItem>$uMed</UnmdItem>\n";
         if ($prc > 0) $xmlDet .= "  <PrcItem>$prc</PrcItem>\n";
-        if ($dp > 0) $xmlDet .= "  <DescuentoPct>$dp</DescuentoPct>\n";
+        if ($dp > 0) {
+            $xmlDet .= "  <DescuentoPct>$dp</DescuentoPct>\n";
+            $xmlDet .= "  <DescuentoMonto>$dscMonto</DescuentoMonto>\n";
+        }
         $xmlDet .= "  <MontoItem>$mnt</MontoItem>\n</Detalle>\n";
     }
 
@@ -3016,6 +3021,44 @@ function signDTE(string $xml, string $certPem, $privKey, string $idToSign): stri
     }
 
     return $signedXml;
+}
+
+function aplicarDescuentoGlobalMontos(array $montos, $descuentoGlobal): array {
+    if (empty($descuentoGlobal)) {
+        return $montos;
+    }
+
+    if (is_array($descuentoGlobal)) {
+        $tipoMov = strtoupper((string)($descuentoGlobal['tipoMov'] ?? 'D'));
+        $tipoVal = (string)($descuentoGlobal['tipoVal'] ?? '%');
+        $valor = (float)($descuentoGlobal['valor'] ?? 0);
+    } else {
+        $tipoMov = 'D';
+        $tipoVal = '%';
+        $valor = (float)$descuentoGlobal;
+    }
+
+    if ($tipoMov !== 'D' || $valor <= 0) {
+        return $montos;
+    }
+
+    $baseNeto = (int)($montos['mntNeto'] ?? 0);
+    if ($baseNeto <= 0) {
+        return $montos;
+    }
+
+    $descuento = $tipoVal === '$'
+        ? (int)round($valor)
+        : (int)round($baseNeto * ($valor / 100));
+    $neto = max(0, $baseNeto - $descuento);
+    $iva = $neto > 0 ? (int)round($neto * 0.19) : 0;
+
+    $montos['mntNeto'] = $neto;
+    $montos['iva'] = $iva;
+    $montos['tasaIVA'] = $neto > 0 ? 19 : 0;
+    $montos['mntTotal'] = $neto + (int)($montos['mntExe'] ?? 0) + $iva;
+
+    return $montos;
 }
 
 // ────────────────────────────────────────────────────────────
