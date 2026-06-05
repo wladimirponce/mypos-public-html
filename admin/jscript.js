@@ -504,178 +504,230 @@ const DTE = {
                 opts.ambiente  = opts.ambiente  || this.state.emisorInfo.ambiente  || '';
             }
 
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(xmlText, "text/xml");
-
-            const getText = (tagName, context = doc) => {
-                let els = context.getElementsByTagName(tagName);
-                if (els.length === 0) {
-                    els = context.getElementsByTagNameNS('*', tagName);
-                }
-                return els.length > 0 ? els[0].textContent : '';
-            };
-
-            const tipo = parseInt(getText('TipoDTE')) || 33;
-            const folio = getText('Folio') || '—';
-            let fecha = getText('FchEmis');
-            if (fecha && fecha.includes('-')) {
-                const p = fecha.split('-');
-                if (p[0].length === 4) fecha = `${p[2]}-${p[1]}-${p[0]}`;
-            }
-
-            const emisor = {
-                rut: getText('RUTEmisor'),
-                razonSocial: getText('RznSoc'),
-                giro: getText('GiroEmis'),
-                acteco: getText('Acteco'),
-                direccion: getText('DirOrigen'),
-                comuna: getText('CmnaOrigen') || getText('CmnOrigen'),
-                ciudad: getText('CiudadOrigen'),
-                sucursal: getText('Sucursal')
-            };
-
-            const receptor = {
-                rut: getText('RUTRecep'),
-                nombre: getText('RznSocRecep'),
-                direccion: getText('DirRecep'),
-                comuna: getText('CmnaRecep') || getText('CmnRecep'),
-                ciudad: getText('CiudadRecep'),
-                giro: getText('GiroRecep')
-            };
-
-            const items = [];
-            const detalles = doc.getElementsByTagName('Detalle');
-            const detallesNS = doc.getElementsByTagNameNS('*', 'Detalle');
-            const listaDetalles = detalles.length > 0 ? detalles : detallesNS;
-
-            for (let i = 0; i < listaDetalles.length; i++) {
-                const det = listaDetalles[i];
-                items.push({
-                    nombre: getText('NmbItem', det),
-                    descripcion: getText('DscItem', det),
-                    cantidad: parseFloat(getText('QtyItem', det)) || 1,
-                    precio: parseFloat(getText('PrcItem', det)) || 0,
-                    descuento: parseFloat(getText('DescuentoPct', det)) || 0,
-                    total: parseFloat(getText('MontoItem', det)) || 0,
-                    exento: getText('IndExe', det) === '1'
-                });
-            }
-
-            const num  = (tagName) => parseInt(getText(tagName)) || 0;
-            const fmtMonto = (tagName) => {
-                const v = num(tagName);
-                return v > 0 ? '$' + v.toLocaleString('es-CL') : '$0';
-            };
-
-            const totales = {
-                neto:     num('MntNeto'),
-                exento:   num('MntExe'),
-                tasaIVA:  parseFloat(getText('TasaIVA')) || 0,
-                iva:      num('IVA'),
-                total:    num('MntTotal'),
-            };
-
-            // Descuento/Recargo global
-            const dscNodes = doc.getElementsByTagName('DscRcgGlobal');
-            const dscGlobal = dscNodes.length > 0 ? {
-                tipoMov:  getText('TpoMov',   dscNodes[0]),
-                glosa:    getText('GlosaDR',  dscNodes[0]),
-                tipoValor:getText('TpoValor', dscNodes[0]),
-                valor:    parseFloat(getText('ValorDR', dscNodes[0])) || 0,
-            } : null;
-
-            // Referencias (para NC/ND)
-            const refNodes = doc.getElementsByTagName('Referencia');
-            const referencias = [];
-            for (let i = 0; i < refNodes.length; i++) {
-                const r = refNodes[i];
-                referencias.push({
-                    tipo:    getText('TpoDocRef', r),
-                    folio:   getText('FolioRef',  r),
-                    fecha:   getText('FchRef',    r),
-                    codigo:  getText('CodRef',    r),
-                    razon:   getText('RazonRef',  r),
-                });
-            }
-
-            const totalPalabras = this.numberToWords(totales.total);
-
-            // Catálogo SII completo de nombres de documento (Manual de Muestras §1.1.4)
-            const tipoNombre = {
-                33: 'FACTURA ELECTRÓNICA',
-                34: 'FACTURA NO AFECTA O EXENTA ELECTRÓNICA',
-                39: 'BOLETA ELECTRÓNICA',
-                41: 'BOLETA EXENTA ELECTRÓNICA',
-                43: 'LIQUIDACIÓN FACTURA ELECTRÓNICA',
-                46: 'FACTURA DE COMPRA ELECTRÓNICA',
-                52: 'GUÍA DE DESPACHO ELECTRÓNICA',
-                56: 'NOTA DE DÉBITO ELECTRÓNICA',
-                61: 'NOTA DE CRÉDITO ELECTRÓNICA',
-                110:'FACTURA DE EXPORTACIÓN ELECTRÓNICA',
-                111:'NOTA DE DÉBITO DE EXPORTACIÓN ELECTRÓNICA',
-                112:'NOTA DE CRÉDITO DE EXPORTACIÓN ELECTRÓNICA',
-            }[tipo] || 'DTE';
-
-            // Documentos que llevan acuse de recibo / cedible (Manual §1.4)
-            //   Factura, Factura Exenta, Guía, Factura de Compra, Liq. Factura.
-            //   NC/ND NO llevan acuse ni cedible (Manual §1.4).
-            //   Boletas (39/41) tampoco llevan acuse (no aplica el régimen Ley 19.983).
-            const tiposConCedible = [33, 34, 46, 43, 52];
-            const llevaAcuse  = tiposConCedible.includes(tipo);
-            const cedibleReal = llevaAcuse && opts.cedible;
-
-            // Etiqueta CEDIBLE — para guías: "CEDIBLE CON SU FACTURA" (Manual §1.4)
-            const cedibleLabel = (tipo === 52) ? 'CEDIBLE CON SU FACTURA' : 'CEDIBLE';
-
-            // Extraer el TED para el código de barras
-            const tedMatch = xmlText.match(/<TED[\s\S]*?<\/TED>/i);
-            this.state.ted = tedMatch ? tedMatch[0] : null;
-
-            // Tabla completa de tipos de traslado SII (Manual §1.4)
-            const trasladoGlosa = {
-                1: 'Operación constituye venta',
-                2: 'Ventas por efectuar',
-                3: 'Consignaciones',
-                4: 'Entrega gratuita',
-                5: 'Traslados internos',
-                6: 'Otros traslados no venta',
-                7: 'Guía de devolución',
-                8: 'Traslado para exportación (no venta)',
-                9: 'Venta para exportación'
-            };
-            const despachoGlosa = {
-                1: 'Por cuenta del receptor',
-                2: 'Por cuenta del emisor',
-                3: 'Por cuenta de un tercero'
-            };
-
-            const extra = {
-                indTraslado:  parseInt(getText('IndTraslado')) || 0,
-                tipoDespacho: parseInt(getText('TipoDespacho')) || 0,
-                patente:      getText('Patente'),
-                rutTranspor:  getText('RUTTrans'),
-                rutChofer:    getText('RUTChofer'),
-                nombreChofer: getText('NombreChofer'),
-                trasladoGlosa,
-                despachoGlosa,
-            };
-
-            const ctx = {
-                tipo, folio, fecha, emisor, receptor, items,
-                totales, dscGlobal, referencias,
-                totalPalabras, tipoNombre, extra,
-                opts, llevaAcuse, cedibleReal, cedibleLabel,
-            };
-
-            if (format === 'ticket') {
-                this.renderTicket(ctx);
-            } else {
-                this.renderLetter(ctx);
-            }
+            const built = this.buildDocHtml(xmlText, format, { ...opts, canvasId: 'barcode-canvas' });
+            if (!built) return;
+            this.state.ted = built.ted;
+            this.doPrint(built.html);
         } catch (e) {
             console.error('Error parseando XML para impresión:', e);
             alert('Error parseando documento para impresión: ' + e.message);
         }
+    },
+
+    /**
+     * Parsea un DTE firmado a un contexto de render. ÚNICA fuente de verdad del
+     * parseo, compartida por la impresión real y las muestras de certificación.
+     * Sin efectos colaterales (no toca this.state).
+     * @returns {{ctx:object, ted:?string, folio:string, tipo:number}}
+     */
+    parseDteCtx(xmlText, opts = {}) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlText, "text/xml");
+
+        const getText = (tagName, context = doc) => {
+            let els = context.getElementsByTagName(tagName);
+            if (els.length === 0) {
+                els = context.getElementsByTagNameNS('*', tagName);
+            }
+            return els.length > 0 ? els[0].textContent : '';
+        };
+
+        const tipo = parseInt(getText('TipoDTE')) || 33;
+        const folio = getText('Folio') || '—';
+        let fecha = getText('FchEmis');
+        if (fecha && fecha.includes('-')) {
+            const p = fecha.split('-');
+            if (p[0].length === 4) fecha = `${p[2]}-${p[1]}-${p[0]}`;
+        }
+
+        const emisor = {
+            rut: getText('RUTEmisor'),
+            razonSocial: getText('RznSoc'),
+            giro: getText('GiroEmis'),
+            acteco: getText('Acteco'),
+            direccion: getText('DirOrigen'),
+            comuna: getText('CmnaOrigen') || getText('CmnOrigen'),
+            ciudad: getText('CiudadOrigen'),
+            sucursal: getText('Sucursal')
+        };
+
+        const receptor = {
+            rut: getText('RUTRecep'),
+            nombre: getText('RznSocRecep'),
+            direccion: getText('DirRecep'),
+            comuna: getText('CmnaRecep') || getText('CmnRecep'),
+            ciudad: getText('CiudadRecep'),
+            giro: getText('GiroRecep')
+        };
+
+        const items = [];
+        const detalles = doc.getElementsByTagName('Detalle');
+        const detallesNS = doc.getElementsByTagNameNS('*', 'Detalle');
+        const listaDetalles = detalles.length > 0 ? detalles : detallesNS;
+
+        for (let i = 0; i < listaDetalles.length; i++) {
+            const det = listaDetalles[i];
+            items.push({
+                nombre: getText('NmbItem', det),
+                descripcion: getText('DscItem', det),
+                cantidad: parseFloat(getText('QtyItem', det)) || 1,
+                precio: parseFloat(getText('PrcItem', det)) || 0,
+                descuento: parseFloat(getText('DescuentoPct', det)) || 0,
+                total: parseFloat(getText('MontoItem', det)) || 0,
+                exento: getText('IndExe', det) === '1'
+            });
+        }
+
+        const num  = (tagName) => parseInt(getText(tagName)) || 0;
+
+        const totales = {
+            neto:     num('MntNeto'),
+            exento:   num('MntExe'),
+            tasaIVA:  parseFloat(getText('TasaIVA')) || 0,
+            iva:      num('IVA'),
+            total:    num('MntTotal'),
+        };
+
+        // Descuento/Recargo global
+        const dscNodes = doc.getElementsByTagName('DscRcgGlobal');
+        const dscGlobal = dscNodes.length > 0 ? {
+            tipoMov:  getText('TpoMov',   dscNodes[0]),
+            glosa:    getText('GlosaDR',  dscNodes[0]),
+            tipoValor:getText('TpoValor', dscNodes[0]),
+            valor:    parseFloat(getText('ValorDR', dscNodes[0])) || 0,
+        } : null;
+
+        // Referencias (para NC/ND)
+        const refNodes = doc.getElementsByTagName('Referencia');
+        const referencias = [];
+        for (let i = 0; i < refNodes.length; i++) {
+            const r = refNodes[i];
+            referencias.push({
+                tipo:    getText('TpoDocRef', r),
+                folio:   getText('FolioRef',  r),
+                fecha:   getText('FchRef',    r),
+                codigo:  getText('CodRef',    r),
+                razon:   getText('RazonRef',  r),
+            });
+        }
+
+        const totalPalabras = this.numberToWords(totales.total);
+
+        // Catálogo SII completo de nombres de documento (Manual de Muestras §1.1.4)
+        const tipoNombre = {
+            33: 'FACTURA ELECTRÓNICA',
+            34: 'FACTURA NO AFECTA O EXENTA ELECTRÓNICA',
+            39: 'BOLETA ELECTRÓNICA',
+            41: 'BOLETA EXENTA ELECTRÓNICA',
+            43: 'LIQUIDACIÓN FACTURA ELECTRÓNICA',
+            46: 'FACTURA DE COMPRA ELECTRÓNICA',
+            52: 'GUÍA DE DESPACHO ELECTRÓNICA',
+            56: 'NOTA DE DÉBITO ELECTRÓNICA',
+            61: 'NOTA DE CRÉDITO ELECTRÓNICA',
+            110:'FACTURA DE EXPORTACIÓN ELECTRÓNICA',
+            111:'NOTA DE DÉBITO DE EXPORTACIÓN ELECTRÓNICA',
+            112:'NOTA DE CRÉDITO DE EXPORTACIÓN ELECTRÓNICA',
+        }[tipo] || 'DTE';
+
+        // Documentos que llevan acuse de recibo / cedible (Manual §1.4)
+        //   Factura, Factura Exenta, Guía, Factura de Compra, Liq. Factura.
+        //   NC/ND NO llevan acuse ni cedible. Boletas (39/41) tampoco.
+        const tiposConCedible = [33, 34, 46, 43, 52];
+        const llevaAcuse  = tiposConCedible.includes(tipo);
+        const cedibleReal = llevaAcuse && opts.cedible;
+        const cedibleLabel = (tipo === 52) ? 'CEDIBLE CON SU FACTURA' : 'CEDIBLE';
+
+        // Extraer el TED para el código de barras
+        const tedMatch = xmlText.match(/<TED[\s\S]*?<\/TED>/i);
+        const ted = tedMatch ? tedMatch[0] : null;
+
+        // Tabla completa de tipos de traslado SII (Manual §1.4)
+        const trasladoGlosa = {
+            1: 'Operación constituye venta',
+            2: 'Ventas por efectuar',
+            3: 'Consignaciones',
+            4: 'Entrega gratuita',
+            5: 'Traslados internos',
+            6: 'Otros traslados no venta',
+            7: 'Guía de devolución',
+            8: 'Traslado para exportación (no venta)',
+            9: 'Venta para exportación'
+        };
+        const despachoGlosa = {
+            1: 'Por cuenta del receptor',
+            2: 'Por cuenta del emisor',
+            3: 'Por cuenta de un tercero'
+        };
+
+        const extra = {
+            indTraslado:  parseInt(getText('IndTraslado')) || 0,
+            tipoDespacho: parseInt(getText('TipoDespacho')) || 0,
+            patente:      getText('Patente'),
+            rutTranspor:  getText('RUTTrans'),
+            rutChofer:    getText('RUTChofer'),
+            nombreChofer: getText('NombreChofer'),
+            trasladoGlosa,
+            despachoGlosa,
+        };
+
+        const ctx = {
+            tipo, folio, fecha, emisor, receptor, items,
+            totales, dscGlobal, referencias,
+            totalPalabras, tipoNombre, extra,
+            opts, llevaAcuse, cedibleReal, cedibleLabel,
+            canvasId: opts.canvasId || 'barcode-canvas',
+        };
+
+        return { ctx, ted, folio, tipo };
+    },
+
+    /**
+     * Construye el HTML imprimible de UN documento (sin efectos colaterales).
+     * Usa el MISMO renderer (renderLetter/renderTicket) que la impresión real.
+     * @returns {{html:string, ted:?string, folio:string, tipo:number}|null}
+     */
+    buildDocHtml(xmlText, format = 'letter', opts = {}) {
+        try {
+            const parsed = this.parseDteCtx(xmlText, opts);
+            const html = (format === 'ticket') ? this.renderTicket(parsed.ctx) : this.renderLetter(parsed.ctx);
+            return { html, ted: parsed.ted, folio: parsed.folio, tipo: parsed.tipo };
+        } catch (e) {
+            console.error('Error construyendo HTML del documento:', e);
+            return null;
+        }
+    },
+
+    /**
+     * Renderiza un LOTE de documentos (muestras de certificación) reutilizando
+     * el mismo renderer de la impresión real — única fuente de verdad. Cada
+     * documento lleva su propio timbre PDF417.
+     * @param {Array<{xml:string,label?:string}>} list
+     * @param {object} opts  { format, cedible, unidadSII, resolNum, resolFch, ambiente }
+     */
+    renderMuestras(list, opts = {}) {
+        if (!Array.isArray(list) || !list.length) {
+            alert('No hay documentos para generar muestras.');
+            return;
+        }
+        const format = opts.format || 'letter';
+        const zona = this.getPrintZone();
+        let allHtml = '';
+        const barcodes = [];
+        list.forEach((it, i) => {
+            const cid = 'ted-cv-' + i;
+            const built = this.buildDocHtml(it.xml, format, { ...opts, canvasId: cid });
+            if (!built) return;
+            allHtml += `<div style="page-break-after:always">${built.html}</div>`;
+            if (built.ted) barcodes.push({ cid, ted: built.ted });
+        });
+        if (!allHtml) { alert('No se pudo construir ninguna muestra.'); return; }
+        zona.innerHTML = allHtml;
+        zona.style.display = 'block';
+        barcodes.forEach(b => this.renderBarcode(b.cid, b.ted));
+        setTimeout(() => {
+            window.print();
+            setTimeout(() => { zona.style.display = 'none'; }, 1500);
+        }, 700);
     },
 
     renderLetter(ctx) {
@@ -776,7 +828,7 @@ const DTE = {
               <p style="font-size:9px; margin:4px 0 0 0; text-align:justify; line-height:1.3">
                 El acuse de recibo que se declara en este acto, de acuerdo a lo dispuesto en la
                 letra b) del Art. 4°, y la letra c) del Art. 5° de la Ley 19.983, acredita que la
-                entrega de mercaderías o servicio(s) prestado(s) ha(n) sido recibido(s).
+                entrega de mercaderías o servicio (s) prestado (s) ha (n) sido recibido (s).
               </p>
             </div>` : '';
 
@@ -792,8 +844,8 @@ const DTE = {
             </div>` : '';
 
         // ── Resolución dinámica ──
-        const resolStr = opts.resolNum
-            ? `Res. Ex. SII N° ${opts.resolNum}` + (opts.resolFch ? ` del ${this._fechaAnio(opts.resolFch)}` : '')
+        const resolStr = (opts.resolNum || opts.resolNum === 0 || opts.ambiente === 'CERTIFICACION')
+            ? `Res. Ex. SII N° ${opts.resolNum || 0}` + (opts.resolFch ? ` del ${this._fechaAnio(opts.resolFch)}` : '')
             : '';
 
         const html = `
@@ -872,15 +924,16 @@ const DTE = {
   <!-- TED a 2cm del borde izquierdo, abajo -->
   <div style="margin-top:18mm; display:flex; align-items:flex-end">
     <div style="margin-left:8mm; text-align:center">
-      <canvas id="barcode-canvas" style="width:75mm; height:22mm; display:block"></canvas>
-      <div style="font-size:8pt; font-weight:bold; margin-top:3px">Timbre Electrónico SII</div>
-      <div style="font-size:7pt; margin-top:1px">${this._esc(resolStr)} — Verifique documento: www.sii.cl</div>
+      <canvas id="${ctx.canvasId || 'barcode-canvas'}" style="width:75mm; height:22mm; display:block"></canvas>
+      <div style="font-size:8pt; font-weight:bold; margin-top:3px; text-align:center">Timbre Electrónico SII</div>
+      <div style="font-size:7pt; margin-top:1px; text-align:center">${this._esc(resolStr)}</div>
+      <div style="font-size:7pt; margin-top:1px; text-align:center">Verifique documento: www.sii.cl</div>
     </div>
   </div>
 
   ${cedibleTag}
 </div>`;
-        this.doPrint(html);
+        return html;
     },
 
     // ─── Helpers compartidos ───────────────────────────────
@@ -952,8 +1005,8 @@ const DTE = {
               ${extra.rutTranspor ? '<strong>TRANSP:</strong> ' + this._esc(extra.rutTranspor) : ''}
             </div>` : '';
 
-        const resolStr = opts.resolNum
-            ? `Res. Ex. SII N° ${opts.resolNum}` + (opts.resolFch ? ` del ${this._fechaAnio(opts.resolFch)}` : '')
+        const resolStr = (opts.resolNum || opts.resolNum === 0 || opts.ambiente === 'CERTIFICACION')
+            ? `Res. Ex. SII N° ${opts.resolNum || 0}` + (opts.resolFch ? ` del ${this._fechaAnio(opts.resolFch)}` : '')
             : '';
 
         const ambienteTag = (opts.ambiente === 'CERTIFICACION') ?
@@ -1007,7 +1060,7 @@ const DTE = {
 
     <!-- TED: a >=2cm del borde izq (margin-left 20mm sobre 80mm de papel) -->
     <div style="margin-top:8px; margin-left:8mm; text-align:center">
-        <canvas id="barcode-canvas" style="width:60mm; height:20mm; display:block; margin:0 auto"></canvas>
+        <canvas id="${ctx.canvasId || 'barcode-canvas'}" style="width:60mm; height:20mm; display:block; margin:0 auto"></canvas>
         <div style="font-size:8px; font-weight:bold; margin-top:2px">Timbre Electrónico SII</div>
         <div style="font-size:7px">${this._esc(resolStr)}</div>
         <div style="font-size:7px">Verifique documento: www.sii.cl</div>
@@ -1015,7 +1068,7 @@ const DTE = {
 
     ${cedibleReal ? `<div style="text-align:right; font-weight:900; font-size:13px; margin-top:8px; border:1.5px solid #000; padding:3px 8px; display:inline-block; float:right">${cedibleLabel}</div><div style="clear:both"></div>` : ''}
 </div>`;
-        this.doPrint(html);
+        return html;
     },
 
     getPrintZone() {

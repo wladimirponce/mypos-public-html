@@ -29,6 +29,7 @@ class CertificationManager
         'B-CASO-1','B-CASO-2','B-CASO-3','B-CASO-4','B-CASO-5',
         'F-4832043-1','F-4832043-2','F-4832043-3','F-4832043-4',
         'F-4832043-5','F-4832043-6','F-4832043-7','F-4832043-8',
+        'G-4820753-1','G-4820753-2','G-4820753-3',
     ];
 
     /** Tipos a simular y cantidad requerida */
@@ -584,8 +585,8 @@ XML;
              'neto'=>9383,'iva'=>0,'exe'=>0,'total'=>11166,
              'codIvaNoRec'=>5,'mntIvaNoRec'=>1783],
 
-            // FCA electrónica 9 — retención total IVA (cód. 6)
-            ['tipo'=>45,'folio'=>9,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
+            // Factura de Compra Electrónica 9 — retención total IVA (cód. 6)
+            ['tipo'=>46,'folio'=>9,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
              'neto'=>9253,'iva'=>0,'exe'=>0,'total'=>11011,
              'codIvaNoRec'=>6,'mntIvaNoRec'=>1758],
 
@@ -618,11 +619,13 @@ XML;
     // =========================================================
 
     /**
-     * Genera HTML listo para imprimir a PDF desde el navegador.
-     * Incluye todos los DTEs del set de pruebas + hasta 10 de simulación.
-     * El código PDF417 del TED se renderiza con bwip-js en el cliente.
+     * Selecciona los DTEs para las muestras impresas (set de pruebas + hasta 10
+     * de simulación + set de boletas). Devuelve solo los XML; el render lo hace
+     * el ÚNICO renderer (jscript.js → DTE.renderMuestras) — misma fuente de
+     * verdad que la impresión real.
+     * @return array<int,array{label:string,tipo:int,folio:int,xml:string}>
      */
-    public function getMuestrasHtml(): string
+    public function getMuestrasXmls(): array
     {
         $state  = $this->loadState();
         $tmpDir = $this->context->getTmpPath();
@@ -654,11 +657,22 @@ XML;
             }
         }
 
-        if (empty($dtes)) {
-            return '<html><body><p style="padding:40px;font-family:sans-serif">No hay DTEs generados aún. Ejecute primero el Set de Pruebas.</p></body></html>';
+        // Set de boletas de certificación (sobre + RCOF): cert_boletas/dte_T39F*.xml
+        $boletasDir = $tmpDir . 'cert_boletas/';
+        if (is_dir($boletasDir)) {
+            foreach (glob($boletasDir . 'dte_T*F*.xml') ?: [] as $bxml) {
+                if (preg_match('/dte_T(\d+)F(\d+)\.xml$/', $bxml, $mm)) {
+                    $dtes[] = [
+                        'label' => 'BOLETA SET',
+                        'tipo'  => (int)$mm[1],
+                        'folio' => (int)$mm[2],
+                        'xml'   => file_get_contents($bxml),
+                    ];
+                }
+            }
         }
 
-        return $this->buildMuestrasHtml($dtes);
+        return $dtes;
     }
 
     private function detectTipo(string $caseId): int
@@ -670,167 +684,144 @@ XML;
         return 33;
     }
 
-    private function buildMuestrasHtml(array $dtes): string
+
+    // =========================================================
+    //  CERTIFICACIÓN DE BOLETAS — Set en un sobre + RCOF
+    // =========================================================
+
+    /**
+     * Ejecuta TODO el flujo de certificación de boletas exigido por el SII:
+     *   1. Toma los casos del Set de Pruebas vinculado a la empresa.
+     *   2. Genera N boletas usando los folios del CAF en orden FIJO (desde..),
+     *      SIN consumir folios ni avanzar el contador → reintentable indefinidamente
+     *      sobre los mismos folios hasta que el SII apruebe.
+     *   3. Arma UN solo sobre EnvioBOLETA y lo firma.
+     *   4. Genera y firma el RCOF (ConsumoFolios) del set.
+     *   5. Envía sobre + RCOF al SII (ambiente certificación) y devuelve los Track IDs.
+     *
+     * Reintentar simplemente vuelve a llamar este método: regenera las mismas
+     * boletas con los mismos folios (no pide folios nuevos).
+     */
+    public function certificarSetBoletas(): array
     {
-        $tipoNombres = [
-            33 => 'FACTURA ELECTRÓNICA',
-            34 => 'FACTURA NO AFECTA O EXENTA',
-            39 => 'BOLETA ELECTRÓNICA',
-            41 => 'BOLETA NO AFECTA O EXENTA',
-            52 => 'GUÍA DE DESPACHO ELECTRÓNICA',
-            56 => 'NOTA DE DÉBITO ELECTRÓNICA',
-            61 => 'NOTA DE CRÉDITO ELECTRÓNICA',
-        ];
-
-        $pages = '';
-        foreach ($dtes as $item) {
-            $dom = new DOMDocument();
-            @$dom->loadXML($item['xml']);
-            $g = fn(string $tag) => htmlspecialchars($dom->getElementsByTagName($tag)->item(0)?->textContent ?? '', ENT_QUOTES, 'UTF-8');
-
-            // Construir filas de detalle
-            $rows = '';
-            foreach ($dom->getElementsByTagName('Detalle') as $det) {
-                $gd  = fn(string $t) => htmlspecialchars($det->getElementsByTagName($t)->item(0)?->textContent ?? '', ENT_QUOTES, 'UTF-8');
-                $rows .= "<tr><td>{$gd('NroLinDet')}</td><td>{$gd('NmbItem')}</td>"
-                       . "<td style='text-align:right'>{$gd('QtyItem')}</td>"
-                       . "<td style='text-align:right'>$ {$gd('PrcItem')}</td>"
-                       . "<td style='text-align:right'>$ {$gd('MontoItem')}</td></tr>";
-            }
-
-            // TED para PDF417
-            $tedNode = $dom->getElementsByTagName('TED')->item(0);
-            $tedXml  = $tedNode ? $dom->saveXML($tedNode) : '';
-            $tedJs   = json_encode($tedXml);
-            $folio   = $item['folio'];
-
-            $tipoNombre = $tipoNombres[$item['tipo']] ?? "DTE TIPO {$item['tipo']}";
-            $label      = htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8');
-
-            $neto = $g('MntNeto');
-            $iva  = $g('IVA');
-            $exe  = $g('MntExe');
-            $tot  = $g('MntTotal');
-
-            $totalesRows = '';
-            if ($neto) $totalesRows .= "<tr><td>Neto</td><td style='text-align:right'>$ $neto</td></tr>";
-            if ($iva)  $totalesRows .= "<tr><td>IVA 19%</td><td style='text-align:right'>$ $iva</td></tr>";
-            if ($exe)  $totalesRows .= "<tr><td>Exento</td><td style='text-align:right'>$ $exe</td></tr>";
-            $totalesRows .= "<tr class='tot'><td><strong>Total</strong></td><td style='text-align:right'><strong>$ $tot</strong></td></tr>";
-
-            $pages .= <<<HTML
-<div class="page">
-  <div class="header">
-    <div class="emisor">
-      <strong>{$g('RznSoc')}</strong><br>
-      RUT: {$g('RUTEmisor')}<br>
-      {$g('GiroEmis')}<br>
-      {$g('DirOrigen')}, {$g('CmnaOrigen')}, {$g('CiudadOrigen')}
-    </div>
-    <div class="tipo-box">
-      <div class="tipo-nombre">$tipoNombre</div>
-      <div class="folio-num">N° $folio</div>
-      <div class="caso-label">CASO: $label</div>
-      <div class="ambiente-badge">SII — CERTIFICACIÓN</div>
-    </div>
-  </div>
-  <div class="recep">
-    <strong>Señor(es):</strong> {$g('RznSocRecep')}&nbsp;&nbsp;|&nbsp;&nbsp;
-    <strong>RUT:</strong> {$g('RUTRecep')}<br>
-    <strong>Giro:</strong> {$g('GiroRecep')}&nbsp;&nbsp;|&nbsp;&nbsp;
-    <strong>Dir:</strong> {$g('DirRecep')}, {$g('CmnaRecep')}, {$g('CiudadRecep')}<br>
-    <strong>F. Emisión:</strong> {$g('FchEmis')}&nbsp;&nbsp;|&nbsp;&nbsp;
-    <strong>F. Pago:</strong> {$g('FmaPago')}
-  </div>
-  <table class="items">
-    <thead><tr><th>#</th><th>Descripción</th><th>Cant.</th><th>Precio Unit.</th><th>Total</th></tr></thead>
-    <tbody>$rows</tbody>
-  </table>
-  <div class="footer-area">
-    <div class="ted-area">
-      <canvas id="ted-$folio"></canvas>
-      <div class="ted-label">Timbre Electrónico SII (PDF417)</div>
-      <script>
-        (function(){
-          var xml = $tedJs;
-          if (xml) {
-            bwipjs.toCanvas('ted-$folio', {bcid:'pdf417', text:xml, scale:2, height:14, includetext:false});
-          }
-        })();
-      </script>
-    </div>
-    <div class="totales-area">
-      <table class="totales">$totalesRows</table>
-    </div>
-  </div>
-  <div class="resol">
-    Resolución SII N° {$g('NroResol')} del {$g('FchResol')} |
-    Emisión: {$g('FchEmis')} |
-    Verifique en <em>www.sii.cl</em>
-  </div>
-</div>
-HTML;
+        $setMgr  = new CertSetManager($this->context);
+        $boletas = $setMgr->getBoletas();
+        if (empty($boletas)) {
+            throw new Exception('No hay un Set de Pruebas de boletas vinculado a la empresa. Súbalo primero en "Set de Certificación".');
         }
 
-        $css = <<<CSS
-* { margin:0; padding:0; box-sizing:border-box; }
-body { background:#ddd; font-family:Arial, sans-serif; font-size:8.5pt; color:#111; }
-.topbar { position:sticky; top:0; z-index:100; background:#1a1a2e; color:#fff;
-  padding:8px 20px; display:flex; align-items:center; gap:16px; }
-.topbar strong { font-size:11pt; }
-.topbar .count { background:#27ae60; padding:2px 10px; border-radius:12px; font-size:9pt; }
-.topbar button { background:#e74c3c; color:#fff; border:none; padding:7px 20px;
-  border-radius:4px; cursor:pointer; font-size:10pt; font-weight:bold; }
-.page { background:#fff; width:21cm; margin:14px auto; padding:1.4cm 1.5cm;
-  page-break-after:always; box-shadow:0 2px 8px rgba(0,0,0,.25); }
-.header { display:flex; justify-content:space-between; gap:16px;
-  border-bottom:2px solid #000; padding-bottom:10px; margin-bottom:10px; }
-.emisor { flex:1; line-height:1.6; }
-.tipo-box { border:2px solid #000; padding:10px 14px; text-align:center; min-width:200px; }
-.tipo-nombre { font-weight:bold; font-size:9pt; text-transform:uppercase; }
-.folio-num { font-size:18pt; font-weight:bold; color:#c0392b; margin:4px 0; }
-.caso-label { font-size:7.5pt; color:#555; background:#f8f8f8; padding:1px 6px; border-radius:3px; }
-.ambiente-badge { font-size:7pt; color:#999; margin-top:4px; }
-.recep { border:1px solid #bbb; padding:6px 10px; background:#fafafa;
-  margin-bottom:10px; line-height:1.7; }
-.items { width:100%; border-collapse:collapse; margin-bottom:12px; }
-.items th, .items td { border:1px solid #ccc; padding:3px 6px; }
-.items th { background:#f0f0f0; text-align:center; }
-.footer-area { display:flex; gap:16px; margin-bottom:10px; align-items:flex-start; }
-.ted-area { flex:0 0 auto; text-align:center; }
-.ted-label { font-size:6.5pt; color:#888; margin-top:3px; }
-.totales-area { flex:1; display:flex; justify-content:flex-end; }
-.totales { border-collapse:collapse; min-width:180px; }
-.totales td { padding:3px 10px; border:1px solid #ccc; }
-.totales .tot { background:#f5f5f5; font-size:10pt; }
-.resol { font-size:6.5pt; color:#888; text-align:center;
-  border-top:1px dashed #ccc; padding-top:6px; }
-@media print {
-  body { background:#fff; }
-  .topbar { display:none !important; }
-  .page { box-shadow:none; margin:0; width:100%; }
-}
-CSS;
+        // CAF de boletas (tipo 39). Folios fijos: desde .. desde+N-1 (no se consumen).
+        $caf        = loadCAF(39, 0);
+        $folioDesde = (int)$caf['desde'];
+        $folioHasta = (int)$caf['hasta'];
+        $disponibles = $folioHasta - $folioDesde + 1;
+        $necesarios  = count($boletas);
+        if ($disponibles < $necesarios) {
+            throw new Exception("El CAF de boletas tiene $disponibles folio(s) pero el set requiere $necesarios. Cargue un CAF con al menos $necesarios folios.");
+        }
 
-        $total = count($dtes);
-        return <<<HTML
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<title>Muestras Impresas DTE — Certificación SII</title>
-<script src="https://cdn.jsdelivr.net/npm/bwip-js@latest/dist/bwip-js-min.js"></script>
-<style>$css</style>
-</head>
-<body>
-<div class="topbar">
-  <strong>Muestras Impresas — Certificación SII</strong>
-  <span class="count">$total documentos</span>
-  <button onclick="window.print()">🖨 Imprimir / Guardar PDF</button>
-</div>
-$pages
-</body>
-</html>
-HTML;
+        $GLOBALS['SII_CERT_TIPO'] = 39;
+        [$cert, $privKey] = loadCertificate(39);
+
+        $fecha  = date('Y-m-d');
+        $tmpDir = $this->context->getTmpPath() . 'cert_boletas/';
+        if (!is_dir($tmpDir)) @mkdir($tmpDir, 0755, true);
+
+        $dtesFirmados = [];
+        $foliosUsados = [];
+        $detalleCasos = [];
+        $sumNeto = $sumIva = $sumExe = $sumTotal = 0;
+
+        foreach (array_values($boletas) as $i => $caso) {
+            $folio  = $folioDesde + $i;
+            $items  = $caso['items'] ?? [];
+            $montos = calcularMontos($items, 39);
+            $idDte  = "T39F{$folio}";
+            $ref    = !empty($caso['referencia']) ? [$caso['referencia']] : [];
+
+            $xmlDoc = buildDocumentoXML(
+                39, $folio, $fecha,
+                ['rut' => '66666666-6', 'nombre' => 'Consumidor Final'],
+                $items, $montos, $caf, $idDte, $privKey,
+                0, 0, '', '', $ref, $caso['descuentoGlobal'] ?? null, null, null, 3
+            );
+            $xmlFirmado = signDTE($xmlDoc, $cert, $privKey, $idDte);
+            file_put_contents($tmpDir . "dte_{$idDte}.xml", $xmlFirmado);
+
+            $dtesFirmados[] = $xmlFirmado;
+            $foliosUsados[] = $folio;
+            $sumNeto  += $montos['mntNeto'];
+            $sumIva   += $montos['iva'];
+            $sumExe   += $montos['mntExe'];
+            $sumTotal += $montos['mntTotal'];
+            $detalleCasos[] = ['caso' => $caso['caso'] ?? "#$i", 'folio' => $folio, 'total' => $montos['mntTotal']];
+        }
+
+        // Sobre único + firma
+        $sobre        = buildEnvioBoletaSet($dtesFirmados, $cert);
+        $sobreFirmado = signDTE($sobre, $cert, $privKey, 'SetDoc');
+        file_put_contents($tmpDir . 'envio_set_boletas.xml', $sobreFirmado);
+
+        // Validación XSD local del sobre
+        $val = validateXmlAgainstXSD($sobreFirmado);
+        if (empty($val['valid']) && empty($val['skipped'])) {
+            return [
+                'ok'         => false,
+                'error'      => 'El sobre no pasó la validación XSD local: ' . implode('; ', array_slice($val['errors'] ?? [], 0, 5)),
+                'xsd_errors' => $val['errors'] ?? [],
+            ];
+        }
+
+        // Enviar el sobre de boletas
+        $envio = sendBoletaREST($sobreFirmado, 39, $folioDesde, '');
+
+        // RCOF del set
+        $rcofGen = generateRCOF([
+            'fecha'     => $fecha,
+            'secuencia' => 1,
+            'resumenes' => [[
+                'tipo' => 39, 'total' => $sumTotal, 'neto' => $sumNeto, 'iva' => $sumIva, 'exe' => $sumExe,
+                'emitidos' => $necesarios, 'utilizados' => $necesarios, 'anulados' => 0,
+                'rango_desde' => $folioDesde, 'rango_hasta' => $folioDesde + $necesarios - 1,
+            ]],
+        ]);
+        file_put_contents($tmpDir . 'rcof_set_boletas.xml', $rcofGen['xml'] ?? '');
+        $rcofEnvio = !empty($rcofGen['ok'])
+            ? sendRCOFToSII($rcofGen['xml'], $fecha, 1)
+            : ['ok' => false, 'error' => $rcofGen['error'] ?? 'No se pudo generar el RCOF'];
+
+        // Persistir estado para auditoría / reintento
+        $state = $this->loadState();
+        $state['boletas'] = [
+            'ts'            => date('Y-m-d\TH:i:s'),
+            'folios'        => $foliosUsados,
+            'casos'         => $detalleCasos,
+            'sobre_trackId' => $envio['trackId'] ?? null,
+            'sobre_estado'  => $envio['estado'] ?? null,
+            'sobre_ok'      => (bool)($envio['ok'] ?? false),
+            'rcof_trackId'  => $rcofEnvio['trackId'] ?? null,
+            'rcof_ok'       => (bool)($rcofEnvio['ok'] ?? false),
+            'rcof_via'      => $rcofEnvio['via'] ?? null,
+        ];
+        $this->saveState($state);
+
+        return [
+            'ok'     => (bool)($envio['ok'] ?? false),
+            'folios' => $foliosUsados,
+            'sobre'  => [
+                'trackId' => $envio['trackId'] ?? null,
+                'estado'  => $envio['estado'] ?? null,
+                'ok'      => (bool)($envio['ok'] ?? false),
+                'mensaje' => $envio['mensaje'] ?? ($envio['error'] ?? ''),
+            ],
+            'rcof'   => [
+                'trackId' => $rcofEnvio['trackId'] ?? null,
+                'ok'      => (bool)($rcofEnvio['ok'] ?? false),
+                'via'     => $rcofEnvio['via'] ?? null,
+                'mensaje' => $rcofEnvio['mensaje'] ?? ($rcofEnvio['error'] ?? ''),
+            ],
+            'montos' => ['neto' => $sumNeto, 'iva' => $sumIva, 'exento' => $sumExe, 'total' => $sumTotal],
+            'mensaje'=> 'Set de boletas y RCOF procesados. Revise los Track IDs e infórmelos en el portal SII.',
+        ];
     }
 }

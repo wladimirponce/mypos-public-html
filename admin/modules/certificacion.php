@@ -71,7 +71,7 @@ $certCases = [
       </div>
     </div>
     <button class="d-btn d-btn-success" onclick="certRunAll()">
-      <i class="bi bi-play-fill"></i> Ejecutar Todo
+      <i class="bi bi-play-fill"></i> Paso 2: Facturas, notas y guias
     </button>
     <button class="d-btn d-btn-warning" onclick="certRetry()" id="btn-retry" style="display:none">
       <i class="bi bi-arrow-clockwise"></i> Reintentar Fallidos
@@ -85,6 +85,59 @@ $certCases = [
     <button class="d-btn d-btn-outline" onclick="loadState()">
       <i class="bi bi-arrow-repeat"></i> Actualizar
     </button>
+  </div>
+</div>
+
+<!-- ══ Certificación de BOLETAS (set en un sobre + RCOF) ══ -->
+<div class="d-card mb-4" style="border:2px solid var(--c-primary)">
+  <div class="cert-stage-header" style="background:linear-gradient(135deg,#eef2ff,#f8fafc)">
+    <i class="bi bi-receipt"></i> Certificación de Boletas Electrónicas
+    <span style="font-size:.7rem; font-weight:400; color:var(--c-text-muted); margin-left:8px">
+      Genera el set completo con los folios del CAF, lo envía en un solo sobre + RCOF.
+    </span>
+  </div>
+  <div class="d-card-body">
+    <div class="row g-3 align-items-start">
+      <!-- Vincular set de prueba -->
+      <div class="col-md-5">
+        <label class="d-label"><i class="bi bi-paperclip"></i> Archivos oficiales del SII (.txt)</label>
+        <div style="font-size:.7rem; color:var(--c-text-muted); margin-bottom:4px">
+          Paso 1 boletas: ejemplo <code>Set Prueba BE.txt</code>
+        </div>
+        <div style="display:flex; gap:6px">
+          <input type="file" id="set-file-boletas" accept=".txt" class="d-input" style="font-size:.78rem">
+          <button class="d-btn d-btn-outline d-btn-sm" onclick="certUploadSet('boletas')" title="Subir set de boletas">
+            <i class="bi bi-upload"></i>
+          </button>
+        </div>
+        <div style="font-size:.7rem; color:var(--c-text-muted); margin:8px 0 4px">
+          Paso 2 facturas/notas/guias: ejemplo <code>SIISetDePruebas784350428.txt</code>
+        </div>
+        <div style="display:flex; gap:6px">
+          <input type="file" id="set-file-basico" accept=".txt" class="d-input" style="font-size:.78rem">
+          <button class="d-btn d-btn-outline d-btn-sm" onclick="certUploadSet('basico')" title="Subir set basico">
+            <i class="bi bi-upload"></i>
+          </button>
+        </div>
+        <div id="set-info" style="font-size:.72rem; color:var(--c-text-muted); margin-top:6px">Cargando set vinculado...</div>
+      </div>
+      <!-- Acción principal -->
+      <div class="col-md-7">
+        <label class="d-label">Proceso completo</label>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <button class="d-btn d-btn-primary" id="btn-cert-boletas" onclick="certBoletas()">
+            <i class="bi bi-rocket-takeoff-fill"></i> Paso 1: Boletas (sobre + RCOF)
+          </button>
+          <button type="button" class="d-btn d-btn-outline" onclick="certMuestras()">
+            <i class="bi bi-printer"></i> Muestras PDF
+          </button>
+        </div>
+        <div style="font-size:.7rem; color:var(--c-text-muted); margin-top:6px">
+          Reutiliza siempre los mismos folios del CAF (no consume de más). Reintentable hasta aprobar.
+        </div>
+      </div>
+    </div>
+    <div id="cert-boletas-result" style="margin-top:12px"></div>
   </div>
 </div>
 
@@ -114,19 +167,31 @@ $certCases = [
         <?php foreach ($certCases as $setKey => $set): ?>
         <div class="cert-stage-header" style="background:transparent; font-size:.75rem; font-weight:600; padding:6px 14px; border-top:1px solid var(--c-border)">
           <?= htmlspecialchars($set['nombre']) ?>
+          <?php if ($setKey === 'B'): ?>
+          <span class="ms-auto" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400">
+            Usar solo "Certificar Boletas (sobre + RCOF)"
+          </span>
+          <?php else: ?>
           <button class="d-btn d-btn-sm d-btn-outline ms-auto"
             onclick="certRunSet('<?= $setKey ?>')">
             <i class="bi bi-send"></i> Enviar set
           </button>
+          <?php endif; ?>
         </div>
         <?php foreach ($set['casos'] as $caseId => $caseName): ?>
         <div class="cert-case-row" id="row-<?= $caseId ?>">
           <span class="cert-badge cb-pending" id="badge-<?= $caseId ?>">Pendiente</span>
           <span><?= htmlspecialchars($caseName) ?></span>
           <span class="cert-folio" id="folio-<?= $caseId ?>"></span>
+          <?php if ($setKey === 'B'): ?>
+          <span class="cert-folio" style="text-align:right; font-size:.68rem; color:var(--c-text-muted)">
+            Sobre + RCOF
+          </span>
+          <?php else: ?>
           <button class="d-btn d-btn-sm d-btn-outline" onclick="certRunCase('<?= $caseId ?>')" title="Ejecutar solo este caso">
             <i class="bi bi-play"></i>
           </button>
+          <?php endif; ?>
         </div>
         <?php endforeach; ?>
         <?php endforeach; ?>
@@ -408,6 +473,76 @@ async function api(action, extra={}) {
   return r.json();
 }
 
+// ── Set de Certificación (subir .txt y vincular) ──────────────────────────────
+async function certLoadSetInfo() {
+  const el = document.getElementById('set-info');
+  try {
+    const res = await api('cert_set_get');
+    if (res.ok && res.set) {
+      const s = res.set;
+      const origenBoletas = s.origen_boletas ? ` � Boletas: <em>${s.origen_boletas}</em>` : '';
+      const origenBasico = s.origen_basico ? ` � General: <em>${s.origen_basico}</em>` : '';
+      el.innerHTML = `<span style="color:#27ae60"><i class="bi bi-check-circle"></i> Set vinculado:</span> `
+        + `${(s.boletas||[]).length} boleta(s)` + (s.facturas?.length ? `, ${s.facturas.length} caso(s) set basico` : '')
+        + (s.atencion_basico ? ` � N� atencion ${s.atencion_basico}` : '')
+        + origenBoletas + origenBasico;
+    } else {
+      el.innerHTML = '<span style="color:#e67e22"><i class="bi bi-exclamation-triangle"></i> Sin set vinculado. Suba el .txt del SII.</span>';
+    }
+  } catch(e) { el.textContent = 'No se pudo cargar el set.'; }
+}
+
+async function certUploadSet(tipo='boletas') {
+  const inputId = tipo === 'basico' ? 'set-file-basico' : 'set-file-boletas';
+  const ejemplo = tipo === 'basico' ? 'SIISetDePruebas784350428.txt' : 'Set Prueba BE.txt';
+  const input = document.getElementById(inputId);
+  const el = document.getElementById('set-info');
+  if (!input.files.length) { alert('Seleccione el archivo ' + ejemplo); return; }
+  const fd = new FormData();
+  fd.append('action', 'cert_set_upload');
+  fd.append('set_file', input.files[0]);
+  el.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando ' + ejemplo + '...';
+  try {
+    const r = await fetch('cert_bridge.php', { method:'POST', body: fd });
+    const res = await r.json();
+    if (res.ok) {
+      log(`Set vinculado: ${res.boletas} boleta(s), ${res.facturas} caso(s) set basico.`, 'ok');
+      certLoadSetInfo();
+    } else {
+      el.innerHTML = `<span style="color:#e74c3c"><i class="bi bi-x-circle"></i> ${res.error||'Error al procesar el set'}</span>`;
+    }
+  } catch(e) { el.innerHTML = `<span style="color:#e74c3c">Error: ${e.message}</span>`; }
+}
+
+async function certBoletas() {
+  const btn = document.getElementById('btn-cert-boletas');
+  const out = document.getElementById('cert-boletas-result');
+  btn.disabled = true;
+  out.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Generando boletas, sobre y RCOF, enviando al SII…</div>';
+  log('Iniciando certificación de boletas (set + RCOF)…', 'info');
+  try {
+    const res = await api('cert_boletas');
+    if (res.error && !res.sobre) {
+      out.innerHTML = `<div class="d-alert danger"><i class="bi bi-x-circle"></i> ${res.error}</div>`;
+      log('Certificación boletas: '+res.error, 'error');
+    } else {
+      const s = res.sobre||{}, rc = res.rcof||{};
+      const badge = (ok)=> ok ? '<span class="cert-badge cb-ok">✓ OK</span>' : '<span class="cert-badge cb-failed">✗</span>';
+      out.innerHTML = `<div class="d-alert ${res.ok?'success':'warning'}">
+        <div><strong>Folios usados:</strong> ${(res.folios||[]).join(', ')}</div>
+        <div style="margin-top:6px">${badge(s.ok)} <strong>Sobre boletas</strong> — Track ID: <code>${s.trackId||'—'}</code> ${s.estado?('· '+s.estado):''} ${s.mensaje?('<br><small>'+s.mensaje+'</small>'):''}</div>
+        <div style="margin-top:6px">${badge(rc.ok)} <strong>RCOF</strong> — Track ID: <code>${rc.trackId||'—'}</code> ${rc.via?('· vía '+rc.via):''} ${rc.mensaje?('<br><small>'+rc.mensaje+'</small>'):''}</div>
+        <div style="margin-top:6px; font-size:.75rem; color:var(--c-text-muted)">Informe estos Track IDs en el portal SII (Boletas electrónicas de ventas y servicios).</div>
+      </div>`;
+      log(`Boletas: sobre TRK ${s.trackId||'-'} (${s.ok?'OK':'FALLA'}), RCOF TRK ${rc.trackId||'-'} (${rc.ok?'OK':'FALLA'})`, res.ok?'ok':'warn');
+    }
+  } catch(e) {
+    out.innerHTML = `<div class="d-alert danger"><i class="bi bi-x-circle"></i> Error de comunicación: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function loadState() {
   try {
     const res = await api('cert_state');
@@ -428,7 +563,7 @@ async function certRunAll() {
   status.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Ejecutando pool completo... puede tardar varios minutos.</div>';
   log('Iniciando ejecución completa del pool...', 'info');
   try {
-    const res = await api('cert_run_all');
+    const res = await api('cert_run_pruebas', { skip_boletas: 1 });
     applyState(res.estado);
     const r = res.resultados || {};
     Object.entries(r).forEach(([k,v]) => {
@@ -447,6 +582,10 @@ async function certRunAll() {
 }
 
 async function certRunSet(setKey) {
+  if (setKey === 'B') {
+    log('Boletas no se envian por casos. Use Certificar Boletas (sobre + RCOF).', 'warn');
+    return;
+  }
   const caseMaps = <?= json_encode($certCases) ?>;
   const caseIds = Object.keys(caseMaps[setKey]?.casos || {});
   log(`Ejecutando set ${setKey} (${caseIds.length} casos)...`, 'info');
@@ -472,6 +611,10 @@ async function certRunSet(setKey) {
 }
 
 async function certRunCase(cid) {
+  if (cid.startsWith('B-CASO-')) {
+    log('Boletas no se envian individualmente. Use Certificar Boletas (sobre + RCOF).', 'warn');
+    return;
+  }
   const badge = document.getElementById('badge-'+cid);
   if (badge) { badge.className='cert-badge cb-running'; badge.textContent='⟳...'; }
   log(`Ejecutando ${cid}...`, 'info');
@@ -517,9 +660,26 @@ async function certReset() {
   await loadState();
 }
 
-function certMuestras() {
-  window.open('cert_bridge.php?action=cert_muestras', '_blank');
-  document.getElementById('stage4-badge').textContent = '✓ Generado';
+async function certMuestras() {
+  // Muestras impresas con el MISMO renderer que la impresión real (jscript.js).
+  if (typeof DTE === 'undefined' || !DTE.renderMuestras) {
+    alert('No se encontró el motor de impresión (jscript.js).');
+    return;
+  }
+  log('Generando muestras impresas…', 'info');
+  try {
+    const res = await api('cert_muestras_xml');
+    if (!res.ok || !Array.isArray(res.dtes) || !res.dtes.length) {
+      alert('No hay documentos para muestras. Ejecute primero el Set de Pruebas o la Certificación de Boletas.');
+      return;
+    }
+    DTE.renderMuestras(res.dtes, res.opts || {});
+    const badge = document.getElementById('stage4-badge');
+    if (badge) badge.textContent = '✓ Generado';
+    log(`Muestras generadas: ${res.dtes.length} documento(s).`, 'ok');
+  } catch (e) {
+    alert('Error generando muestras: ' + e.message);
+  }
 }
 
 // ── Intercambio ───────────────────────────────────────────────────────────────
@@ -588,6 +748,7 @@ async function certLibro(tipo) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadState();
+  certLoadSetInfo();
   log('Módulo de certificación cargado.', 'info');
 });
 </script>

@@ -12,14 +12,14 @@ if (file_exists($autoloadProd)) {
     \Mypos\Support\Env::loadFile(dirname(__DIR__) . '/api/.env');
 } else {
     require_once $autoloadLocal;
-    \Mypos\Support\Env::loadFile(dirname(__DIR__) . '/web/mypos-backend/backend/.env');
+    \Mypos\Support\Env::loadFile(dirname(__DIR__) . '/web/mypos-backend/.env');
 }
 
 // Configuración
 $verify_token = 'AGENTIKA-MYPOS';
-$access_token = 'EAAU0ImqRHX8BRtSZAqZBQXm4z6HAaAFTdUbAZClHUpYtKd7hVgNYLZC05HnFvwN0npJZCL9C89NHuyygMkLhCw1NPY6wgXCpNW3l60ezG2Pze1Y5qy8GKktkrgrJw34oOa2IV8QPHgHslmkctkVXaHrDCYcBSNZAFUQkmh5FJAj0ppceYuczYj21Nuhe4IRZBdZBbskfmcQd4XBC8fP1E5Qce5QrZBGDl4XoqnkUEyLPkjZCqY5GoyA2pPYm2cbF7xbMdhJDSPq9maDvhzRJn27vnysmg0ZBQrZAXJg2JlMZD';
+$access_token = 'EAAU0ImqRHX8BRvdCK3BfmreX8mve0NaAp6R0AKmlJefJeEzkQz5XsVhHH1Gdg24CqeGHea937itX93dZCbpF5zQfdWXclmfuZCrqvIfjxsIN9Hv7TqWHh7DRoXLHOLtaclRkZB17Ypzo0ZCONOC7jgc0gPAn7dUTdabWKoueQtJuW8NZAfle6XytZCnqWT1QZDZD';
 $api_url = 'https://graph.facebook.com/v25.0/1181492205043206/messages';
-$gemini_api_key = 'AIzaSyDhozy7FKElAl-kkrIAWAZW7r076GEm3O8'; // TODO: Reemplazar con la API Key real
+$gemini_api_key = getenv('GEMINI_API_KEY') ?: '';
 
 // Manejo de errores global
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
@@ -62,16 +62,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $data = json_decode($input, true);
     
     $log_file = __DIR__ . '/webhook_log.txt';
-    file_put_contents($log_file, "\n" . str_repeat("=", 80) . "\n", FILE_APPEND);
-    file_put_contents($log_file, date('Y-m-d H:i:s') . " - Webhook recibido\n", FILE_APPEND);
     
     $from = null;
     $userMessage = '';
     $userName = '';
+    $messageId = '';
     
     if (isset($data['entry'][0]['changes'][0]['value']['messages'][0])) {
         $message = $data['entry'][0]['changes'][0]['value']['messages'][0];
         $from = $message['from'];
+        $messageId = $message['id'] ?? '';
         
         if (isset($message['text']['body'])) {
             $userMessage = $message['text']['body'];
@@ -84,8 +84,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Si hay un mensaje de texto válido
     if ($from && $userMessage) {
-        file_put_contents($log_file, "De: " . sanitizeForLog($from) . ($userName ? " (" . sanitizeForLog($userName) . ")" : "") . "\n", FILE_APPEND);
-        file_put_contents($log_file, "Mensaje: " . sanitizeForLog($userMessage) . "\n", FILE_APPEND);
+        // --- PREVENIR REINTENTOS DUPLICADOS DE META ---
+        if ($messageId) {
+            $processed_file = __DIR__ . '/processed_messages.json';
+            $processed_ids = [];
+            
+            if (file_exists($processed_file)) {
+                $content = file_get_contents($processed_file);
+                if ($content) {
+                    $processed_ids = json_decode($content, true) ?: [];
+                }
+            }
+            
+            if (in_array($messageId, $processed_ids)) {
+                http_response_code(200);
+                echo 'OK';
+                exit;
+            }
+            
+            // Mantener solo los últimos 100 IDs
+            $processed_ids[] = $messageId;
+            if (count($processed_ids) > 100) {
+                array_shift($processed_ids);
+            }
+            file_put_contents($processed_file, json_encode($processed_ids));
+        }
+        // ----------------------------------------------
         
         // --- INTERCEPTAR VERIFICACION ONBOARDING ---
         if (preg_match('/^Verificar MyPOS (WTS-[A-Z0-9\-]+)$/i', trim($userMessage), $matches)) {
@@ -134,52 +158,222 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // --- FIN INTERCEPCION ---
 
         try {
-            // Llamar a Gemini API directamente
-            $gemini_endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=' . $gemini_api_key;
+            // --- MEMORIA DE CONVERSACION ---
+            $db = \Mypos\Config\Database::connection();
+            $stmt = $db->prepare('SELECT context_summary FROM whatsapp_conversations WHERE phone_number = ?');
+            $stmt->execute([$from]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
             
-            $prompt = $userMessage;
-            
-            $gemini_payload = [
-                'contents' => [
-                    [
-                        'parts' => [
-                            ['text' => $prompt]
-                        ]
-                    ]
-                ],
-                'systemInstruction' => [
-                    'parts' => [
-                        ['text' => "Eres el asistente virtual de MyPOS, un avanzado software de Punto de Venta (POS) en la nube. Tu objetivo es ayudar a los clientes y usuarios respondiendo de manera amigable, rápida, concisa y muy profesional en español. Representas a la marca MyPOS. El usuario con el que estás hablando se llama $userName."]
-                    ]
-                ]
-            ];
-            
-            $gemini_options = [
-                'http' => [
-                    'header'  => "Content-Type: application/json\r\n",
-                    'method'  => 'POST',
-                    'content' => json_encode($gemini_payload),
-                    'ignore_errors' => true
-                ]
-            ];
-            
-            $gemini_context  = stream_context_create($gemini_options);
-            $gemini_response_raw = file_get_contents($gemini_endpoint, false, $gemini_context);
-            
-            $aiResponse = "Lo siento, en este momento no puedo procesar tu solicitud. Por favor, intenta contactarnos más tarde o visítanos en www.mypos.cl";
-            
-            if ($gemini_response_raw) {
-                $gemini_data = json_decode($gemini_response_raw, true);
-                if (isset($gemini_data['candidates'][0]['content']['parts'][0]['text'])) {
-                    $aiResponse = trim($gemini_data['candidates'][0]['content']['parts'][0]['text']);
-                } else {
-                    file_put_contents($log_file, "Error Gemini Response: " . sanitizeForLog($gemini_response_raw) . "\n", FILE_APPEND);
-                }
+            $contextSummary = '';
+            if ($row) {
+                $contextSummary = $row['context_summary'];
             } else {
-                file_put_contents($log_file, "Error Gemini API Request Failed\n", FILE_APPEND);
+                $stmtIns = $db->prepare('INSERT INTO whatsapp_conversations (phone_number, user_name) VALUES (?, ?)');
+                $stmtIns->execute([$from, $userName]);
+            }
+            // --------------------------------
+
+            // --- CONTROL DE LIMITES Y ROTACION DE LLAVES GEMINI ---
+            $gemini_api_base = rtrim(getenv('GEMINI_API_BASE') ?: 'https://generativelanguage.googleapis.com/v1beta', '/');
+            $gemini_model = getenv('GEMINI_MODEL') ?: 'gemini-1.5-flash';
+            
+            // Cargar llaves disponibles
+            $gemini_keys = [];
+            $env_vars = getenv();
+            foreach ($env_vars as $key => $val) {
+                if (strpos($key, 'GEMINI_API_KEY') === 0 && !empty(trim($val))) {
+                    $gemini_keys[$key] = trim($val);
+                }
+            }
+            if (empty($gemini_keys)) {
+                $gemini_keys['GEMINI_API_KEY'] = getenv('GEMINI_API_KEY') ?: '';
+            }
+
+            $rate_limit_file = __DIR__ . '/gemini_keys_usage.json';
+            
+            $reserveKey = function() use ($rate_limit_file, $gemini_keys, $log_file) {
+                $max_daily = 500;
+                $max_min_req = 10;
+                $max_min_tok = 200000;
+                
+                $fp = fopen($rate_limit_file, 'c+');
+                if (!$fp) return null;
+                flock($fp, LOCK_EX);
+                $data = json_decode(file_get_contents($rate_limit_file) ?: '{}', true) ?: [];
+                
+                $today = date('Y-m-d');
+                $now = date('H:i');
+                
+                $selected_key_id = null;
+                $selected_key_val = null;
+                
+                foreach ($gemini_keys as $k_id => $k_val) {
+                    if (!isset($data[$k_id])) {
+                        $data[$k_id] = ['date' => $today, 'daily_requests' => 0, 'current_minute' => $now, 'minute_requests' => 0, 'minute_tokens' => 0];
+                    }
+                    if ($data[$k_id]['date'] !== $today) {
+                        $data[$k_id]['date'] = $today;
+                        $data[$k_id]['daily_requests'] = 0;
+                    }
+                    if ($data[$k_id]['current_minute'] !== $now) {
+                        $data[$k_id]['current_minute'] = $now;
+                        $data[$k_id]['minute_requests'] = 0;
+                        $data[$k_id]['minute_tokens'] = 0;
+                    }
+                    
+                    if ($data[$k_id]['daily_requests'] < $max_daily && $data[$k_id]['minute_requests'] < $max_min_req && $data[$k_id]['minute_tokens'] < $max_min_tok) {
+                        $selected_key_id = $k_id;
+                        $selected_key_val = $k_val;
+                        $data[$k_id]['daily_requests']++;
+                        $data[$k_id]['minute_requests']++;
+                        break;
+                    }
+                }
+                
+                ftruncate($fp, 0);
+                rewind($fp);
+                fwrite($fp, json_encode($data));
+                flock($fp, LOCK_UN);
+                fclose($fp);
+                
+                if (!$selected_key_id) {
+                    file_put_contents($log_file, "ERROR: Todas las llaves Gemini saturadas.\n", FILE_APPEND);
+                    return null;
+                }
+                return ['id' => $selected_key_id, 'val' => $selected_key_val];
+            };
+
+            $updateKeyUsage = function($k_id, $tokensUsed, $markExhausted = false) use ($rate_limit_file) {
+                $fp = fopen($rate_limit_file, 'c+');
+                if (!$fp) return;
+                flock($fp, LOCK_EX);
+                $data = json_decode(file_get_contents($rate_limit_file) ?: '{}', true) ?: [];
+                if (isset($data[$k_id])) {
+                    $data[$k_id]['minute_tokens'] += $tokensUsed;
+                    if ($markExhausted) {
+                        $data[$k_id]['minute_requests'] = 999;
+                    }
+                }
+                ftruncate($fp, 0);
+                rewind($fp);
+                fwrite($fp, json_encode($data));
+                flock($fp, LOCK_UN);
+                fclose($fp);
+            };
+
+            $callGemini = function($sysInstruction, $userMsg) use ($gemini_api_base, $gemini_model, $log_file, $reserveKey, $updateKeyUsage, &$callGemini) {
+                $keyInfo = $reserveKey();
+                if (!$keyInfo) {
+                    return ['text' => null, 'tokens' => 0];
+                }
+                
+                $gemini_endpoint = $gemini_api_base . '/models/' . $gemini_model . ':generateContent?key=' . $keyInfo['val'];
+                $payload = [
+                    'contents' => [['parts' => [['text' => $userMsg]]]],
+                    'system_instruction' => ['parts' => [['text' => $sysInstruction]]]
+                ];
+                $options = [
+                    'http' => [
+                        'header'  => "Content-Type: application/json\r\n",
+                        'method'  => 'POST',
+                        'content' => json_encode($payload),
+                        'ignore_errors' => true
+                    ]
+                ];
+                $context = stream_context_create($options);
+                $res = file_get_contents($gemini_endpoint, false, $context);
+                
+                $used_tokens = 0;
+                
+                if (isset($http_response_header) && is_array($http_response_header)) {
+                    if (preg_match('/HTTP\/\d+\.\d+\s+429/', $http_response_header[0])) {
+                        $updateKeyUsage($keyInfo['id'], 0, true);
+                        return $callGemini($sysInstruction, $userMsg);
+                    }
+                }
+                
+                if ($res) {
+                    $data = json_decode($res, true);
+                    if (isset($data['usageMetadata']['totalTokenCount'])) {
+                        $used_tokens = (int)$data['usageMetadata']['totalTokenCount'];
+                    }
+                    $updateKeyUsage($keyInfo['id'], $used_tokens, false);
+                    
+                    if (isset($data['candidates'][0]['content']['parts'][0]['text'])) {
+                        return ['text' => trim($data['candidates'][0]['content']['parts'][0]['text']), 'tokens' => $used_tokens];
+                    } else {
+                        file_put_contents($log_file, "Error Gemini Response: " . sanitizeForLog($res) . "\n", FILE_APPEND);
+                    }
+                }
+                return ['text' => null, 'tokens' => $used_tokens];
+            };
+
+            $prompt = $userMessage;
+            $total_tokens_consumed = 0;
+            
+            // --- PASO 1: Determinar concepto ---
+            $kb_file = __DIR__ . '/knowledge_base.json';
+            $kb_data = [];
+            $injected_info = "";
+            
+            if (file_exists($kb_file)) {
+                $kb_content = file_get_contents($kb_file);
+                if ($kb_content) {
+                    $kb_data = json_decode($kb_content, true) ?: [];
+                }
             }
             
-            file_put_contents($log_file, "Respuesta AI generada: " . sanitizeForLog(substr($aiResponse, 0, 100)) . "...\n", FILE_APPEND);
+            if (!empty($kb_data)) {
+                $conceptos = implode(", ", array_keys($kb_data));
+                $sysConcept = "El usuario dice: '$prompt'. ¿Cuál de estos conceptos necesita saber para responder? Conceptos disponibles: [$conceptos]. Responde SOLO con el nombre del concepto exacto. Si no aplica ninguno, responde NADA.";
+                
+                $resConcepto = $callGemini($sysConcept, "Identifica el concepto.");
+                $conceptoDetectado = $resConcepto['text'];
+                $total_tokens_consumed += $resConcepto['tokens'];
+                
+                if ($conceptoDetectado) {
+                    $conceptoDetectado = trim(str_replace(['"', "'", '`'], '', $conceptoDetectado));
+                    if (isset($kb_data[$conceptoDetectado])) {
+                        $injected_info = "\n\nInformación de contexto estricta (úsala para responder):\n" . $kb_data[$conceptoDetectado];
+                    }
+                }
+            }
+            // -----------------------------------
+
+            $base_instruction = "Eres el asistente virtual de MyPOS, un avanzado software de Punto de Venta (POS) en la nube. Tu objetivo es ayudar a los clientes y usuarios respondiendo de manera amigable, rápida, concisa y muy profesional en español. Representas a la marca MyPOS. El usuario con el que estás hablando se llama $userName.\n\nInstrucción Obligatoria: DEBES responder ÚNICAMENTE con un objeto JSON válido con la siguiente estructura estricta: {\"respuesta_usuario\": \"(tu respuesta amigable para enviar al usuario)\", \"nuevo_resumen\": \"(resumen en máximo 50 palabras del estado de la conversación histórica más este nuevo mensaje, para que recuerdes de qué hablaban en el futuro)\"}\n\nMemoria del Chat hasta ahora: " . ($contextSummary ?: "(No hay charla previa)") . $injected_info;
+
+            // --- PASO 2: Generar respuesta final (JSON) ---
+            $resFinal = $callGemini($base_instruction, $prompt);
+            $aiResponseRaw = $resFinal['text'];
+            $total_tokens_consumed += $resFinal['tokens'];
+            
+            // Actualizar total gastado en BD
+            if ($total_tokens_consumed > 0) {
+                $stmtTk = $db->prepare('UPDATE whatsapp_conversations SET total_tokens_used = total_tokens_used + ? WHERE phone_number = ?');
+                $stmtTk->execute([$total_tokens_consumed, $from]);
+            }
+
+            $aiResponse = "Lo siento, estoy procesando demasiadas consultas ahora mismo. Por favor, intenta enviarme el mensaje en un par de minutos.";
+            
+            if ($aiResponseRaw) {
+                $cleanJson = preg_replace('/^```(?:json)?\s*|\s*```$/i', '', trim($aiResponseRaw));
+                $parsed = json_decode($cleanJson, true);
+                
+                if ($parsed && isset($parsed['respuesta_usuario'])) {
+                    $aiResponse = $parsed['respuesta_usuario'];
+                    if (isset($parsed['nuevo_resumen'])) {
+                        $nuevoResumen = $parsed['nuevo_resumen'];
+                        $stmtUpd = $db->prepare('UPDATE whatsapp_conversations SET context_summary = ? WHERE phone_number = ?');
+                        $stmtUpd->execute([$nuevoResumen, $from]);
+                    }
+                } else {
+                    file_put_contents($log_file, "Error JSON Parse: " . sanitizeForLog($aiResponseRaw) . "\n", FILE_APPEND);
+                    $aiResponse = $aiResponseRaw;
+                }
+            } else {
+                file_put_contents($log_file, "Error Gemini API Request Failed or Saturada\n", FILE_APPEND);
+            }
+            // ---------------------------------------
             
             // Enviar respuesta por WhatsApp
             $response_data = [
@@ -203,13 +397,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $context = stream_context_create($options);
             $result = file_get_contents($api_url, false, $context);
-            file_put_contents($log_file, "Respuesta Meta: " . sanitizeForLog($result) . "\n", FILE_APPEND);
             
         } catch (Exception $e) {
             file_put_contents($log_file, "ERROR: " . $e->getMessage() . "\n", FILE_APPEND);
         }
-    } else {
-        file_put_contents($log_file, "⚠ Webhook ignorado - Sin mensaje de texto válido\n", FILE_APPEND);
     }
     
     http_response_code(200);

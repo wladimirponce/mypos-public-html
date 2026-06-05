@@ -59,9 +59,18 @@ class Context
     /**
      * Retorna la ruta temporal de la empresa.
      */
-    public function getTmpPath(): string 
+    public function getTmpPath(): string
     {
         return "{$this->basePath}/tmp/{$this->getRut()}/";
+    }
+
+    /**
+     * Retorna la ruta persistente del set de certificación SII de la empresa.
+     * (No vive en tmp/ porque el deploy regenera tmp/).
+     */
+    public function getSetPath(): string
+    {
+        return "{$this->basePath}/cert_sets/{$this->getRut()}/set.json";
     }
 
     /**
@@ -72,6 +81,7 @@ class Context
         $dirs = [
             dirname($this->getCertPath()),
             dirname($this->getCafPath(0)), // Solo el directorio base de CAFs
+            dirname($this->getSetPath()),
             $this->getTmpPath()
         ];
 

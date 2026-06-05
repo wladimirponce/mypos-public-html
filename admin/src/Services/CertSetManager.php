@@ -1,0 +1,315 @@
+<?php
+declare(strict_types=1);
+
+namespace App\Services;
+
+use App\Core\Context;
+
+/**
+ * Parsea y persiste el Set de Pruebas del SII vinculado a una empresa.
+ *
+ * Permite subir el archivo .txt tal cual lo entrega el SII (ej.
+ * "Set Prueba BE.txt" para boletas o "SIISetDePruebas{rut}.txt" para el set
+ * básico de facturas) y convertirlo a una estructura JSON reutilizable, sin
+ * hardcodear casos ni números de atención.
+ *
+ * Estructura persistida (cert_sets/{RUT}/set.json):
+ * {
+ *   "rut": "...", "uploaded": "ISO8601", "origen": "nombre archivo",
+ *   "atencion_boletas": null,
+ *   "atencion_basico":  "4879708",
+ *   "boletas":  [ { "caso","tipoDTE",39,"referencia":{...},"items":[...] }, ... ],
+ *   "facturas": [ { "caso","tipoDTE","referencia"?,"descuentoGlobal"?,"items":[...] }, ... ]
+ * }
+ */
+class CertSetManager
+{
+    private Context $context;
+    private string  $setPath;
+
+    public function __construct(Context $context)
+    {
+        $this->context = $context;
+        $this->setPath = $context->getSetPath();
+    }
+
+    // =========================================================
+    //  PERSISTENCIA
+    // =========================================================
+
+    public function load(): ?array
+    {
+        if (!is_file($this->setPath)) return null;
+        $j = json_decode((string)file_get_contents($this->setPath), true);
+        return is_array($j) ? $j : null;
+    }
+
+    private function save(array $set): void
+    {
+        $dir = dirname($this->setPath);
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        file_put_contents($this->setPath, json_encode($set, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    }
+
+    public function delete(): bool
+    {
+        return is_file($this->setPath) ? @unlink($this->setPath) : true;
+    }
+
+    /** Devuelve solo los casos de boletas del set vinculado (o []). */
+    public function getBoletas(): array
+    {
+        $s = $this->load();
+        return $s['boletas'] ?? [];
+    }
+
+    // =========================================================
+    //  IMPORTACIÓN
+    // =========================================================
+
+    /**
+     * Parsea el contenido crudo del .txt y lo persiste asociado a la empresa.
+     * @return array resumen { ok, boletas:int, facturas:int, atencion_basico }
+     */
+    public function importarTxt(string $rawContent, string $origen = 'set.txt'): array
+    {
+        $txt = $this->normalizarTexto($rawContent);
+
+        $boletas  = $this->parseBoletas($txt);
+        $facturas = $this->parseSetBasico($txt);
+
+        if (empty($boletas) && empty($facturas)) {
+            return ['ok' => false, 'error' => 'No se reconocieron casos de boleta ni de facturación en el archivo. Verifique que sea el .txt del Set de Pruebas del SII.'];
+        }
+
+        $actual = $this->load() ?? [];
+        $set = [
+            'rut'              => $this->context->getRut(),
+            'uploaded'         => date('c'),
+            'origen'           => $origen,
+            'origen_boletas'   => !empty($boletas) ? $origen : ($actual['origen_boletas'] ?? null),
+            'origen_basico'    => !empty($facturas) ? $origen : ($actual['origen_basico'] ?? null),
+            'atencion_basico'  => $this->extraerAtencion($txt, 'SET BASICO') ?? ($actual['atencion_basico'] ?? null),
+            'boletas'          => !empty($boletas) ? $boletas : ($actual['boletas'] ?? []),
+            'facturas'         => !empty($facturas) ? $facturas : ($actual['facturas'] ?? []),
+        ];
+        $this->save($set);
+
+        return [
+            'ok'              => true,
+            'boletas'         => count($boletas),
+            'facturas'        => count($facturas),
+            'atencion_basico' => $set['atencion_basico'],
+            'origen'          => $origen,
+        ];
+    }
+
+    /** Convierte a UTF-8 (los .txt del SII vienen en ISO-8859-1) y normaliza saltos. */
+    private function normalizarTexto(string $raw): string
+    {
+        $enc = mb_detect_encoding($raw, ['UTF-8', 'ISO-8859-1', 'Windows-1252'], true) ?: 'ISO-8859-1';
+        if ($enc !== 'UTF-8') {
+            $raw = mb_convert_encoding($raw, 'UTF-8', $enc);
+        }
+        return str_replace(["\r\n", "\r"], "\n", $raw);
+    }
+
+    private function extraerAtencion(string $txt, string $marcador): ?string
+    {
+        if (preg_match('/' . preg_quote($marcador, '/') . '.*?N[ÚU]MERO DE ATENCI[ÓO]N:\s*(\d+)/iu', $txt, $m)) {
+            return $m[1];
+        }
+        return null;
+    }
+
+    // =========================================================
+    //  PARSER — BOLETAS
+    // =========================================================
+
+    /**
+     * Reconoce los casos de boleta (CASO-1, CASO-2, ...). El set de boletas usa
+     * "Precio Unitario con IVA", referencia CodRef=SET / RazonRef=CASO-N, y
+     * observaciones que marcan ítems exentos o unidad de medida.
+     */
+    private function parseBoletas(string $txt): array
+    {
+        // Solo procesar la sección de boletas si el archivo la contiene.
+        if (!preg_match('/BOLETA\s+ELECTRONICA/i', $txt)) {
+            return [];
+        }
+
+        // Aislar la parte de boletas: desde el encabezado hasta un separador de set básico (si lo hubiera).
+        $seccion = $txt;
+        if (preg_match('/(SET\s+B[ÁA]SICO|SET\s+LIBRO|NUMERO DE ATENCION)/iu', $txt, $m, PREG_OFFSET_CAPTURE)) {
+            // Si "CASO-" (boletas) aparece antes que "SET BASICO", recortar en el set básico.
+            $posBasico = $m[0][1];
+            $posBoleta = stripos($txt, 'CASO-');
+            if ($posBoleta !== false && $posBoleta < $posBasico) {
+                $seccion = substr($txt, 0, $posBasico);
+            }
+        }
+
+        // Dividir por casos "CASO-N"
+        $bloques = preg_split('/^CASO-(\d+)\s*$/m', $seccion, -1, PREG_SPLIT_DELIM_CAPTURE);
+        if (count($bloques) < 3) return [];
+
+        $casos = [];
+        // $bloques: [pre, "1", cuerpo1, "2", cuerpo2, ...]
+        for ($i = 1; $i < count($bloques); $i += 2) {
+            $num    = $bloques[$i];
+            $cuerpo = $bloques[$i + 1] ?? '';
+            $items  = $this->parseItems($cuerpo, /*conIvaIncluido*/ true);
+            if (empty($items)) continue;
+
+            $this->aplicarObservaciones($cuerpo, $items);
+
+            $casos[] = [
+                'caso'       => "CASO-$num",
+                'tipoDTE'    => 39,
+                'referencia' => ['codigo' => 'SET', 'razon' => "CASO-$num"],
+                'items'      => $items,
+            ];
+        }
+        return $casos;
+    }
+
+    // =========================================================
+    //  PARSER — SET BÁSICO (FACTURAS / NC / ND)
+    // =========================================================
+
+    private function parseSetBasico(string $txt): array
+    {
+        if (!preg_match('/SET\s+B[ÁA]SICO/iu', $txt)) return [];
+
+        // Aislar desde "SET BASICO" hasta el siguiente "SET " (libro de ventas, etc.)
+        $start = stripos($txt, 'SET BASICO');
+        if ($start === false) return [];
+        $sub = substr($txt, $start);
+        if (preg_match('/\nSET\s+LIBRO/i', $sub, $m, PREG_OFFSET_CAPTURE)) {
+            $sub = substr($sub, 0, $m[0][1]);
+        }
+
+        // Casos "CASO 4879708-1"
+        $bloques = preg_split('/^CASO\s+([0-9]+)-(\d+)\s*$/m', $sub, -1, PREG_SPLIT_DELIM_CAPTURE);
+        if (count($bloques) < 4) return [];
+
+        $casos = [];
+        for ($i = 1; $i < count($bloques); $i += 3) {
+            $atencion = $bloques[$i];
+            $num      = $bloques[$i + 1];
+            $cuerpo   = $bloques[$i + 2] ?? '';
+            $caseId   = "$atencion-$num";
+
+            $tipoDTE = $this->detectarTipoDoc($cuerpo);
+            $items   = $this->parseItems($cuerpo, /*conIvaIncluido*/ false);
+
+            $caso = ['caso' => $caseId, 'tipoDTE' => $tipoDTE, 'items' => $items];
+
+            // Descuento global "DESCUENTO GLOBAL ITEMES AFECTOS  23%"
+            if (preg_match('/DESCUENTO\s+GLOBAL[^\d]*(\d+)\s*%/iu', $cuerpo, $m)) {
+                $caso['descuentoGlobal'] = (int)$m[1];
+            }
+
+            // Referencia a otro caso (NC/ND)
+            if (preg_match('/REFERENCIA\s+.*?CASO\s+[0-9]+-(\d+)/isu', $cuerpo, $m)) {
+                $razon = '';
+                if (preg_match('/RAZON\s+REFERENCIA\s+(.+)/iu', $cuerpo, $mr)) {
+                    $razon = trim(preg_split('/\n/', $mr[1])[0]);
+                }
+                $caso['referencia'] = ['caso_ref' => $atencion . '-' . $m[1], 'razon' => $razon];
+            }
+
+            $casos[] = $caso;
+        }
+        return $casos;
+    }
+
+    private function detectarTipoDoc(string $cuerpo): int
+    {
+        if (preg_match('/NOTA\s+DE\s+CREDITO/iu', $cuerpo))  return 61;
+        if (preg_match('/NOTA\s+DE\s+DEBITO/iu', $cuerpo))   return 56;
+        if (preg_match('/FACTURA\s+DE\s+COMPRA/iu', $cuerpo)) return 46;
+        if (preg_match('/GUIA\s+DE\s+DESPACHO/iu', $cuerpo)) return 52;
+        if (preg_match('/LIQUIDACION/iu', $cuerpo))          return 43;
+        return 33; // Factura electrónica por defecto
+    }
+
+    // =========================================================
+    //  HELPERS DE PARSEO DE LÍNEAS
+    // =========================================================
+
+    /**
+     * Extrae ítems de un bloque de texto. Cada línea de ítem termina en
+     * cantidad y (opcionalmente) precio; el resto es el nombre.
+     *
+     * Acepta:
+     *   "Cambio de aceite      1      19900"        → qty, precio
+     *   "Pañuelo AFECTO   767   5937   10%"         → qty, precio, descuento%
+     *   "ITEM 1                71"                  → solo cantidad (guías)
+     */
+    private function parseItems(string $cuerpo, bool $conIvaIncluido): array
+    {
+        $items = [];
+        foreach (explode("\n", $cuerpo) as $linea) {
+            $l = trim($linea);
+            if ($l === '') continue;
+
+            // Saltar metadatos y la fila de ENCABEZADO de columnas.
+            // OJO: no filtrar por "ITEM" al inicio — hay ítems reales llamados
+            // "ITEM 1 AFECTO", "item exento 2", etc. La fila de encabezado se
+            // reconoce porque contiene la columna CANTIDAD / PRECIO / TOTAL LINEA.
+            if (preg_match('/^(DOCUMENTO|REFERENCIA|RAZON|MOTIVO|TRASLADO|OBSERVAC|DESCUENTO\s+GLOBAL|COMISIONES|={3,}|-{3,})/iu', $l)
+                || preg_match('/\b(CANTIDAD|PRECIO\s+UNITARIO|TOTAL\s+LINEA)\b/iu', $l)) {
+                continue;
+            }
+
+            // nombre + cantidad + precio (+ opcional descuento %)
+            if (preg_match('/^(.+?)\s+(\d{1,7})\s+([\d.]+)(?:\s+(\d{1,3})\s*%)?\s*$/u', $l, $m)) {
+                $items[] = [
+                    'nombre'    => trim($m[1]),
+                    'cantidad'  => (int)$m[2],
+                    'precio'    => (int)str_replace('.', '', $m[3]),
+                    'descuento' => isset($m[4]) ? (int)$m[4] : 0,
+                    'exento'    => (bool)preg_match('/exento/i', $m[1]),
+                ];
+                continue;
+            }
+
+            // nombre + cantidad (guías de despacho sin precio)
+            if (preg_match('/^(.+?)\s+(\d{1,7})\s*$/u', $l, $m) && !preg_match('/^(CASO|SET|FACTURA|BOLETA)/i', $l)) {
+                $items[] = [
+                    'nombre'   => trim($m[1]),
+                    'cantidad' => (int)$m[2],
+                    'precio'   => 0,
+                    'exento'   => (bool)preg_match('/exento/i', $m[1]),
+                ];
+            }
+        }
+        return $items;
+    }
+
+    /**
+     * Aplica las OBSERVACIONES de un caso a sus ítems:
+     *   - "El item N ... es ... exento"  → marca ese ítem como exento
+     *   - "Unidad de medida en Kg"       → fija unidadMedida en los ítems
+     */
+    private function aplicarObservaciones(string $cuerpo, array &$items): void
+    {
+        if (!preg_match('/OBSERVAC/iu', $cuerpo)) return;
+
+        // Ítems exentos por número: "item 2 ... exento"
+        if (preg_match_all('/item\s+(\d+)[^.]*?exento/iu', $cuerpo, $mm)) {
+            foreach ($mm[1] as $idx) {
+                $k = (int)$idx - 1;
+                if (isset($items[$k])) $items[$k]['exento'] = true;
+            }
+        }
+
+        // Unidad de medida (ej. Kg)
+        if (preg_match('/unidad\s+de\s+medida\s+en\s+([A-Za-zº°]+)/iu', $cuerpo, $m)) {
+            $um = trim($m[1]);
+            foreach ($items as &$it) { $it['unidadMedida'] = $um; }
+            unset($it);
+        }
+    }
+}

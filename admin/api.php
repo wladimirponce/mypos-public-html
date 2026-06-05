@@ -1035,7 +1035,7 @@ if ($action) {
             $mgr = new \App\Services\CertificationManager($globalContext);
             $tSim = (int)($data['tipo'] ?? $_GET['tipo'] ?? 33);
             $cantSim = (int)($data['cantidad'] ?? $_GET['cantidad'] ?? 50);
-            echo json_encode($mgr->generateSimulationSet($tSim, $cantSim));
+            echo json_encode($mgr->runSimulacion($tSim, $cantSim));
             break;
         case 'cc':
         case 'cert_case':
@@ -1610,17 +1610,15 @@ function sendDTE(array $data): array {
 
     if (!$xml) throw new Exception('No hay XML de DTE para enviar');
 
-    // Certificado según tipo: boletas (39/41) -> Cristina ; guías/facturas -> David
+    // Certificado según tipo: boletas (39/41) → Cristina ; guías/facturas → David
     $GLOBALS['SII_CERT_TIPO'] = $tipo;
     [$cert, $privKey] = loadCertificate($tipo);
-    $semilla   = getSemilla();
-    $token     = getToken($semilla, $cert, $privKey);
 
     // Construir y firmar el sobre (aplica tanto para Boletas como para DTEs normales)
-    $envio = buildEnvioDTE($xml, $tipo, $folio, $cert);
+    $envio        = buildEnvioDTE($xml, $tipo, $folio, $cert);
     $envioFirmado = signDTE($envio, $cert, $privKey, 'SetDoc');
 
-    // ── Validación XSD local del sobre (si el XSD está disponible) ──
+    // ── Validación XSD local del sobre ──
     $val = validateXmlAgainstXSD($envioFirmado);
     if (!$val['valid'] && !$val['skipped']) {
         saveSiiLog('sendDTE', "T{$tipo}F{$folio} rechazado por XSD local: " . implode('; ', array_slice($val['errors'], 0, 3)), 'ERROR');
@@ -1632,8 +1630,9 @@ function sendDTE(array $data): array {
         ];
     }
 
-    // ── Validación de límite de DTEs por sobre (max declarado por XSD oficial) ──
+    // ── Boletas (39/41): flujo REST — obtiene su propio token, no usa SOAP ──
     if (in_array($tipo, [39, 41], true)) {
+        // Validación de límite solo para boletas
         $lim = validateEnvioBoletaLimit($envioFirmado);
         if (!$lim['ok']) {
             saveSiiLog('sendDTE', "T{$tipo}F{$folio} sobre excede límite: {$lim['reason']}", 'ERROR');
@@ -1645,19 +1644,16 @@ function sendDTE(array $data): array {
                 'mensaje' => "Sobre EnvioBOLETA excede el máximo permitido: {$lim['reason']}",
             ];
         }
-    }
-
-    // Si es Boleta (39 o 41), usamos el flujo REST moderno
-    if (in_array($tipo, [39, 41], true)) {
-        $result = sendBoletaREST($envioFirmado, $tipo, $folio, $token);
-    saveTrackingId($tipo, $folio, $result['trackId'] ?? null, $result);
+        $result = sendBoletaREST($envioFirmado, $tipo, $folio, '');
+        saveTrackingId($tipo, $folio, $result['trackId'] ?? null, $result);
         return $result;
     }
 
-    // Para otros documentos (Facturas, Guías), seguimos con el flujo SOAP
+    // ── Facturas, Guías y otros: flujo SOAP (semilla + token SOAP) ──
+    $semilla  = getSemilla();
+    $token    = getToken($semilla, $cert, $privKey);
     $resultado = uploadDTE($envioFirmado, $token);
 
-    // Persistir el TrackID para consultas futuras
     saveTrackingId($tipo, $folio, $resultado['trackId'] ?? null, $resultado);
 
     return [
@@ -2154,28 +2150,53 @@ function loadCAF(int $tipo, int $folio = 0): array {
 // CÁLCULO DE MONTOS
 // ────────────────────────────────────────────────────────────
 function calcularMontos(array $items, int $tipo): array {
-    $suma = 0;
+    // Separar afecto y exento por ítem (la marca 'exento' la fija el formulario,
+    // el set de pruebas o el nombre del ítem). Necesario para boletas/facturas
+    // con líneas mixtas (ej. CASO-4 del set de boletas: 1 afecto + 1 exento).
+    $sumaAfecta = 0;
+    $sumaExenta = 0;
     foreach ($items as $it) {
         $qty  = (float)($it['cantidad']  ?? 1);
         $prc  = (float)($it['precio']    ?? 0);
         $desc = (float)($it['descuento'] ?? 0);
-        $suma += round($qty * $prc * (1 - $desc / 100));
+        $monto = round($qty * $prc * (1 - $desc / 100));
+        if (!empty($it['exento'])) {
+            $sumaExenta += $monto;
+        } else {
+            $sumaAfecta += $monto;
+        }
     }
 
-    $esExento  = in_array($tipo, [34, 41, 110, 111, 112]);
-    $esBoleta  = ($tipo === 39);            // boleta afecta: precio incluye IVA
+    // Documentos completamente exentos (factura/boleta exenta, exportación)
+    $docExento = in_array($tipo, [34, 41, 110, 111, 112], true);
+    if ($docExento) {
+        $exe = $sumaAfecta + $sumaExenta;
+        return ['mntNeto' => 0, 'mntExe' => $exe, 'tasaIVA' => 0, 'iva' => 0, 'mntTotal' => $exe];
+    }
 
-    if ($esExento) {
-        return ['mntNeto' => 0, 'mntExe' => $suma, 'tasaIVA' => 0, 'iva' => 0, 'mntTotal' => $suma];
+    // Boleta afecta (39): el precio ingresado INCLUYE IVA → se desglosa.
+    if ($tipo === 39) {
+        $neto = $sumaAfecta > 0 ? (int)round($sumaAfecta / 1.19) : 0;
+        $iva  = $sumaAfecta > 0 ? $sumaAfecta - $neto : 0;
+        return [
+            'mntNeto'  => $neto,
+            'mntExe'   => $sumaExenta,
+            'tasaIVA'  => $neto > 0 ? 19 : 0,
+            'iva'      => $iva,
+            'mntTotal' => $neto + $iva + $sumaExenta,
+        ];
     }
-    if ($esBoleta) {
-        $neto = round($suma / 1.19);
-        $iva  = $suma - $neto;
-        return ['mntNeto' => $neto, 'mntExe' => 0, 'tasaIVA' => 19, 'iva' => $iva, 'mntTotal' => $suma];
-    }
-    // Factura afecta, guía, nota — precio es neto
-    $iva = round($suma * 0.19);
-    return ['mntNeto' => $suma, 'mntExe' => 0, 'tasaIVA' => 19, 'iva' => $iva, 'mntTotal' => $suma + $iva];
+
+    // Factura afecta, guía, nota — el precio es NETO; el IVA se agrega.
+    $neto = $sumaAfecta;
+    $iva  = (int)round($neto * 0.19);
+    return [
+        'mntNeto'  => $neto,
+        'mntExe'   => $sumaExenta,
+        'tasaIVA'  => $neto > 0 ? 19 : 0,
+        'iva'      => $iva,
+        'mntTotal' => $neto + $iva + $sumaExenta,
+    ];
 }
 
 // ────────────────────────────────────────────────────────────
@@ -2338,7 +2359,7 @@ function buildExportacionXML(
     }
 
     $xmlRef = '';
-    foreach ($referencias as $idx => $ref) {
+    foreach (array_slice($referencias, 0, 40) as $idx => $ref) {
         $l = $idx + 1;
         $xmlRef .= "<Referencia>\n  <NroLinRef>$l</NroLinRef>\n";
         if (!empty($ref['tipo'])) $xmlRef .= "  <TpoDocRef>" . $h($ref['tipo']) . "</TpoDocRef>\n";
@@ -2553,7 +2574,7 @@ function buildDocumentoXML(
 
     // Referencias
     $xmlRef = '';
-    foreach ($referencias as $idx => $ref) {
+    foreach (array_slice($referencias, 0, 40) as $idx => $ref) {
         $l = $idx + 1;
         $xmlRef .= "<Referencia>\n";
         $xmlRef .= "  <NroLinRef>$l</NroLinRef>\n";
@@ -2702,7 +2723,7 @@ function buildLiquidacionXML(
 
     // Referencias
     $xmlRef = '';
-    foreach ($referencias as $idx => $ref) {
+    foreach (array_slice($referencias, 0, 40) as $idx => $ref) {
         $l = $idx + 1;
         $xmlRef .= "<Referencia>\n  <NroLinRef>$l</NroLinRef>\n";
         if (!empty($ref['tipo']))   $xmlRef .= "  <TpoDocRef>" . $h($ref['tipo']) . "</TpoDocRef>\n";
@@ -2937,6 +2958,59 @@ function buildEnvioDTE(string $dteXml, int $tipo, int $folio, string $certPem): 
 $dteXmlClean
 </SetDTE>
 </$tagEnvio>
+XML;
+}
+
+/**
+ * Arma UN sobre EnvioBOLETA con MÚLTIPLES boletas firmadas (Set de certificación).
+ * El SII exige que el set de prueba de boletas se envíe en un solo archivo (sobre).
+ *
+ * @param array  $dtesXml  Lista de XML de <Documento> ya firmados (tipo 39/41).
+ * @param string $certPem  Certificado para extraer el RUT que envía.
+ */
+function buildEnvioBoletaSet(array $dtesXml, string $certPem): string {
+    global $globalContext;
+    $rutEmisor = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
+    $rutEnvia  = getRutCertificadoSeguro($certPem);
+
+    if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
+        $nroResol = 0;
+        $fchResol = '2021-01-04';
+    } else {
+        $emp = $globalContext ? $globalContext->getEmpresa() : [];
+        $nroResol = $emp['numero_resolucion'] ?? NRO_RESOL;
+        $fchResol = $emp['fecha_resolucion']  ?? FCH_RESOL;
+    }
+    $tmst = date('Y-m-d\TH:i:s');
+
+    // Limpiar declaración XML de cada documento y concatenar
+    $docs = '';
+    foreach ($dtesXml as $d) {
+        $docs .= preg_replace('/<\?xml.*?\?>\s*/i', '', $d) . "\n";
+    }
+    $nroDte = count($dtesXml);
+
+    return <<<XML
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<EnvioBOLETA version="1.0"
+  xmlns="http://www.sii.cl/SiiDte"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.sii.cl/SiiDte EnvioBOLETA_v11.xsd">
+<SetDTE ID="SetDoc">
+<Caratula version="1.0">
+  <RutEmisor>$rutEmisor</RutEmisor>
+  <RutEnvia>$rutEnvia</RutEnvia>
+  <RutReceptor>60803000-K</RutReceptor>
+  <FchResol>$fchResol</FchResol>
+  <NroResol>$nroResol</NroResol>
+  <TmstFirmaEnv>$tmst</TmstFirmaEnv>
+  <SubTotDTE>
+    <TpoDTE>39</TpoDTE>
+    <NroDTE>$nroDte</NroDTE>
+  </SubTotDTE>
+</Caratula>
+$docs</SetDTE>
+</EnvioBOLETA>
 XML;
 }
 
@@ -4487,6 +4561,10 @@ function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array
         global $globalContext;
         $rutCompanyFull = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
         [$rutCompany, $dvCompany] = array_pad(explode('-', $rutCompanyFull, 2), 2, '');
+        // RUT que envía = titular del certificado (no la empresa). Antes quedaba
+        // indefinido y el SII rechazaba el RCOF por rutSender vacío.
+        $rutSenderFull = getRutCertificadoSeguro($cert);
+        [$rutSender, $dvSender] = array_pad(explode('-', $rutSenderFull, 2), 2, '');
 
         $filename = "rcof_{$fecha}_seq{$secuencia}.xml";
         $tmpFile  = rtrim($actualTmpDir, '/\\') . DIRECTORY_SEPARATOR . $filename;
@@ -4507,7 +4585,7 @@ function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array
                 "dvSender"   => strtoupper($dvSender),
                 "rutCompany" => $rutCompany,
                 "dvCompany"  => strtoupper($dvCompany),
-                "archivo"    => new CURLFile($tmpFile, 'text/xml', $filename),
+                "archivo"    => new CURLFile($tmpFile, 'application/xml', $filename),
             ];
             $ch = curl_init($url);
             curl_setopt_array($ch, [
@@ -6299,7 +6377,7 @@ function sendBoletaREST(string $xml, int $tipo, int $folio, string $token): arra
         "dvSender"   => strtoupper($dvSender),
         "rutCompany" => $rutCompany,
         "dvCompany"  => strtoupper($dvCompany),
-        "archivo"    => new CURLFile($uploadFile, 'text/xml', $filename),
+        "archivo"    => new CURLFile($uploadFile, 'application/xml', $filename),
     ];
 
     $ch = curl_init($url);
@@ -6611,13 +6689,33 @@ function getCertCaseData(string $caseId): array {
             'tipoDTE' => 61, 'referencias' => [['tipo'=>33, 'folio'=>'REF_F2', 'codigo'=>1, 'razon'=>'DEVOLUCION DE MERCADERIAS']],
             'items' => [['nombre'=>'Pañuelo AFECTO','cantidad'=>282,'precio'=>5937],['nombre'=>'ITEM 2 AFECTO','cantidad'=>483,'precio'=>4988]]
         ],
+        // Caso 7: NC que anula la factura del caso 3. Los ítems deben replicar
+        // exactamente los de F-4832043-3 para que los montos cuadren (NC de anulación).
         'F-4832043-7' => [
             'tipoDTE' => 61, 'referencias' => [['tipo'=>33, 'folio'=>'REF_F3', 'codigo'=>1, 'razon'=>'ANULA FACTURA']],
-            'items' => [['nombre'=>'ANULACION COMPLETA','cantidad'=>1,'precio'=>0,'exento'=>true]]
+            'items' => [
+                ['nombre'=>'Pintura B&W AFECTO',        'cantidad'=>65,  'precio'=>6938],
+                ['nombre'=>'ITEM 2 AFECTO',              'cantidad'=>238, 'precio'=>4041],
+                ['nombre'=>'ITEM 3 SERVICIO EXENTO',     'cantidad'=>1,   'precio'=>35301, 'exento'=>true],
+            ],
         ],
         'F-4832043-8' => [
             'tipoDTE' => 56, 'referencias' => [['tipo'=>61, 'folio'=>'REF_NC1', 'codigo'=>1, 'razon'=>'ANULA NOTA DE CREDITO ELECTRONICA']],
             'items' => [['nombre'=>'ANULACION NC','cantidad'=>1,'precio'=>0,'exento'=>true]]
+        ],
+        // SET GUIAS DE DESPACHO (Atención 4820753)
+        // IndTraslado 5 = traslado interno: receptor es el propio emisor (XSD lo exige igualmente)
+        'G-4820753-1' => [
+            'tipoDTE' => 52, 'indTraslado' => 5,
+            'items' => [['nombre'=>'Producto Traslado Interno','cantidad'=>10,'precio'=>5000]],
+        ],
+        'G-4820753-2' => [
+            'tipoDTE' => 52, 'indTraslado' => 1,
+            'items' => [['nombre'=>'Producto Venta Facturada','cantidad'=>5,'precio'=>12000]],
+        ],
+        'G-4820753-3' => [
+            'tipoDTE' => 52, 'indTraslado' => 1,
+            'items' => [['nombre'=>'Producto Venta Anulada','cantidad'=>3,'precio'=>8000]],
         ],
     ];
 
@@ -6654,13 +6752,15 @@ function getCertCaseData(string $caseId): array {
     $tDte = (int)$cases[$caseId]['tipoDTE'];
     $rutReceptorCert = in_array($tDte, [39, 41]) ? '66666666-6' : '55555555-5';
     
-    $recep = ($cases[$caseId]['indTraslado'] ?? 0) == 5 ? [] : [
-        'rut' => $rutReceptorCert, 
-        'nombre' => 'EMPRESA DE PRUEBAS SII', 
-        'giro' => 'GIRO DE PRUEBAS',
-        'direccion' => 'CALLE PRUEBA 123', 
-        'comuna' => 'SANTIAGO', 
-        'ciudad' => 'SANTIAGO'
+    // Guías de despacho (tipo 52) siempre requieren receptor, incluso en traslado interno.
+    // Para IndTraslado=5 el SII acepta el mismo RUT del emisor como receptor.
+    $recep = [
+        'rut'      => $rutReceptorCert,
+        'nombre'   => 'EMPRESA DE PRUEBAS SII',
+        'giro'     => 'GIRO DE PRUEBAS',
+        'direccion'=> 'CALLE PRUEBA 123',
+        'comuna'   => 'SANTIAGO',
+        'ciudad'   => 'SANTIAGO',
     ];
     
     return array_merge(['receptor' => $recep], $cases[$caseId]);

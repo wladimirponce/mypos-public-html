@@ -1,0 +1,11 @@
+{
+  "que_es_mypos": "MyPOS es una plataforma integral en la nube para comercios chilenos que unifica ventas, caja, stock, compras, clientes, créditos, DTE (boletas/facturas), reportes e Inteligencia Artificial en un solo lugar. Todo trabaja conectado, no son herramientas separadas.",
+  "precios_y_planes": "MyPOS no tiene contrato de permanencia y se paga mes a mes. Ofrecemos 3 planes: 1) Plan Base ($9.990+IVA/mes): 1 usuario, 1 caja, 1 sucursal, POS, stock básico y boletas ilimitadas. 2) Plan Negocio ($19.990+IVA/mes): 3 usuarios, 2 cajas, facturas, clientes/créditos, reportes e IA asistida (100 docs). 3) Plan Crecimiento ($29.990+IVA/mes): Usuarios y cajas ilimitadas, hasta 3 sucursales, multiempresa, roles avanzados e IA asistida (500 docs).",
+  "modulo_ventas_y_caja": "El módulo POS permite ventas rápidas, búsqueda por código o nombre, pagos al contado, tarjeta y créditos, integrado directamente con la Caja Diaria que gestiona apertura con saldo, ingresos, retiros, control de diferencias y cierre diario.",
+  "modulo_compras_e_inventario": "MyPOS maneja un maestro de productos y stock por sucursal con trazabilidad. Las compras se pueden ingresar manualmente o mediante IA, afectando directamente y de manera segura al stock del inventario.",
+  "inteligencia_artificial": "MyPOS cuenta con 'IA Asistida' para registrar compras más rápido. El usuario sube una foto o PDF de su factura/guía de despacho, la IA extrae proveedor, productos, cantidades y precios. Luego el usuario revisa y valida humanamente antes de actualizar el stock de forma segura.",
+  "clientes_y_creditos": "El sistema permite tener un directorio de clientes y gestionar ventas a crédito (fiado), registrando pagos parciales y manteniendo un estado de cuenta claro por cliente.",
+  "dte_y_tributario": "MyPOS permite emitir Documentos Tributarios Electrónicos (DTE) como Boletas y Facturas. Administra folios y genera automáticamente los libros de ventas y compras requeridos.",
+  "reportes": "El sistema cuenta con un dashboard que muestra ventas totales, ticket promedio, productos más vendidos, rendimiento por vendedor y resumen de IVA.",
+  "multiempresa_y_roles": "El Plan Crecimiento permite manejar Multiempresa y Multisucursal con varias razones sociales, cajas independientes, y un sistema de seguridad de usuarios por rol y permisos específicos."
+}

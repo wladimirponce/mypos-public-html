@@ -36,24 +36,9 @@ function resolveCertEmpresaId(): int
     return (int)$emp['id'];
 }
 
-// ── Muestras: responde HTML ───────────────────────────────────────────────────
-if ($action === 'cert_muestras') {
-    ob_clean();
-    try {
-        $empresaIdMuestras = resolveCertEmpresaId();
-        $_SESSION['active_empresa_id'] = $empresaIdMuestras;
-        $ctx = new Context($empresaIdMuestras);
-        require_once __DIR__ . '/api.php';
-        $mgr = new CertificationManager($ctx);
-        header('Content-Type: text/html; charset=UTF-8');
-        echo $mgr->getMuestrasHtml();
-    } catch (\Throwable $e) {
-        header('Content-Type: text/html; charset=UTF-8');
-        echo '<p style="color:red;padding:20px;font-family:sans-serif">Error: '
-           . htmlspecialchars($e->getMessage()) . '</p>';
-    }
-    exit;
-}
+// ── Las muestras impresas ahora se renderizan en el cliente (jscript.js →
+//    DTE.renderMuestras), única fuente de verdad. El servidor solo entrega los
+//    XML vía la acción JSON 'cert_muestras_xml' (más abajo). ────────────────────
 
 // ── Resto: JSON ───────────────────────────────────────────────────────────────
 header('Content-Type: application/json; charset=UTF-8');
@@ -100,7 +85,22 @@ try {
         case 'cert_run_all':
             set_time_limit(600);
             ob_clean();
-            echo json_encode($mgr->runAll());
+            $state = [];
+            $caseIds = [
+                'F-4832043-1','F-4832043-2','F-4832043-3','F-4832043-4',
+                'F-4832043-5','F-4832043-6','F-4832043-7','F-4832043-8',
+                'G-4820753-1','G-4820753-2','G-4820753-3',
+            ];
+            $log = [
+                'pruebas' => $mgr->runPruebas($state, $caseIds),
+                'sim_33'  => $mgr->runSimulacion(33, 50, $state),
+                'sim_39'  => $mgr->runSimulacion(39, 50, $state),
+                'boletas' => [
+                    'skipped' => true,
+                    'mensaje' => 'Las boletas del set SII se ejecutan solo con cert_boletas (sobre + RCOF).',
+                ],
+            ];
+            echo json_encode(['ok' => true, 'resultados' => $log, 'estado' => $mgr->loadState()]);
             break;
 
         case 'cert_run_pruebas':
@@ -110,7 +110,15 @@ try {
             $forceRun = isset($_GET['force']) && $_GET['force'] == '1';
             if ($forceRun) $mgr->resetState();
             $state = [];
-            echo json_encode(['ok' => true, 'resultados' => $mgr->runPruebas($state), 'estado' => $mgr->loadState()]);
+            $caseIds = [];
+            if (isset($_GET['skip_boletas']) && $_GET['skip_boletas'] == '1') {
+                $caseIds = [
+                    'F-4832043-1','F-4832043-2','F-4832043-3','F-4832043-4',
+                    'F-4832043-5','F-4832043-6','F-4832043-7','F-4832043-8',
+                    'G-4820753-1','G-4820753-2','G-4820753-3',
+                ];
+            }
+            echo json_encode(['ok' => true, 'resultados' => $mgr->runPruebas($state, $caseIds), 'estado' => $mgr->loadState()]);
             break;
 
         case 'cert_run_sim':
@@ -132,6 +140,14 @@ try {
         case 'cc':
         case 'cert_case':
             $cid  = $_GET['cid'] ?? $_POST['cid'] ?? '';
+            if (str_starts_with($cid, 'B-CASO-')) {
+                ob_clean();
+                echo json_encode([
+                    'ok' => false,
+                    'error' => 'Las boletas del set SII no se envian individualmente. Use Certificar Boletas (sobre + RCOF).',
+                ]);
+                break;
+            }
             $data = getCertCaseData($cid);
             $dte  = generateDTE($data);
             if (empty($dte['ok'])) throw new \Exception($dte['error'] ?? 'Error generando DTE');
@@ -214,6 +230,57 @@ try {
                 'mensaje'  => 'Folios huérfanos eliminados. Puede reintentar los casos.',
                 'limpiados'=> count($limpiados),
                 'folios'   => $limpiados,
+            ]);
+            break;
+
+        // ── Set de Certificación: subir el .txt del SII y parsearlo ──
+        case 'cert_set_upload':
+            ob_clean();
+            if (empty($_FILES['set_file']['tmp_name'])) {
+                echo json_encode(['ok' => false, 'error' => 'Adjunte el archivo .txt del Set de Pruebas del SII.']);
+                break;
+            }
+            $setMgr = new \App\Services\CertSetManager($globalContext);
+            $raw    = file_get_contents($_FILES['set_file']['tmp_name']);
+            echo json_encode($setMgr->importarTxt($raw, $_FILES['set_file']['name'] ?? 'set.txt'));
+            break;
+
+        // ── Set de Certificación: ver el set vinculado ───────────
+        case 'cert_set_get':
+            ob_clean();
+            $setMgr = new \App\Services\CertSetManager($globalContext);
+            echo json_encode(['ok' => true, 'set' => $setMgr->load()]);
+            break;
+
+        // ── Set de Certificación: eliminar vínculo ───────────────
+        case 'cert_set_delete':
+            ob_clean();
+            $setMgr = new \App\Services\CertSetManager($globalContext);
+            echo json_encode(['ok' => $setMgr->delete()]);
+            break;
+
+        // ── Certificación de BOLETAS: set en un sobre + RCOF ──────
+        case 'cert_boletas':
+            set_time_limit(600);
+            ob_clean();
+            echo json_encode($mgr->certificarSetBoletas());
+            break;
+
+        // ── Muestras impresas: entrega los XML + opts para el renderer cliente ──
+        case 'cert_muestras_xml':
+            ob_clean();
+            $empM   = $globalContext->getEmpresa();
+            $esCert = $globalContext->getAmbiente() === 'CERTIFICACION';
+            echo json_encode([
+                'ok'   => true,
+                'dtes' => $mgr->getMuestrasXmls(),
+                'opts' => [
+                    'format'    => 'letter',
+                    'unidadSII' => $empM['unidad_sii'] ?? 'S.I.I.',
+                    'resolNum'  => $esCert ? 0 : (int)($empM['numero_resolucion'] ?? 0),
+                    'resolFch'  => $esCert ? '2021-01-04' : ($empM['fecha_resolucion'] ?? ''),
+                    'ambiente'  => $globalContext->getAmbiente(),
+                ],
             ]);
             break;
 
