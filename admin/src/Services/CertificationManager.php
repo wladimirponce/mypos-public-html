@@ -164,10 +164,12 @@ class CertificationManager
 
         // Folios NUEVOS en cada corrida. El SII deja "quemado" todo (Tipo, Folio)
         // que ya recibió: reenviar el mismo folio devuelve "DTE Repetido" (3-100)
-        // o "Folio ya recibido" (3-101). Por eso ya NO se reutiliza: se calcula un
-        // folio base por tipo = primer folio LIBRE (más alto ya usado + 1, tomado
-        // de sii_dte y del state de pruebas) y se consume de verdad, avanzando en
-        // cada corrida sin colisionar con envíos anteriores.
+        // o "Folio ya recibido" (3-101). Por eso ya NO se reutiliza: el folio base
+        // por tipo = primer folio LIBRE (más alto ya usado + 1, tomado del state de
+        // pruebas y de la BD) y AVANZA en cada corrida vía el state. NO se registra
+        // en BD (certNoConsume=true): en cert el XML va en Latin-1 y json_encode del
+        // payload falla (rompería el CHECK json_valid de documentos_emitidos), y los
+        // DTE de prueba no deben ensuciar la tabla de documentos reales.
         $offsetMap  = $this->certFolioOffsetMap(); // caseId => offset dentro de su tipo
         $baseByTipo = [];
 
@@ -180,7 +182,7 @@ class CertificationManager
                 }
                 $offset = $offsetMap[$caseId]['offset'] ?? 0;
                 $caseData['folio']         = $baseByTipo[$tipoCaso] + $offset;
-                $caseData['certNoConsume'] = false; // consumir de verdad: registra el folio para no reutilizarlo
+                $caseData['certNoConsume'] = true; // no escribir en BD; el folio nuevo avanza vía el state
 
                 $dte = generateDTE($caseData);
                 if (empty($dte['ok'])) {
@@ -360,6 +362,10 @@ class CertificationManager
         $dte = ['ok' => false, 'tipo' => null, 'folio' => null]; // inicializar para preservar en catch
         try {
             $caseData = $this->getUploadedCertCaseData($caseId, $state) ?? getCertCaseData($caseId);
+            // Nunca registrar en BD durante certificación: el XML va en Latin-1 y
+            // json_encode del payload rompería el CHECK json_valid de documentos_emitidos.
+            // Consistente con runSetBasico() que ya lo hace.
+            $caseData['certNoConsume'] = true;
             $dte      = generateDTE($caseData);
 
             if (empty($dte['ok'])) {

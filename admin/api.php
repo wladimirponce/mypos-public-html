@@ -1629,7 +1629,10 @@ function generateDTE(array $data): array {
     // PERSISTENCIA EN BASE DE DATOS CENTRAL
     // En certificación con folios reutilizables se omite: no se registra el DTE
     // ni se marca el folio como consumido (así el mismo folio se reusa al reintentar).
-    if ($globalContext && !$certNoConsume) {
+    // Segunda guardia: en ambiente CERTIFICACION nunca persistir, aunque certNoConsume
+    // no se haya propagado por algún path de código futuro (el XML va en Latin-1 y
+    // json_encode del payload rompería el CHECK json_valid de documentos_emitidos).
+    if ($globalContext && !$certNoConsume && $globalContext->getAmbiente() !== 'CERTIFICACION') {
         $repo = new EmpresaRepository();
         $dteId = $repo->registrarDTE([
             'empresa_id'     => $globalContext->getEmpresaId(),
