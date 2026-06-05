@@ -164,6 +164,36 @@ define('SII_CAINFO',    __DIR__ . '/cert/cacert.pem');
 define('SII_SSL_VERIFY', file_exists(__DIR__ . '/cert/cacert.pem'));
 // ============================================================
 
+if (!function_exists('normalizeCafXmlContent')) {
+    function normalizeCafXmlContent(string $content): string
+    {
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
+
+        if (!preg_match('//u', $content)) {
+            $enc = function_exists('mb_detect_encoding')
+                ? (mb_detect_encoding($content, ['UTF-8', 'Windows-1252', 'ISO-8859-1'], true) ?: 'Windows-1252')
+                : 'Windows-1252';
+            $content = function_exists('mb_convert_encoding')
+                ? mb_convert_encoding($content, 'UTF-8', $enc)
+                : iconv($enc, 'UTF-8//IGNORE', $content);
+        }
+
+        $updated = preg_replace(
+            '/<\?xml([^>]*?)encoding=["\'][^"\']+["\']([^>]*?)\?>/i',
+            '<?xml$1encoding="UTF-8"$2?>',
+            $content,
+            1,
+            $count
+        );
+
+        if ($count > 0 && $updated !== null) {
+            return $updated;
+        }
+
+        return '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . $content;
+    }
+}
+
 require_once __DIR__ . '/autoload.php';
 use App\Core\Context;
 use App\Repositories\EmpresaRepository;

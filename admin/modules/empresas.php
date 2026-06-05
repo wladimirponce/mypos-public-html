@@ -1,7 +1,7 @@
 <?php
 /**
  * Módulo Empresas — Gestión Multi-Cliente
- * CRUD completo: crear / editar / eliminar (soft-delete) empresas.
+ * CRUD completo: crear / editar / eliminar empresas.
  */
 $empMsg = '';
 $empError = '';
@@ -30,6 +30,32 @@ $metadataJson = function () use ($actecoToJson): string {
         'numero_resolucion' => trim((string)($_POST['num_resol'] ?? '80')) ?: '80',
         'fecha_resolucion' => trim((string)($_POST['fecha_resol'] ?? '2026-05-17')) ?: '2026-05-17',
     ], JSON_UNESCAPED_UNICODE);
+};
+
+$deleteDirTree = function (string $dir): void {
+    if ($dir === '' || !is_dir($dir)) return;
+    $base = realpath(__DIR__ . '/..');
+    $real = realpath($dir);
+    if (!$base || !$real || strpos($real, $base) !== 0) return;
+    $items = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($real, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+    );
+    foreach ($items as $item) {
+        $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
+    }
+    @rmdir($real);
+};
+
+$tableExists = function (string $table) use ($db): bool {
+    $stmt = $db->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
+    $stmt->execute([$table]);
+    return (int)$stmt->fetchColumn() > 0;
+};
+
+$tablesWithEmpresaId = function () use ($db): array {
+    $stmt = $db->query("SELECT TABLE_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'empresa_id'");
+    return array_values(array_unique($stmt->fetchAll(PDO::FETCH_COLUMN) ?: []));
 };
 
 // ── Procesar CREACIÓN ────────────────────────────────────────────────────────
@@ -111,17 +137,67 @@ if (isset($_POST['action']) && $_POST['action'] === 'update_empresa' && $dbOk) {
     }
 }
 
-// ── Procesar ELIMINACIÓN (soft-delete: activo=0 para preservar DTEs históricos) ──
+// ── Procesar ELIMINACIÓN FÍSICA ────────────────────────────────────────────────
 if (isset($_POST['action']) && $_POST['action'] === 'delete_empresa' && $dbOk) {
     try {
         $id = (int)$_POST['empresa_id'];
-        if ($useSiiTables) {
-            $db->prepare("UPDATE sii_empresa SET activo=0 WHERE id=?")->execute([$id]);
-        } else {
-            $db->prepare("UPDATE empresas SET activo=0 WHERE id=?")->execute([$id]);
+        if ($id <= 0) throw new Exception('Empresa inválida.');
+
+        $mainTable = $useSiiTables ? 'sii_empresa' : 'empresas';
+        $stmtRut = $db->prepare("SELECT rut, razon_social FROM `$mainTable` WHERE id=? LIMIT 1");
+        $stmtRut->execute([$id]);
+        $empresaDel = $stmtRut->fetch(PDO::FETCH_ASSOC);
+        if (!$empresaDel) throw new Exception('Empresa no encontrada.');
+        $rutDel = (string)$empresaDel['rut'];
+
+        $db->beginTransaction();
+
+        $priority = [
+            'sii_folio_consumo', 'folios_consumidos',
+            'folios_asignaciones', 'sii_dte', 'documentos_emitidos',
+            'sii_caf', 'caf_archivos',
+            'sii_certificado', 'archivos_subidos',
+            'sii_api_key', 'dte_configuracion',
+            'empresa_configuracion_operativa', 'empresa_configuracion',
+            'sucursales', 'dispositivos_pos',
+        ];
+        $tables = array_values(array_unique(array_merge($priority, $tablesWithEmpresaId())));
+        $deletedRows = 0;
+
+        foreach (range(1, 4) as $_pass) {
+            foreach ($tables as $table) {
+                if ($table === $mainTable || !$tableExists($table)) continue;
+                try {
+                    $stmtDel = $db->prepare("DELETE FROM `$table` WHERE empresa_id=?");
+                    $stmtDel->execute([$id]);
+                    $deletedRows += $stmtDel->rowCount();
+                } catch (Throwable $ignored) {
+                    // Otra pasada puede eliminar primero la tabla que bloquea la FK.
+                }
+            }
         }
-        $empMsg = "Empresa desactivada. Sus documentos históricos se conservan.";
+
+        $stmtMain = $db->prepare("DELETE FROM `$mainTable` WHERE id=?");
+        $stmtMain->execute([$id]);
+        if ($stmtMain->rowCount() === 0) {
+            throw new Exception('No se pudo eliminar la empresa principal. Revise dependencias de base de datos.');
+        }
+
+        $db->commit();
+
+        $adminBase = dirname(__DIR__);
+        foreach ([
+            $adminBase . '/cert/' . $rutDel,
+            $adminBase . '/caf/' . $rutDel,
+            $adminBase . '/tmp/' . $rutDel,
+            $adminBase . '/cert_sets/' . $rutDel,
+        ] as $dirDel) {
+            $deleteDirTree($dirDel);
+        }
+
+        $empMsg = "Empresa eliminada definitivamente: {$empresaDel['razon_social']} ($rutDel). Registros relacionados: $deletedRows.";
     } catch (Exception $e) {
+        if ($db->inTransaction()) $db->rollBack();
         $empError = $e->getMessage();
     }
 }
@@ -324,10 +400,10 @@ $ambActual = strtolower($editEmp['ambiente_default'] ?? 'certificacion');
                                     <i class="bi bi-pencil"></i>
                                 </a>
                                 <?php if ($emp['activo']): ?>
-                                <form method="POST" style="display:inline" onsubmit="return confirm('¿Desactivar la empresa <?= htmlspecialchars(addslashes($emp['razon_social'])) ?>? Sus documentos históricos se conservan.');">
+                                <form method="POST" style="display:inline" onsubmit="return confirm('¿Eliminar definitivamente la empresa <?= htmlspecialchars(addslashes($emp['razon_social'])) ?>? Se borrarán sus certificados, CAF, set de certificación y registros asociados.');">
                                     <input type="hidden" name="action" value="delete_empresa">
                                     <input type="hidden" name="empresa_id" value="<?= (int)$emp['id'] ?>">
-                                    <button type="submit" class="d-btn d-btn-sm d-btn-outline" style="color:var(--c-danger)" title="Eliminar">
+                                    <button type="submit" class="d-btn d-btn-sm d-btn-outline" style="color:var(--c-danger)" title="Eliminar definitivamente">
                                         <i class="bi bi-trash3"></i>
                                     </button>
                                 </form>
