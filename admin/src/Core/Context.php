@@ -18,16 +18,18 @@ class Context
     public function __construct($idOrKey)
     {
         $repo = new EmpresaRepository();
-        
-        if (is_numeric($idOrKey) && (int)$idOrKey > 0) {
-            $this->empresa = $repo->getById((int)$idOrKey);
-        } else {
-            $this->empresa = $repo->getByApiKey((string)$idOrKey);
+
+        // Resolver a variable local primero: $empresa es de tipo array y asignarle
+        // null (cuando getById/getByApiKey no encuentran) provocaría un TypeError
+        // fatal antes del chequeo. Validamos y lanzamos la excepción controlada.
+        $empresa = (is_numeric($idOrKey) && (int)$idOrKey > 0)
+            ? $repo->getById((int)$idOrKey)
+            : $repo->getByApiKey((string)$idOrKey);
+
+        if (!$empresa || !is_array($empresa)) {
+            throw new Exception("Acceso denegado: Empresa inválida o inactiva (id/clave: " . (string)$idOrKey . ").");
         }
-        
-        if (!$this->empresa) {
-            throw new Exception("Acceso denegado: Empresa inválida o inactiva.");
-        }
+        $this->empresa = $empresa;
 
         $this->ambiente = $this->empresa['ambiente_default'];
         $this->basePath = dirname(__DIR__, 2);

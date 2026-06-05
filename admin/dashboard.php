@@ -83,10 +83,19 @@ try {
     if ($empresaProd === null && !empty($empresas)) {
         $empresaProd = $empresas[0]; // sin producción definida: primera activa
     }
-    // Autoseleccionar la empresa por defecto ANTES de cargar api.php para que
-    // Context se construya sobre ella (y no caiga al fallback de constantes).
-    if (!isset($_SESSION['active_empresa_id']) && $empresaProd !== null) {
-        $_SESSION['active_empresa_id'] = (int)$empresaProd['id'];
+    // Autoseleccionar/validar la empresa activa ANTES de cargar api.php para que
+    // Context se construya sobre una empresa REAL. Si la sesión apunta a un id
+    // que ya no existe entre las empresas activas (sesión vieja, empresa borrada,
+    // o id de otra tabla), se resetea automáticamente para evitar el fatal en
+    // Context (auto-sanación de sesión).
+    $idsValidos = array_map(fn($e) => (int)$e['id'], $empresas);
+    $sesActual  = (int)($_SESSION['active_empresa_id'] ?? 0);
+    if ($sesActual <= 0 || !in_array($sesActual, $idsValidos, true)) {
+        if ($empresaProd !== null) {
+            $_SESSION['active_empresa_id'] = (int)$empresaProd['id'];
+        } else {
+            unset($_SESSION['active_empresa_id']);
+        }
     }
 } catch (Exception $e) {
     // DB no disponible — modo degradado de SOLO LECTURA sobre constantes.
