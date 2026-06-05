@@ -25,7 +25,10 @@ try {
     L("================ EMPRESAS / SESIÓN ================");
     $sesId = (int)($_SESSION['active_empresa_id'] ?? 0);
     L("active_empresa_id en sesión : " . ($sesId ?: '(vacío)'));
-    L("useSiiTables (existe sii_empresa) : " . ($ex('sii_empresa') ? 'TRUE → usa sii_caf' : 'FALSE → usa caf_archivos'));
+    $siiRows = $ex('sii_empresa') ? (int)$pdo->query("SELECT COUNT(*) FROM sii_empresa WHERE activo=1")->fetchColumn() : 0;
+    $useSiiReal = $ex('sii_empresa') && $siiRows > 0;
+    L("sii_empresa: " . ($ex('sii_empresa') ? "existe, $siiRows fila(s) activa(s)" : 'no existe'));
+    L("useSiiTables REAL (2 pasos) : " . ($useSiiReal ? 'TRUE → usa sii_caf' : 'FALSE → usa caf_archivos (MyPOS)'));
     L("");
     if ($ex('sii_empresa')) {
         L("-- sii_empresa --");
