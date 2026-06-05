@@ -32,7 +32,22 @@ ob_start();
 if (isset($_GET['switch_empresa'])) {
     $newId = (int)$_GET['switch_empresa'];
     if ($newId > 0) {
-        $_SESSION['active_empresa_id'] = $newId;
+        try {
+            $dbSwitch = Database::getInstance();
+            $stmtSwitch = $dbSwitch->prepare("
+                SELECT COUNT(*)
+                FROM sii_empresa
+                WHERE id = ? AND activo = 1
+            ");
+            $stmtSwitch->execute([$newId]);
+            if ((int)$stmtSwitch->fetchColumn() > 0) {
+                $_SESSION['active_empresa_id'] = $newId;
+            } else {
+                unset($_SESSION['active_empresa_id']);
+            }
+        } catch (Exception $e) {
+            unset($_SESSION['active_empresa_id']);
+        }
     }
     // Redirigir para limpiar URL
     header("Location: dashboard.php?module=" . ($_GET['module'] ?? 'clientes_mypos'));

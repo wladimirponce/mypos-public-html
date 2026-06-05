@@ -235,7 +235,21 @@ try {
         $globalContext = new Context($apiKey);
     }
 } catch (Exception $e) {
-    if (PHP_SAPI !== 'cli') {
+    if (defined('DTE_API_BOOTSTRAP_ONLY') && DTE_API_BOOTSTRAP_ONLY) {
+        unset($_SESSION['active_empresa_id']);
+        $globalContext = null;
+
+        try {
+            $repoFallback = new EmpresaRepository();
+            $fallbackEmpresa = $repoFallback->getByAmbiente('CERTIFICACION') ?: $repoFallback->getByAmbiente('PRODUCCION');
+            if ($fallbackEmpresa && !empty($fallbackEmpresa['id'])) {
+                $_SESSION['active_empresa_id'] = (int)$fallbackEmpresa['id'];
+                $globalContext = new Context((int)$fallbackEmpresa['id']);
+            }
+        } catch (Throwable $ignored) {
+            $globalContext = null;
+        }
+    } elseif (PHP_SAPI !== 'cli') {
         http_response_code(401);
         echo json_encode([
             'ok'    => false,
