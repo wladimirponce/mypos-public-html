@@ -63,6 +63,13 @@ class CertSetManager
         return $s['boletas'] ?? [];
     }
 
+    /** Devuelve solo los casos del set basico facturas/NC/ND/guias (o []). */
+    public function getFacturas(): array
+    {
+        $s = $this->load();
+        return $s['facturas'] ?? [];
+    }
+
     // =========================================================
     //  IMPORTACIÓN
     // =========================================================
@@ -226,12 +233,18 @@ class CertSetManager
 
     private function detectarTipoDoc(string $cuerpo): int
     {
-        if (preg_match('/NOTA\s+DE\s+CREDITO/iu', $cuerpo))  return 61;
-        if (preg_match('/NOTA\s+DE\s+DEBITO/iu', $cuerpo))   return 56;
-        if (preg_match('/FACTURA\s+DE\s+COMPRA/iu', $cuerpo)) return 46;
-        if (preg_match('/GUIA\s+DE\s+DESPACHO/iu', $cuerpo)) return 52;
-        if (preg_match('/LIQUIDACION/iu', $cuerpo))          return 43;
-        return 33; // Factura electrónica por defecto
+        $docLine = '';
+        if (preg_match('/^DOCUMENTO\s+(.+)$/imu', $cuerpo, $m)) {
+            $docLine = trim($m[1]);
+        }
+        $scope = $docLine !== '' ? $docLine : $cuerpo;
+
+        if (preg_match('/NOTA\s+DE\s+DEBITO/iu', $scope))   return 56;
+        if (preg_match('/NOTA\s+DE\s+CREDITO/iu', $scope))  return 61;
+        if (preg_match('/FACTURA\s+DE\s+COMPRA/iu', $scope)) return 46;
+        if (preg_match('/GUIA\s+DE\s+DESPACHO/iu', $scope)) return 52;
+        if (preg_match('/LIQUIDACION/iu', $scope))          return 43;
+        return 33; // Factura electronica por defecto
     }
 
     // =========================================================

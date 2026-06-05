@@ -560,21 +560,28 @@ async function loadState() {
 
 async function certRunAll() {
   const status = document.getElementById('cert-run-status');
-  status.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Ejecutando pool completo... puede tardar varios minutos.</div>';
-  log('Iniciando ejecución completa del pool...', 'info');
+  status.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Ejecutando Paso 2: facturas, notas y guias... puede tardar varios minutos.</div>';
+  log('Iniciando Paso 2: facturas, notas y guias...', 'info');
   try {
     const res = await api('cert_run_pruebas', { skip_boletas: 1 });
     applyState(res.estado);
     const r = res.resultados || {};
+    const logCaseResult = (cid, cr) => {
+      if (!cr || typeof cr !== 'object') return;
+      if (!('status' in cr) && !('folio' in cr) && !('error' in cr)) return;
+      const st = cr.status || '?';
+      log(`${cid}: ${st} - folio ${cr.folio||'-'} ${cr.error?'| '+cr.error:''}`,
+        st === 'ok' ? 'ok' : 'error');
+    };
     Object.entries(r).forEach(([k,v]) => {
-      if (typeof v === 'object') {
-        Object.entries(v).forEach(([cid, cr]) => {
-          log(`${cid}: ${cr.status||'?'} — folio ${cr.folio||'-'} ${cr.error?'| '+cr.error:''}`,
-            cr.status==='ok'?'ok':'error');
-        });
+      if (!v || typeof v !== 'object') return;
+      if ('status' in v || 'folio' in v || 'error' in v) {
+        logCaseResult(k, v);
+      } else {
+        Object.entries(v).forEach(([cid, cr]) => logCaseResult(cid, cr));
       }
     });
-    status.innerHTML = '<div class="d-alert success"><i class="bi bi-check-circle"></i> Pool ejecutado. Revise los resultados arriba.</div>';
+    status.innerHTML = '<div class="d-alert success"><i class="bi bi-check-circle"></i> Paso 2 ejecutado. Revise los resultados arriba.</div>';
   } catch(e) {
     status.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
     log('Error: '+e.message, 'error');

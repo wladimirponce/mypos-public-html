@@ -135,7 +135,7 @@ class CertificationManager
     {
         $dte = ['ok' => false, 'tipo' => null, 'folio' => null]; // inicializar para preservar en catch
         try {
-            $caseData = getCertCaseData($caseId);
+            $caseData = $this->getUploadedCertCaseData($caseId, $state) ?? getCertCaseData($caseId);
             $dte      = generateDTE($caseData);
 
             if (empty($dte['ok'])) {
@@ -168,6 +168,149 @@ class CertificationManager
 
         $state['pruebas'][$caseId] = $result;
         return $result;
+    }
+
+    private function getUploadedCertCaseData(string $caseId, array $state): ?array
+    {
+        if (!preg_match('/^F-\d+-(\d+)$/', $caseId, $m)) {
+            return null;
+        }
+
+        $setMgr = new CertSetManager($this->context);
+        $casos  = $setMgr->getFacturas();
+        if (empty($casos)) {
+            return null;
+        }
+
+        $num = (int)$m[1];
+        $caso = null;
+        foreach ($casos as $candidate) {
+            if (preg_match('/-(\d+)$/', (string)($candidate['caso'] ?? ''), $cm) && (int)$cm[1] === $num) {
+                $caso = $candidate;
+                break;
+            }
+        }
+        if (!$caso && isset($casos[$num - 1])) {
+            $caso = $casos[$num - 1];
+        }
+        if (!$caso) {
+            return null;
+        }
+
+        $tipoDte = (int)($caso['tipoDTE'] ?? 33);
+        $items   = $caso['items'] ?? [];
+        $data = [
+            'tipoDTE'  => $tipoDte,
+            'receptor' => $this->certReceptor($tipoDte),
+            'items'    => $items,
+        ];
+
+        if (isset($caso['descuentoGlobal'])) {
+            $data['descuentoGlobal'] = $caso['descuentoGlobal'];
+        }
+
+        if (!empty($caso['referencia']) && in_array($tipoDte, [56, 61], true)) {
+            $ref = $this->buildUploadedReference($caso, $casos, $state);
+            $data['referencias'] = [$ref];
+
+            if (empty($data['items'])) {
+                $data['items'] = $this->itemsForUploadedReference($ref, $caso, $casos);
+            }
+        }
+
+        return $data;
+    }
+
+    private function certReceptor(int $tipoDte): array
+    {
+        return [
+            'rut'       => in_array($tipoDte, [39, 41], true) ? '66666666-6' : '55555555-5',
+            'nombre'    => 'EMPRESA DE PRUEBAS SII',
+            'giro'      => 'GIRO DE PRUEBAS',
+            'direccion' => 'CALLE PRUEBA 123',
+            'comuna'    => 'SANTIAGO',
+            'ciudad'    => 'SANTIAGO',
+        ];
+    }
+
+    private function buildUploadedReference(array $caso, array $casos, array $state): array
+    {
+        $refInfo = $caso['referencia'] ?? [];
+        $casoRef = (string)($refInfo['caso_ref'] ?? '');
+        $razon = trim((string)($refInfo['razon'] ?? 'REFERENCIA SET DE PRUEBAS'));
+        $tipoRef = $this->tipoForUploadedCase($casoRef, $casos);
+        $folioRef = $this->folioForUploadedCase($casoRef, $state);
+
+        return [
+            'tipo'   => $tipoRef,
+            'folio'  => $folioRef,
+            'fecha'  => date('Y-m-d'),
+            'codigo' => $this->codigoRefForRazon($razon),
+            'razon'  => $razon !== '' ? $razon : 'REFERENCIA SET DE PRUEBAS',
+        ];
+    }
+
+    private function tipoForUploadedCase(string $casoRef, array $casos): int
+    {
+        foreach ($casos as $candidate) {
+            if ((string)($candidate['caso'] ?? '') === $casoRef) {
+                return (int)($candidate['tipoDTE'] ?? 33);
+            }
+        }
+        return 33;
+    }
+
+    private function folioForUploadedCase(string $casoRef, array $state): int
+    {
+        $key = $this->legacyKeyForUploadedCase($casoRef);
+        $folio = (int)($state['pruebas'][$key]['folio'] ?? 0);
+        return $folio > 0 ? $folio : 1;
+    }
+
+    private function legacyKeyForUploadedCase(string $casoRef): string
+    {
+        if (preg_match('/-(\d+)$/', $casoRef, $m)) {
+            return 'F-4832043-' . (int)$m[1];
+        }
+        return 'F-4832043-1';
+    }
+
+    private function codigoRefForRazon(string $razon): int
+    {
+        $r = mb_strtoupper($razon, 'UTF-8');
+        if (str_contains($r, 'ANULA')) {
+            return 1;
+        }
+        if (str_contains($r, 'CORRIGE') || str_contains($r, 'GIRO') || str_contains($r, 'TEXTO')) {
+            return 2;
+        }
+        return 3;
+    }
+
+    private function itemsForUploadedReference(array $ref, array $caso, array $casos): array
+    {
+        if ((int)($ref['codigo'] ?? 0) === 2) {
+            return [[
+                'nombre'   => mb_substr((string)($ref['razon'] ?? 'CORRIGE TEXTO'), 0, 80, 'UTF-8'),
+                'cantidad' => 1,
+                'precio'   => 0,
+                'exento'   => true,
+            ]];
+        }
+
+        $casoRef = (string)(($caso['referencia'] ?? [])['caso_ref'] ?? '');
+        foreach ($casos as $candidate) {
+            if ((string)($candidate['caso'] ?? '') === $casoRef && !empty($candidate['items'])) {
+                return $candidate['items'];
+            }
+        }
+
+        return [[
+            'nombre'   => mb_substr((string)($ref['razon'] ?? 'AJUSTE REFERENCIA'), 0, 80, 'UTF-8'),
+            'cantidad' => 1,
+            'precio'   => 0,
+            'exento'   => true,
+        ]];
     }
 
     // =========================================================
