@@ -93,7 +93,7 @@ $certCases = [
   <div class="cert-stage-header" style="background:linear-gradient(135deg,#eef2ff,#f8fafc)">
     <i class="bi bi-receipt"></i> Certificación de Boletas Electrónicas
     <span style="font-size:.7rem; font-weight:400; color:var(--c-text-muted); margin-left:8px">
-      Genera el set completo con los folios del CAF, lo envía en un solo sobre + RCOF.
+      Genera el set completo con los folios del CAF y lo envía en un solo sobre. El RCOF queda como respaldo local opcional.
     </span>
   </div>
   <div class="d-card-body">
@@ -126,7 +126,7 @@ $certCases = [
         <label class="d-label">Proceso completo</label>
         <div style="display:flex; gap:8px; flex-wrap:wrap">
           <button class="d-btn d-btn-primary" id="btn-cert-boletas" onclick="certBoletas()">
-            <i class="bi bi-rocket-takeoff-fill"></i> Paso 1: Boletas (sobre + RCOF)
+            <i class="bi bi-rocket-takeoff-fill"></i> Paso 1: Boletas (sobre SII)
           </button>
           <button type="button" class="d-btn d-btn-outline" onclick="certMuestras()">
             <i class="bi bi-printer"></i> Muestras PDF
@@ -169,7 +169,7 @@ $certCases = [
           <?= htmlspecialchars($set['nombre']) ?>
           <?php if ($setKey === 'B'): ?>
           <span class="ms-auto" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400">
-            Usar solo "Certificar Boletas (sobre + RCOF)"
+            Usar solo "Paso 1: Boletas (sobre SII)"
           </span>
           <?php else: ?>
           <button class="d-btn d-btn-sm d-btn-outline ms-auto"
@@ -185,7 +185,7 @@ $certCases = [
           <span class="cert-folio" id="folio-<?= $caseId ?>"></span>
           <?php if ($setKey === 'B'): ?>
           <span class="cert-folio" style="text-align:right; font-size:.68rem; color:var(--c-text-muted)">
-            Sobre + RCOF
+            Sobre SII
           </span>
           <?php else: ?>
           <button class="d-btn d-btn-sm d-btn-outline" onclick="certRunCase('<?= $caseId ?>')" title="Ejecutar solo este caso">
@@ -518,8 +518,8 @@ async function certBoletas() {
   const btn = document.getElementById('btn-cert-boletas');
   const out = document.getElementById('cert-boletas-result');
   btn.disabled = true;
-  out.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Generando boletas, sobre y RCOF, enviando al SII…</div>';
-  log('Iniciando certificación de boletas (set + RCOF)…', 'info');
+  out.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Generando boletas y sobre, enviando al SII…</div>';
+  log('Iniciando certificación de boletas (set en sobre SII)…', 'info');
   try {
     const res = await api('cert_boletas');
     if (res.error && !res.sobre) {
@@ -532,9 +532,9 @@ async function certBoletas() {
         <div><strong>Folios usados:</strong> ${(res.folios||[]).join(', ')}</div>
         <div style="margin-top:6px">${badge(s.ok)} <strong>Sobre boletas</strong> — Track ID: <code>${s.trackId||'—'}</code> ${s.estado?('· '+s.estado):''} ${s.mensaje?('<br><small>'+s.mensaje+'</small>'):''}</div>
         <div style="margin-top:6px">${badge(rc.ok)} <strong>RCOF</strong> — Track ID: <code>${rc.trackId||'—'}</code> ${rc.via?('· vía '+rc.via):''} ${rc.mensaje?('<br><small>'+rc.mensaje+'</small>'):''}</div>
-        <div style="margin-top:6px; font-size:.75rem; color:var(--c-text-muted)">Informe estos Track IDs en el portal SII (Boletas electrónicas de ventas y servicios).</div>
+        <div style="margin-top:6px; font-size:.75rem; color:var(--c-text-muted)">Informe el Track ID del sobre en el portal SII (Boletas electrónicas de ventas y servicios).</div>
       </div>`;
-      log(`Boletas: sobre TRK ${s.trackId||'-'} (${s.ok?'OK':'FALLA'}), RCOF TRK ${rc.trackId||'-'} (${rc.ok?'OK':'FALLA'})`, res.ok?'ok':'warn');
+      log(`Boletas: sobre TRK ${s.trackId||'-'} (${s.ok?'OK':'FALLA'}), RCOF ${rc.skipped?'omitido':('TRK '+(rc.trackId||'-')+' ('+(rc.ok?'OK':'FALLA')+')')}`, res.ok?'ok':'warn');
     }
   } catch(e) {
     out.innerHTML = `<div class="d-alert danger"><i class="bi bi-x-circle"></i> Error de comunicación: ${e.message}</div>`;
@@ -590,7 +590,7 @@ async function certRunAll() {
 
 async function certRunSet(setKey) {
   if (setKey === 'B') {
-    log('Boletas no se envian por casos. Use Certificar Boletas (sobre + RCOF).', 'warn');
+    log('Boletas no se envian por casos. Use Paso 1: Boletas (sobre SII).', 'warn');
     return;
   }
   const caseMaps = <?= json_encode($certCases) ?>;
@@ -619,7 +619,7 @@ async function certRunSet(setKey) {
 
 async function certRunCase(cid) {
   if (cid.startsWith('B-CASO-')) {
-    log('Boletas no se envian individualmente. Use Certificar Boletas (sobre + RCOF).', 'warn');
+    log('Boletas no se envian individualmente. Use Paso 1: Boletas (sobre SII).', 'warn');
     return;
   }
   const badge = document.getElementById('badge-'+cid);

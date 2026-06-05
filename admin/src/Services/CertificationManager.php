@@ -800,7 +800,7 @@ XML;
             }
         }
 
-        // Set de boletas de certificación (sobre + RCOF): cert_boletas/dte_T39F*.xml
+        // Set de boletas de certificación: cert_boletas/dte_T39F*.xml
         $boletasDir = $tmpDir . 'cert_boletas/';
         if (is_dir($boletasDir)) {
             foreach (glob($boletasDir . 'dte_T*F*.xml') ?: [] as $bxml) {
@@ -829,7 +829,7 @@ XML;
 
 
     // =========================================================
-    //  CERTIFICACIÓN DE BOLETAS — Set en un sobre + RCOF
+    //  CERTIFICACIÓN DE BOLETAS — Set en un sobre SII
     // =========================================================
 
     /**
@@ -839,8 +839,8 @@ XML;
      *      SIN consumir folios ni avanzar el contador → reintentable indefinidamente
      *      sobre los mismos folios hasta que el SII apruebe.
      *   3. Arma UN solo sobre EnvioBOLETA y lo firma.
-     *   4. Genera y firma el RCOF (ConsumoFolios) del set.
-     *   5. Envía sobre + RCOF al SII (ambiente certificación) y devuelve los Track IDs.
+     *   4. Genera y firma el RCOF (ConsumoFolios) del set como respaldo local.
+     *   5. Envía el sobre al SII (ambiente certificación) y devuelve su Track ID.
      *
      * Reintentar simplemente vuelve a llamar este método: regenera las mismas
      * boletas con los mismos folios (no pide folios nuevos).
@@ -929,8 +929,18 @@ XML;
             ]],
         ]);
         file_put_contents($tmpDir . 'rcof_set_boletas.xml', $rcofGen['xml'] ?? '');
+        $enviarRcof = getenv('SII_CERT_SEND_RCOF') === '1';
         $rcofEnvio = !empty($rcofGen['ok'])
-            ? sendRCOFToSII($rcofGen['xml'], $fecha, 1)
+            ? (
+                $enviarRcof
+                    ? sendRCOFToSII($rcofGen['xml'], $fecha, 1)
+                    : [
+                        'ok'      => true,
+                        'skipped' => true,
+                        'via'     => 'omitido',
+                        'mensaje' => 'RCOF generado y guardado, no enviado: el SII informa que el RVD/RCOF no es obligatorio desde 2022-08-01.',
+                    ]
+            )
             : ['ok' => false, 'error' => $rcofGen['error'] ?? 'No se pudo generar el RCOF'];
 
         // Persistir estado para auditoría / reintento
@@ -964,7 +974,7 @@ XML;
                 'mensaje' => $rcofEnvio['mensaje'] ?? ($rcofEnvio['error'] ?? ''),
             ],
             'montos' => ['neto' => $sumNeto, 'iva' => $sumIva, 'exento' => $sumExe, 'total' => $sumTotal],
-            'mensaje'=> 'Set de boletas y RCOF procesados. Revise los Track IDs e infórmelos en el portal SII.',
+            'mensaje'=> 'Set de boletas enviado. Informe el Track ID del sobre en el portal SII. RCOF generado como respaldo local.',
         ];
     }
 }
