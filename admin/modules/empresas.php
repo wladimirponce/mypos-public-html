@@ -22,6 +22,16 @@ $actecoToJson = function (?string $raw): string {
     return json_encode($codes ?: []);
 };
 
+$metadataJson = function () use ($actecoToJson): string {
+    return json_encode([
+        'acteco' => json_decode($actecoToJson($_POST['acteco'] ?? ''), true) ?: [],
+        'unidad_sii' => trim((string)($_POST['unidad_sii'] ?? '')),
+        'email_sii' => trim((string)($_POST['email_sii'] ?? '')),
+        'numero_resolucion' => trim((string)($_POST['num_resol'] ?? '80')) ?: '80',
+        'fecha_resolucion' => trim((string)($_POST['fecha_resol'] ?? '2026-05-17')) ?: '2026-05-17',
+    ], JSON_UNESCAPED_UNICODE);
+};
+
 // ── Procesar CREACIÓN ────────────────────────────────────────────────────────
 if (isset($_POST['action']) && $_POST['action'] === 'create_empresa' && $dbOk) {
     try {
@@ -52,8 +62,8 @@ if (isset($_POST['action']) && $_POST['action'] === 'create_empresa' && $dbOk) {
             $stmt->execute([$rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '']);
             $empresaId = $db->lastInsertId();
 
-            $stmtConf = $db->prepare("INSERT INTO empresa_configuracion (empresa_id, rut_empresa, razon_social, nombre_fantasia, giro, direccion, comuna, ciudad) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmtConf->execute([$empresaId, $rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '']);
+            $stmtConf = $db->prepare("INSERT INTO empresa_configuracion (empresa_id, rut_empresa, razon_social, nombre_fantasia, giro, direccion, comuna, ciudad, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmtConf->execute([$empresaId, $rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '', $metadataJson()]);
 
             $db->prepare("INSERT INTO empresa_configuracion_operativa (empresa_id) VALUES (?)")->execute([$empresaId]);
 
@@ -92,8 +102,8 @@ if (isset($_POST['action']) && $_POST['action'] === 'update_empresa' && $dbOk) {
         } else {
             $db->prepare("UPDATE empresas SET rut=?, razon_social=?, nombre_fantasia=?, giro=?, direccion=?, comuna=?, ciudad=? WHERE id=?")
                ->execute([$rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '', $id]);
-            $db->prepare("UPDATE empresa_configuracion SET rut_empresa=?, razon_social=?, nombre_fantasia=?, giro=?, direccion=?, comuna=?, ciudad=? WHERE empresa_id=?")
-               ->execute([$rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '', $id]);
+            $db->prepare("UPDATE empresa_configuracion SET rut_empresa=?, razon_social=?, nombre_fantasia=?, giro=?, direccion=?, comuna=?, ciudad=?, metadata_json=? WHERE empresa_id=?")
+               ->execute([$rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '', $metadataJson(), $id]);
         }
         $empMsg = "Empresa '$rs' actualizada con éxito.";
     } catch (Exception $e) {
@@ -125,7 +135,17 @@ if ($dbOk && isset($_GET['edit'])) {
         $stmt->execute([$eid]);
         $editEmp = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     } else {
-        $stmt = $db->prepare("SELECT * FROM empresas WHERE id=? LIMIT 1");
+        $stmt = $db->prepare("
+            SELECT e.*,
+                   CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.acteco')), '[]') ELSE '[]' END AS acteco,
+                   CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.unidad_sii')), '') ELSE '' END AS unidad_sii,
+                   CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.email_sii')), e.email) ELSE e.email END AS email_sii,
+                   CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.numero_resolucion')), '80') ELSE '80' END AS numero_resolucion,
+                   CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.fecha_resolucion')), '2026-05-17') ELSE '2026-05-17' END AS fecha_resolucion
+            FROM empresas e
+            LEFT JOIN empresa_configuracion ec ON ec.empresa_id = e.id
+            WHERE e.id=? LIMIT 1
+        ");
         $stmt->execute([$eid]);
         $editEmp = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }

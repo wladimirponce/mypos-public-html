@@ -2587,7 +2587,10 @@ function buildDocumentoXML(
     $xmlIndServ = in_array($tipo, [39, 41])
         ? "\n  <IndServicio>$indServicio</IndServicio>"
         : "";
-    $acteco         = ACTECO;
+    $acteco         = (int)ACTECO;
+    if ($acteco <= 0) {
+        throw new Exception('ACTECO no configurado para la empresa. Edite la ficha en Empresas y registre el codigo de actividad economica SII antes de certificar facturas/notas/guias.');
+    }
 
     // Sección Transporte (Solo si hay datos o es Guía)
     $xmlTrans = "";

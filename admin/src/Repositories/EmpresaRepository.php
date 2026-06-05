@@ -98,9 +98,13 @@ class EmpresaRepository extends BaseRepository
                        e.direccion AS direccion_origen, e.comuna AS comuna_origen, e.ciudad AS ciudad_origen,
                        e.telefono, e.email AS email_sii, e.activo,
                        COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default,
-                       NULL AS acteco, '80' AS numero_resolucion, '2026-05-17' AS fecha_resolucion, '' AS unidad_sii
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.acteco')), '[]') ELSE '[]' END AS acteco,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.numero_resolucion')), '80') ELSE '80' END AS numero_resolucion,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.fecha_resolucion')), '2026-05-17') ELSE '2026-05-17' END AS fecha_resolucion,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.unidad_sii')), '') ELSE '' END AS unidad_sii
                 FROM empresas e
                 LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id
+                LEFT JOIN empresa_configuracion ec ON e.id = ec.empresa_id
                 WHERE e.id = ? AND e.activo = 1";
         $stmt = $this->db->prepare($sql);
         $stmt->execute([$id]);
@@ -120,9 +124,14 @@ class EmpresaRepository extends BaseRepository
         $sql = "SELECT e.id, e.rut, e.razon_social, e.nombre_fantasia, e.giro,
                        e.direccion AS direccion_origen, e.comuna AS comuna_origen, e.ciudad AS ciudad_origen,
                        e.telefono, e.email AS email_sii, e.activo,
-                       COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default
+                       COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.acteco')), '[]') ELSE '[]' END AS acteco,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.numero_resolucion')), '80') ELSE '80' END AS numero_resolucion,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.fecha_resolucion')), '2026-05-17') ELSE '2026-05-17' END AS fecha_resolucion,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.unidad_sii')), '') ELSE '' END AS unidad_sii
                 FROM empresas e
                 LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id
+                LEFT JOIN empresa_configuracion ec ON e.id = ec.empresa_id
                 WHERE COALESCE(dc.ambiente, 'CERTIFICACION') = ? AND e.activo = 1 LIMIT 1";
         $stmt = $this->db->prepare($sql);
         $stmt->execute([strtoupper($ambiente)]);
