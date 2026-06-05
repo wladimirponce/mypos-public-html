@@ -487,8 +487,8 @@ async function certLoadSetInfo() {
     const res = await api('cert_set_get');
     if (res.ok && res.set) {
       const s = res.set;
-      const origenBoletas = s.origen_boletas ? ` � Boletas: <em>${s.origen_boletas}</em>` : '';
-      const origenBasico = s.origen_basico ? ` � General: <em>${s.origen_basico}</em>` : '';
+      const origenBoletas = s.origen_boletas ? ` &middot; Boletas: <em>${s.origen_boletas}</em>` : '';
+      const origenBasico = s.origen_basico ? ` &middot; General: <em>${s.origen_basico}</em>` : '';
       el.innerHTML = `<span style="color:#27ae60"><i class="bi bi-check-circle"></i> Set vinculado:</span> `
         + `${(s.boletas||[]).length} boleta(s)` + (s.facturas?.length ? `, ${s.facturas.length} caso(s) set basico` : '')
         + (s.atencion_basico ? ` &middot; Atencion ${s.atencion_basico}` : '')
