@@ -316,7 +316,7 @@ if (isset($globalContext) && $globalContext->getRut() === '77776321-0') {
         }
 
         // Leer rango real del archivo en disco
-        $xmlParsed = @simplexml_load_string(file_get_contents($pathFix));
+        $xmlParsed = @simplexml_load_string(normalizeCafXmlContent((string)file_get_contents($pathFix)));
         $desdeReal = $xmlParsed ? (int)$xmlParsed->CAF->DA->RNG->D : 1;
         $hastaReal = $xmlParsed ? (int)$xmlParsed->CAF->DA->RNG->H : 2000;
         $faReal    = $xmlParsed ? (string)$xmlParsed->CAF->DA->FA  : '2026-05-17';
@@ -2050,6 +2050,32 @@ function getRutCertificadoSeguro(string $certPem): string {
     return strtoupper(getRutCertificado($certPem));
 }
 
+if (!function_exists('normalizeCafXmlContent')) {
+    function normalizeCafXmlContent(string $content): string
+    {
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
+
+        if (!preg_match('//u', $content)) {
+            $enc = function_exists('mb_detect_encoding')
+                ? (mb_detect_encoding($content, ['UTF-8', 'Windows-1252', 'ISO-8859-1'], true) ?: 'Windows-1252')
+                : 'Windows-1252';
+            $content = function_exists('mb_convert_encoding')
+                ? mb_convert_encoding($content, 'UTF-8', $enc)
+                : iconv($enc, 'UTF-8//IGNORE', $content);
+        }
+
+        $updated = preg_replace(
+            '/<\?xml([^>]*?)encoding=["\'][^"\']+["\']([^>]*?)\?>/i',
+            '<?xml$1encoding="UTF-8"$2?>',
+            $content,
+            1,
+            $count
+        );
+
+        return $count > 0 ? $updated : $content;
+    }
+}
+
 function loadCAF(int $tipo, int $folio = 0): array {
     global $globalContext;
 
@@ -2079,9 +2105,9 @@ function loadCAF(int $tipo, int $folio = 0): array {
         }
 
         if (!empty($dbCaf['xml_path'])) {
-            $xmlCont = file_get_contents($dbCaf['xml_path']);
+            $xmlCont = normalizeCafXmlContent((string)file_get_contents($dbCaf['xml_path']));
         } elseif (!empty($dbCaf['xml_content'])) {
-            $xmlCont = $dbCaf['xml_content'];
+            $xmlCont = normalizeCafXmlContent((string)$dbCaf['xml_content']);
         } else {
             throw new Exception("CAF sin contenido XML disponible para folio $folio (tipo $tipo)");
         }
@@ -2120,7 +2146,8 @@ function loadCAF(int $tipo, int $folio = 0): array {
         );
     }
 
-    $xml = simplexml_load_file($file);
+    $xmlCont = normalizeCafXmlContent((string)file_get_contents($file));
+    $xml = simplexml_load_string($xmlCont);
     $registryFile = $actualCafDir . 'registry.json';
     $lastUsed = file_exists($registryFile) ? (json_decode(file_get_contents($registryFile), true)[$tipo] ?? 0) : 0;
 
@@ -2136,7 +2163,7 @@ function loadCAF(int $tipo, int $folio = 0): array {
     }
 
     return [
-        'xml'     => file_get_contents($file),
+        'xml'     => $xmlCont,
         'desde'   => $desde,
         'hasta'   => $hasta,
         'privKey' => (string)$xml->RSASK,
@@ -6195,7 +6222,7 @@ function getCAFStatus(): array {
         if (!preg_match('/caf_(\d+)\.xml$/', $f, $m)) continue;
         $tipo = (int)$m[1];
         $tiposCargados[] = $tipo;
-        $xml = simplexml_load_file($f);
+        $xml = simplexml_load_string(normalizeCafXmlContent((string)file_get_contents($f)));
         if (!$xml) continue;
 
         $desde = (int)$xml->CAF->DA->RNG->D;
@@ -6253,7 +6280,7 @@ function uploadCAF(): array {
     }
 
     $tmp = $_FILES['file']['tmp_name'];
-    $content = file_get_contents($tmp);
+    $content = normalizeCafXmlContent((string)file_get_contents($tmp));
     
     // Validar XML
     libxml_use_internal_errors(true);

@@ -5,6 +5,32 @@
 $cCertPfx = $globalContext ? $globalContext->getCertPath() : CERT_PFX;
 $cCafDir  = $globalContext ? dirname($globalContext->getCafPath(0)) . '/' : CAF_DIR;
 
+if (!function_exists('normalizeCafXmlContent')) {
+    function normalizeCafXmlContent(string $content): string
+    {
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
+
+        if (!preg_match('//u', $content)) {
+            $enc = function_exists('mb_detect_encoding')
+                ? (mb_detect_encoding($content, ['UTF-8', 'Windows-1252', 'ISO-8859-1'], true) ?: 'Windows-1252')
+                : 'Windows-1252';
+            $content = function_exists('mb_convert_encoding')
+                ? mb_convert_encoding($content, 'UTF-8', $enc)
+                : iconv($enc, 'UTF-8//IGNORE', $content);
+        }
+
+        $updated = preg_replace(
+            '/<\?xml([^>]*?)encoding=["\'][^"\']+["\']([^>]*?)\?>/i',
+            '<?xml$1encoding="UTF-8"$2?>',
+            $content,
+            1,
+            $count
+        );
+
+        return $count > 0 ? $updated : $content;
+    }
+}
+
 // Procesar acciones POST
 if (isset($_POST['action'])) {
     try {
@@ -62,7 +88,7 @@ if (isset($_POST['action'])) {
         
         if ($_POST['action'] === 'upload_caf' && !empty($_FILES['caf_file']['tmp_name'])) {
             $tmp = $_FILES['caf_file']['tmp_name'];
-            $content = file_get_contents($tmp);
+            $content = normalizeCafXmlContent((string)file_get_contents($tmp));
             $xml = simplexml_load_string($content);
             if (!$xml || !isset($xml->CAF->DA->TD)) throw new Exception("El archivo no parece ser un CAF válido.");
 
@@ -130,10 +156,7 @@ $tiposN = [33=>'Factura',34=>'Factura Exenta',39=>'Boleta',41=>'Boleta Exenta',5
 foreach (glob($cCafDir . 'caf_*.xml') as $f) {
     preg_match('/caf_(\d+)\.xml$/', $f, $m);
     $tipo = (int)($m[1] ?? 0);
-    $content = file_get_contents($f);
-    if (!preg_match('//u', $content)) {
-        $content = utf8_encode($content);
-    }
+    $content = normalizeCafXmlContent((string)file_get_contents($f));
     $xml = @simplexml_load_string($content);    if (!$xml) continue;
     $cafsData[] = [
         'tipo' => $tipo, 'nombre' => $tiposN[$tipo] ?? "Tipo $tipo",
