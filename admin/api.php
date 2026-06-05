@@ -3009,7 +3009,13 @@ function signDTE(string $xml, string $certPem, $privKey, string $idToSign): stri
     openssl_sign($siInCtx->C14N(), $sigBytes, $privKey, OPENSSL_ALGO_SHA1);
     $svInCtx->textContent = base64_encode($sigBytes);
 
-    return $dom->saveXML();
+    $dom->encoding = 'ISO-8859-1';
+    $signedXml = $dom->saveXML();
+    if (preg_match('//u', $signedXml)) {
+        $signedXml = mb_convert_encoding($signedXml, 'ISO-8859-1', 'UTF-8');
+    }
+
+    return $signedXml;
 }
 
 // ────────────────────────────────────────────────────────────
