@@ -8,12 +8,6 @@ $empError = '';
 $empNewKey = '';
 
 $useSiiTables = false;
-try {
-    $stmt = $db->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sii_empresa'");
-    if ((int)$stmt->fetchColumn() > 0) {
-        $useSiiTables = true;
-    }
-} catch (Exception $e) {}
 
 /** Normaliza el campo acteco (texto "107300, 463020") a JSON array. */
 $actecoToJson = function (?string $raw): string {

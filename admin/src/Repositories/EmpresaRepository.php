@@ -16,15 +16,7 @@ class EmpresaRepository extends BaseRepository
     public function __construct()
     {
         parent::__construct();
-        try {
-            $stmt = $this->db->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sii_empresa'");
-            if ((int)$stmt->fetchColumn() > 0) {
-                $stmt = $this->db->query("SELECT COUNT(*) FROM sii_empresa WHERE activo = 1");
-                $this->useSiiTables = ((int)$stmt->fetchColumn()) > 0;
-            }
-        } catch (Exception $e) {
-            $this->useSiiTables = false;
-        }
+        $this->useSiiTables = false;
     }
 
     /**

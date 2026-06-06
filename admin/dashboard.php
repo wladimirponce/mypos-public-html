@@ -1,6 +1,6 @@
 <?php
 /**
- * Dashboard DTE â€” Layout Maestro
+ * Dashboard DTE — Layout Maestro
  * Sistema profesional de facturación electrónica
  */
 if (session_status() === PHP_SESSION_NONE) session_start();
@@ -37,7 +37,7 @@ if (isset($_GET['switch_empresa'])) {
             $dbSwitch = Database::getInstance();
             $stmtSwitch = $dbSwitch->prepare("
                 SELECT COUNT(*)
-                FROM sii_empresa
+                FROM empresas
                 WHERE id = ? AND activo = 1
             ");
             $stmtSwitch->execute([$newId]);
@@ -67,7 +67,7 @@ try {
     $db = Database::getInstance();
     $dbOk = true;
 
-    $empresas = $db->query("SELECT id, rut, razon_social, ambiente_default, activo FROM sii_empresa WHERE activo = 1 ORDER BY razon_social")->fetchAll(PDO::FETCH_ASSOC);
+    $empresas = $db->query("SELECT e.id, e.rut, e.razon_social, COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default, e.activo FROM empresas e LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id WHERE e.activo = 1 ORDER BY e.razon_social")->fetchAll(PDO::FETCH_ASSOC);
 
     // Nunca se selecciona una empresa automaticamente.
     $idsValidos = array_map(fn($e) => (int)$e['id'], $empresas);
@@ -76,10 +76,9 @@ try {
         unset($_SESSION['active_empresa_id']);
     }
 } catch (Exception $e) {
-    // DB no disponible â€” modo degradado de SOLO LECTURA sobre constantes.
+    // DB no disponible — modo degradado de SOLO LECTURA sobre constantes.
     // El selector NUNCA muestra "Legacy"; muestra la última empresa conocida.
 }
-
 // —— Datos del emisor (desde constantes legacy o DB) ——
 define('DTE_API_BOOTSTRAP_ONLY', true);
 require_once __DIR__ . '/api.php';
