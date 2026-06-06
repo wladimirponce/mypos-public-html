@@ -5079,6 +5079,7 @@ function generateLibro(array $data): array {
             $resumenPorTipo[$tipo] = [
                 'TotDoc' => 0, 'TotMntExe' => 0, 'TotMntNeto' => 0, 'TotMntIVA' => 0, 'TotMntTotal' => 0,
                 'TotOpIVAUsoComun' => 0, 'TotIVAUsoComun' => 0, 'FctProp' => null,
+                'TotOpIVARetTotal' => 0, 'TotIVARetTotal' => 0,
                 'IVANoRecup' => [],
             ];
         }
@@ -5093,11 +5094,17 @@ function generateLibro(array $data): array {
         $mntIvaNoRec   = isset($d['mntIvaNoRec'])   ? (int)$d['mntIvaNoRec']            : null;
         $mntIvaUsoComun= isset($d['mntIvaUsoComun'])? (int)$d['mntIvaUsoComun']         : null;
         $fctProp       = isset($d['fctProp'])       ? number_format((float)$d['fctProp'], 3, '.', '') : null;
+        $ivaRetTotal   = isset($d['ivaRetTotal'])   ? (int)$d['ivaRetTotal']            : null;
 
         if ($mntIvaUsoComun > 0) {
             $resumenPorTipo[$tipo]['TotOpIVAUsoComun']++;
             $resumenPorTipo[$tipo]['TotIVAUsoComun'] += $mntIvaUsoComun;
             if ($fctProp !== null) $resumenPorTipo[$tipo]['FctProp'] = $fctProp;
+        }
+
+        if ($ivaRetTotal > 0) {
+            $resumenPorTipo[$tipo]['TotOpIVARetTotal']++;
+            $resumenPorTipo[$tipo]['TotIVARetTotal'] += $ivaRetTotal;
         }
 
         if ($mntIvaNoRec > 0 && $codIvaNoRec !== null) {
@@ -5118,10 +5125,9 @@ function generateLibro(array $data): array {
             . ($exe   > 0 || $exe < 0 ? "  <MntExe>$exe</MntExe>\n"           : "")
             . ($neto  > 0 || $neto < 0 ? "  <MntNeto>$neto</MntNeto>\n"         : "")
             . ($iva   > 0 || $iva < 0 ? "  <MntIVA>$iva</MntIVA>\n"           : "")
-            . ($codIvaNoRec    !== null ? "  <CodIVANoRec>$codIvaNoRec</CodIVANoRec>\n"       : "")
-            . ($mntIvaNoRec    !== null ? "  <MntIVANoRec>$mntIvaNoRec</MntIVANoRec>\n"       : "")
-            . ($mntIvaUsoComun !== null ? "  <MntIVAUsoComun>$mntIvaUsoComun</MntIVAUsoComun>\n" : "")
-            . ($fctProp        !== null ? "  <FctProp>$fctProp</FctProp>\n"                   : "")
+            . ($codIvaNoRec !== null && $mntIvaNoRec !== null ? "  <IVANoRec>\n    <CodIVANoRec>$codIvaNoRec</CodIVANoRec>\n    <MntIVANoRec>$mntIvaNoRec</MntIVANoRec>\n  </IVANoRec>\n" : "")
+            . ($mntIvaUsoComun !== null ? "  <IVAUsoComun>$mntIvaUsoComun</IVAUsoComun>\n" : "")
+            . ($ivaRetTotal !== null ? "  <IVARetTotal>$ivaRetTotal</IVARetTotal>\n" : "")
             . "  <MntTotal>$total</MntTotal>\n"
             . "</Detalle>\n";
     }
@@ -5152,6 +5158,11 @@ function generateLibro(array $data): array {
             if ($tot['FctProp'] !== null) {
                 $resumenXml .= "    <FctProp>{$tot['FctProp']}</FctProp>\n";
             }
+        }
+        
+        if ($tot['TotOpIVARetTotal'] > 0) {
+            $resumenXml .= "    <TotOpIVARetTotal>{$tot['TotOpIVARetTotal']}</TotOpIVARetTotal>\n";
+            $resumenXml .= "    <TotIVARetTotal>{$tot['TotIVARetTotal']}</TotIVARetTotal>\n";
         }
         
         $resumenXml .= "    <TotMntTotal>{$tot['TotMntTotal']}</TotMntTotal>\n";

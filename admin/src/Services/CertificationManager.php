@@ -989,24 +989,24 @@ XML;
             ['tipo'=>33,'folio'=>32,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
              'neto'=>5021,'iva'=>954,'exe'=>8299,'total'=>14274],
 
-            // Factura papel 781 — IVA uso común, factor prop = 0.60
+            // Factura papel 781 - IVA uso comun, factor prop = 0.60
             ['tipo'=>33,'folio'=>781,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
              'neto'=>29668,'iva'=>0,'exe'=>0,'total'=>35305,
-             'codIvaNoRec'=>2,'mntIvaUsoComun'=>5637,'fctProp'=>0.60],
+             'mntIvaUsoComun'=>5637,'fctProp'=>0.60],
 
             // NC papel 451 — descuento sobre factura 234
             ['tipo'=>61,'folio'=>451,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
              'neto'=>-2655,'iva'=>-504,'exe'=>0,'total'=>-3159],
 
-            // FE 67 — entrega gratuita, IVA no recuperable (cód. 5)
+            // FE 67 — entrega gratuita, IVA no recuperable (cód. 4)
             ['tipo'=>33,'folio'=>67,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
              'neto'=>9383,'iva'=>0,'exe'=>0,'total'=>11166,
-             'codIvaNoRec'=>5,'mntIvaNoRec'=>1783],
+             'codIvaNoRec'=>4,'mntIvaNoRec'=>1783],
 
-            // Factura de Compra Electrónica 9 — retención total IVA (cód. 6)
+            // Factura de Compra Electrónica 9 — retención total IVA
             ['tipo'=>46,'folio'=>9,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
              'neto'=>9253,'iva'=>0,'exe'=>0,'total'=>11011,
-             'codIvaNoRec'=>6,'mntIvaNoRec'=>1758],
+             'ivaRetTotal'=>1758],
 
             // NC papel 211 — descuento sobre FE 32
             ['tipo'=>61,'folio'=>211,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
