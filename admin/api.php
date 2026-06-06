@@ -5060,32 +5060,64 @@ function generateLibro(array $data): array {
     // Calcular totales reales del período desde los detalles
     $totNeto  = 0; $totIVA = 0; $totExe = 0; $totTotal = 0;
     $xmlDetalles = '';
+    $resumenPorTipo = [];
+
     foreach ($detalles as $d) {
+        $tipo  = (int)($d['tipo']  ?? 33);
         $neto  = (int)($d['neto']  ?? 0);
         $iva   = (int)($d['iva']   ?? 0);
         $exe   = (int)($d['exe']   ?? 0);
         $total = (int)($d['total'] ?? 0);
+        
         $totNeto  += $neto;
         $totIVA   += $iva;
         $totExe   += $exe;
         $totTotal += $total;
 
+        // Agrupar para TotalesPeriodo
+        if (!isset($resumenPorTipo[$tipo])) {
+            $resumenPorTipo[$tipo] = [
+                'TotDoc' => 0, 'TotMntExe' => 0, 'TotMntNeto' => 0, 'TotMntIVA' => 0, 'TotMntTotal' => 0,
+                'TotOpIVAUsoComun' => 0, 'TotIVAUsoComun' => 0, 'FctProp' => null,
+                'IVANoRecup' => [],
+            ];
+        }
+        $resumenPorTipo[$tipo]['TotDoc']++;
+        $resumenPorTipo[$tipo]['TotMntExe'] += $exe;
+        $resumenPorTipo[$tipo]['TotMntNeto'] += $neto;
+        $resumenPorTipo[$tipo]['TotMntIVA'] += $iva;
+        $resumenPorTipo[$tipo]['TotMntTotal'] += $total;
+
         // Campos especiales Libro de Compras: IVA uso común, no recuperable, retención
         $codIvaNoRec   = isset($d['codIvaNoRec'])   ? (int)$d['codIvaNoRec']            : null;
         $mntIvaNoRec   = isset($d['mntIvaNoRec'])   ? (int)$d['mntIvaNoRec']            : null;
         $mntIvaUsoComun= isset($d['mntIvaUsoComun'])? (int)$d['mntIvaUsoComun']         : null;
-        $fctProp       = isset($d['fctProp'])        ? number_format((float)$d['fctProp'], 2, '.', '') : null;
+        $fctProp       = isset($d['fctProp'])       ? number_format((float)$d['fctProp'], 3, '.', '') : null;
+
+        if ($mntIvaUsoComun > 0) {
+            $resumenPorTipo[$tipo]['TotOpIVAUsoComun']++;
+            $resumenPorTipo[$tipo]['TotIVAUsoComun'] += $mntIvaUsoComun;
+            if ($fctProp !== null) $resumenPorTipo[$tipo]['FctProp'] = $fctProp;
+        }
+
+        if ($mntIvaNoRec > 0 && $codIvaNoRec !== null) {
+            if (!isset($resumenPorTipo[$tipo]['IVANoRecup'][$codIvaNoRec])) {
+                $resumenPorTipo[$tipo]['IVANoRecup'][$codIvaNoRec] = ['TotOp' => 0, 'TotMnt' => 0];
+            }
+            $resumenPorTipo[$tipo]['IVANoRecup'][$codIvaNoRec]['TotOp']++;
+            $resumenPorTipo[$tipo]['IVANoRecup'][$codIvaNoRec]['TotMnt'] += $mntIvaNoRec;
+        }
 
         $xmlDetalles .= "<Detalle>\n"
-            . "  <TpoDoc>" . (int)($d['tipo']  ?? 33) . "</TpoDoc>\n"
+            . "  <TpoDoc>" . $tipo . "</TpoDoc>\n"
             . "  <NroDoc>" . (int)($d['folio'] ?? 1)  . "</NroDoc>\n"
             . "  <TasaImp>19</TasaImp>\n"
             . "  <FchDoc>" . ($d['fecha'] ?? date('Y-m-d')) . "</FchDoc>\n"
             . "  <RUTDoc>" . ($d['rut']   ?? '66666666-6') . "</RUTDoc>\n"
             . "  <RznSoc>" . htmlspecialchars($d['razon'] ?? '', ENT_XML1) . "</RznSoc>\n"
-            . ($neto  > 0 ? "  <MntNeto>$neto</MntNeto>\n"         : "")
-            . ($iva   > 0 ? "  <MntIVA>$iva</MntIVA>\n"           : "")
-            . ($exe   > 0 ? "  <MntExe>$exe</MntExe>\n"           : "")
+            . ($neto  > 0 || $neto < 0 ? "  <MntNeto>$neto</MntNeto>\n"         : "")
+            . ($iva   > 0 || $iva < 0 ? "  <MntIVA>$iva</MntIVA>\n"           : "")
+            . ($exe   > 0 || $exe < 0 ? "  <MntExe>$exe</MntExe>\n"           : "")
             . ($codIvaNoRec    !== null ? "  <CodIVANoRec>$codIvaNoRec</CodIVANoRec>\n"       : "")
             . ($mntIvaNoRec    !== null ? "  <MntIVANoRec>$mntIvaNoRec</MntIVANoRec>\n"       : "")
             . ($mntIvaUsoComun !== null ? "  <MntIVAUsoComun>$mntIvaUsoComun</MntIVAUsoComun>\n" : "")
@@ -5094,34 +5126,58 @@ function generateLibro(array $data): array {
             . "</Detalle>\n";
     }
 
-    // ResumenPeriodo con totales calculados
-    $resumenXml = "<ResumenPeriodo>\n"
-        . ($totNeto  > 0 ? "  <TotMntNeto>$totNeto</TotMntNeto>\n"   : "")
-        . ($totIVA   > 0 ? "  <TotMntIVA>$totIVA</TotMntIVA>\n"     : "")
-        . ($totExe   > 0 ? "  <TotMntExe>$totExe</TotMntExe>\n"     : "")
-        . "  <TotMntTotal>$totTotal</TotMntTotal>\n"
-        . "</ResumenPeriodo>";
+    // ResumenPeriodo con TotalesPeriodo agrupados
+    $resumenXml = "<ResumenPeriodo>\n";
+    ksort($resumenPorTipo);
+    foreach ($resumenPorTipo as $tipo => $tot) {
+        $resumenXml .= "  <TotalesPeriodo>\n";
+        $resumenXml .= "    <TpoDoc>$tipo</TpoDoc>\n";
+        $resumenXml .= "    <TotDoc>{$tot['TotDoc']}</TotDoc>\n";
+        
+        if ($tot['TotMntExe'] != 0) $resumenXml .= "    <TotMntExe>{$tot['TotMntExe']}</TotMntExe>\n";
+        if ($tot['TotMntNeto'] != 0) $resumenXml .= "    <TotMntNeto>{$tot['TotMntNeto']}</TotMntNeto>\n";
+        if ($tot['TotMntIVA'] != 0) $resumenXml .= "    <TotMntIVA>{$tot['TotMntIVA']}</TotMntIVA>\n";
+        
+        foreach ($tot['IVANoRecup'] as $cod => $recup) {
+            $resumenXml .= "    <TotIVANoRec>\n";
+            $resumenXml .= "      <CodIVANoRec>$cod</CodIVANoRec>\n";
+            $resumenXml .= "      <TotOpIVANoRec>{$recup['TotOp']}</TotOpIVANoRec>\n";
+            $resumenXml .= "      <TotMntIVANoRec>{$recup['TotMnt']}</TotMntIVANoRec>\n";
+            $resumenXml .= "    </TotIVANoRec>\n";
+        }
+        
+        if ($tot['TotOpIVAUsoComun'] > 0) {
+            $resumenXml .= "    <TotOpIVAUsoComun>{$tot['TotOpIVAUsoComun']}</TotOpIVAUsoComun>\n";
+            $resumenXml .= "    <TotIVAUsoComun>{$tot['TotIVAUsoComun']}</TotIVAUsoComun>\n";
+            if ($tot['FctProp'] !== null) {
+                $resumenXml .= "    <FctProp>{$tot['FctProp']}</FctProp>\n";
+            }
+        }
+        
+        $resumenXml .= "    <TotMntTotal>{$tot['TotMntTotal']}</TotMntTotal>\n";
+        $resumenXml .= "  </TotalesPeriodo>\n";
+    }
+    $resumenXml .= "</ResumenPeriodo>";
 
     $tmst = date('Y-m-d\TH:i:s');
 
     $xmlRaw = <<<XML
 <?xml version="1.0" encoding="ISO-8859-1"?>
 <LibroCompraVenta version="1.0" xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sii.cl/SiiDte LibroCV_v10.xsd">
-<EnvioLibro ID="$idLibro">
+<EnvioLibro ID="\$idLibro">
 <Caratula>
-  <RutEmisorLibro>$rutE</RutEmisorLibro>
-  <RutEnvia>$rutEnvia</RutEnvia>
-  <PeriodoTributario>$periodo</PeriodoTributario>
-  <FchResol>$fchR</FchResol>
-  <NroResol>$nroR</NroResol>
-  <TipoOperacion>$tipoLibro</TipoOperacion>
+  <RutEmisorLibro>\$rutE</RutEmisorLibro>
+  <RutEnvia>\$rutEnvia</RutEnvia>
+  <PeriodoTributario>\$periodo</PeriodoTributario>
+  <FchResol>\$fchR</FchResol>
+  <NroResol>\$nroR</NroResol>
+  <TipoOperacion>\$tipoLibro</TipoOperacion>
   <TipoLibro>MENSUAL</TipoLibro>
-  <TipoEnvio>$tipoEnvio</TipoEnvio>
-  <FolioDesde>$folioDsde</FolioDesde>
+  <TipoEnvio>\$tipoEnvio</TipoEnvio>
 </Caratula>
-$resumenXml
-$xmlDetalles
-<TmstFirma>$tmst</TmstFirma>
+\$resumenXml
+\$xmlDetalles
+<TmstFirma>\$tmst</TmstFirma>
 </EnvioLibro>
 </LibroCompraVenta>
 XML;

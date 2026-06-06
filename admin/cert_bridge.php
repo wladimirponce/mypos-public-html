@@ -195,10 +195,13 @@ try {
         // ── Restaurar estado desde XMLs existentes en tmp/ ───────
         // Útil cuando el state fue reiniciado pero los XMLs y TrackIDs
         // ya existen (no hay más folios para regenerar).
-        // Recibe: { casos: { "F-4832043-1": { folio, tipo, trackId }, ... } }
+        // action via GET/POST: ?action=cert_restore_state
+        // body JSON: { "casos": { "F-4832043-1": { "folio": 11, "tipo": 33, "trackId": "..." }, ... } }
         case 'cert_restore_state':
             ob_clean();
-            $casos = $input['casos'] ?? [];
+            $body  = (string) file_get_contents('php://input');
+            $bodyData = json_decode($body, true);
+            $casos = $bodyData['casos'] ?? ($_POST['casos'] ?? []);
             if (empty($casos) || !is_array($casos)) {
                 echo json_encode(['ok' => false, 'error' => 'Debe enviar casos con folio, tipo y trackId.']);
                 break;
