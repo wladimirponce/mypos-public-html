@@ -27,8 +27,8 @@ $metadataJson = function () use ($actecoToJson): string {
         'acteco' => json_decode($actecoToJson($_POST['acteco'] ?? ''), true) ?: [],
         'unidad_sii' => trim((string)($_POST['unidad_sii'] ?? '')),
         'email_sii' => trim((string)($_POST['email_sii'] ?? '')),
-        'numero_resolucion' => trim((string)($_POST['num_resol'] ?? '80')) ?: '80',
-        'fecha_resolucion' => trim((string)($_POST['fecha_resol'] ?? '2026-05-17')) ?: '2026-05-17',
+        'numero_resolucion' => isset($_POST['num_resol']) && $_POST['num_resol'] !== '' ? trim((string)$_POST['num_resol']) : '',
+        'fecha_resolucion' => isset($_POST['fecha_resol']) && $_POST['fecha_resol'] !== '' ? trim((string)$_POST['fecha_resol']) : '',
     ], JSON_UNESCAPED_UNICODE);
 };
 
@@ -74,7 +74,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'create_empresa' && $dbOk) {
                 $rut, $rs, $_POST['giro'], $actecoToJson($_POST['acteco'] ?? ''),
                 $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '',
                 $_POST['unidad_sii'] ?? '', $_POST['email_sii'] ?? '',
-                $_POST['fecha_resol'] ?: '2014-01-01', $_POST['num_resol'] ?: '0', $_POST['ambiente']
+                $_POST['fecha_resol'] ?: null, $_POST['num_resol'] !== '' ? $_POST['num_resol'] : 0, $_POST['ambiente']
             ]);
             $empresaId = $db->lastInsertId();
 
@@ -123,13 +123,15 @@ if (isset($_POST['action']) && $_POST['action'] === 'update_empresa' && $dbOk) {
                 $rut, $rs, $_POST['giro'], $actecoToJson($_POST['acteco'] ?? ''),
                 $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '',
                 $_POST['unidad_sii'] ?? '', $_POST['email_sii'] ?? '',
-                $_POST['fecha_resol'] ?: '2014-01-01', $_POST['num_resol'] ?: '0', $_POST['ambiente'], $id
+                $_POST['fecha_resol'] ?: null, $_POST['num_resol'] !== '' ? $_POST['num_resol'] : 0, $_POST['ambiente'], $id
             ]);
         } else {
             $db->prepare("UPDATE empresas SET rut=?, razon_social=?, nombre_fantasia=?, giro=?, direccion=?, comuna=?, ciudad=? WHERE id=?")
                ->execute([$rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '', $id]);
             $db->prepare("UPDATE empresa_configuracion SET rut_empresa=?, razon_social=?, nombre_fantasia=?, giro=?, direccion=?, comuna=?, ciudad=?, metadata_json=? WHERE empresa_id=?")
                ->execute([$rut, $rs, $rs, $_POST['giro'], $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '', $metadataJson(), $id]);
+            $db->prepare("UPDATE dte_configuracion SET ambiente=? WHERE empresa_id=?")
+               ->execute([strtoupper($_POST['ambiente'] ?? 'PRODUCCION'), $id]);
         }
         $empMsg = "Empresa '$rs' actualizada con éxito.";
     } catch (Exception $e) {
@@ -216,10 +218,12 @@ if ($dbOk && isset($_GET['edit'])) {
                    CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.acteco')), '[]') ELSE '[]' END AS acteco,
                    CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.unidad_sii')), '') ELSE '' END AS unidad_sii,
                    CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.email_sii')), e.email) ELSE e.email END AS email_sii,
-                   CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.numero_resolucion')), '80') ELSE '80' END AS numero_resolucion,
-                   CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.fecha_resolucion')), '2026-05-17') ELSE '2026-05-17' END AS fecha_resolucion
+                   CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.numero_resolucion')), '') ELSE '' END AS numero_resolucion,
+                   CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.fecha_resolucion')), '') ELSE '' END AS fecha_resolucion,
+                   COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default
             FROM empresas e
             LEFT JOIN empresa_configuracion ec ON ec.empresa_id = e.id
+            LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id
             WHERE e.id=? LIMIT 1
         ");
         $stmt->execute([$eid]);
