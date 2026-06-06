@@ -5122,9 +5122,9 @@ function generateLibro(array $data): array {
             . "  <FchDoc>" . ($d['fecha'] ?? date('Y-m-d')) . "</FchDoc>\n"
             . "  <RUTDoc>" . ($d['rut']   ?? '66666666-6') . "</RUTDoc>\n"
             . "  <RznSoc>" . htmlspecialchars($d['razon'] ?? '', ENT_XML1) . "</RznSoc>\n"
-            . ($exe   > 0 || $exe < 0 ? "  <MntExe>$exe</MntExe>\n"           : "")
-            . ($neto  > 0 || $neto < 0 ? "  <MntNeto>$neto</MntNeto>\n"         : "")
-            . ($iva   > 0 || $iva < 0 ? "  <MntIVA>$iva</MntIVA>\n"           : "")
+            . ($exe   != 0 || ($neto == 0 && $iva == 0) ? "  <MntExe>$exe</MntExe>\n" : "")
+            . ($neto  != 0 ? "  <MntNeto>$neto</MntNeto>\n"         : "")
+            . ($iva   != 0 ? "  <MntIVA>$iva</MntIVA>\n"           : "")
             . ($codIvaNoRec !== null && $mntIvaNoRec !== null ? "  <IVANoRec>\n    <CodIVANoRec>$codIvaNoRec</CodIVANoRec>\n    <MntIVANoRec>$mntIvaNoRec</MntIVANoRec>\n  </IVANoRec>\n" : "")
             . ($mntIvaUsoComun !== null ? "  <IVAUsoComun>$mntIvaUsoComun</IVAUsoComun>\n" : "")
             . ($ivaRetTotal !== null ? "  <IVARetTotal>$ivaRetTotal</IVARetTotal>\n" : "")

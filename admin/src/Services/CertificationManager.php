@@ -843,13 +843,13 @@ XML;
             $exe   = (int)$g('MntExe');
             $total = (int)$g('MntTotal');
 
-            // NC/ND llevan montos negativos en el libro de ventas
-            if (in_array($tipo, [61, 56])) {
+            // NC/ND llevan montos POSITIVOS en el libro, el tipo de documento indica la resta
+            /* if (in_array($tipo, [61, 56])) {
                 $neto  = -abs($neto);
                 $iva   = -abs($iva);
                 $exe   = -abs($exe);
                 $total = -abs($total);
-            }
+            } */
 
             $detalles[] = [
                 'tipo'  => $tipo,
@@ -994,23 +994,23 @@ XML;
              'neto'=>29668,'iva'=>0,'exe'=>0,'total'=>35305,
              'mntIvaUsoComun'=>5637,'fctProp'=>0.60],
 
-            // NC papel 451 — descuento sobre factura 234
+            // NC papel 451 - descuento sobre factura 234
             ['tipo'=>61,'folio'=>451,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>-2655,'iva'=>-504,'exe'=>0,'total'=>-3159],
+             'neto'=>2655,'iva'=>504,'exe'=>0,'total'=>3159],
 
             // FE 67 — entrega gratuita, IVA no recuperable (cód. 4)
             ['tipo'=>33,'folio'=>67,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
              'neto'=>9383,'iva'=>0,'exe'=>0,'total'=>11166,
              'codIvaNoRec'=>4,'mntIvaNoRec'=>1783],
 
-            // Factura de Compra Electrónica 9 — retención total IVA
+            // Factura de compra 9 - retención total (cód. 6 => ivaRetTotal)
             ['tipo'=>46,'folio'=>9,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>9253,'iva'=>0,'exe'=>0,'total'=>11011,
+             'neto'=>9253,'iva'=>1758,'exe'=>0,'total'=>9253,
              'ivaRetTotal'=>1758],
 
             // NC papel 211 — descuento sobre FE 32
             ['tipo'=>61,'folio'=>211,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>-3068,'iva'=>-583,'exe'=>0,'total'=>-3651],
+             'neto'=>3068,'iva'=>583,'exe'=>0,'total'=>3651],
         ];
 
         $result = sendLibro([
