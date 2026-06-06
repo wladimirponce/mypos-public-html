@@ -65,6 +65,12 @@ class CertificationManager
         file_put_contents($this->statePath, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
+    /** Versión pública de saveState para uso desde cert_bridge en casos de restauración. */
+    public function saveStatePublic(array &$state): void
+    {
+        $this->saveState($state);
+    }
+
     private function defaultState(): array
     {
         return [

@@ -192,7 +192,59 @@ try {
             echo json_encode($mgr->runLibroCompras());
             break;
 
-        // ── Limpieza de folios no recibidos por SII ─────────────
+        // ── Restaurar estado desde XMLs existentes en tmp/ ───────
+        // Útil cuando el state fue reiniciado pero los XMLs y TrackIDs
+        // ya existen (no hay más folios para regenerar).
+        // Recibe: { casos: { "F-4832043-1": { folio, tipo, trackId }, ... } }
+        case 'cert_restore_state':
+            ob_clean();
+            $casos = $input['casos'] ?? [];
+            if (empty($casos) || !is_array($casos)) {
+                echo json_encode(['ok' => false, 'error' => 'Debe enviar casos con folio, tipo y trackId.']);
+                break;
+            }
+            $state   = $mgr->loadState();
+            $tmpDir  = $globalContext->getTmpPath();
+            $restored = [];
+            $missing  = [];
+
+            foreach ($casos as $caseId => $info) {
+                $tipo  = (int)($info['tipo']    ?? 0);
+                $folio = (int)($info['folio']   ?? 0);
+                $trk   = trim((string)($info['trackId'] ?? ''));
+
+                if (!$tipo || !$folio) {
+                    $missing[] = $caseId . ' (tipo o folio inválido)';
+                    continue;
+                }
+
+                $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
+                if (!file_exists($xmlFile)) {
+                    $missing[] = $caseId . " (XML no encontrado: dte_T{$tipo}F{$folio}.xml)";
+                    continue;
+                }
+
+                $state['pruebas'][$caseId] = [
+                    'status'  => 'ok',
+                    'tipo'    => $tipo,
+                    'folio'   => $folio,
+                    'trackId' => $trk ?: null,
+                    'error'   => null,
+                    'ts'      => date('Y-m-d\TH:i:s'),
+                ];
+                $restored[] = $caseId;
+            }
+
+            $mgr->saveStatePublic($state);
+            echo json_encode([
+                'ok'       => true,
+                'restored' => $restored,
+                'missing'  => $missing,
+                'message'  => count($restored) . ' caso(s) restaurados en el state. Ya puede enviar los libros.',
+            ]);
+            break;
+
+
         // Elimina registros de sii_folio_consumo y sii_dte cuyo estado sea
         // 'emitido'/'firmado' (nunca confirmados por el SII). Permite reintentar
         // el mismo caso reutilizando los mismos folios sin desperdiciarlos.
