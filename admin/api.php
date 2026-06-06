@@ -5164,20 +5164,20 @@ function generateLibro(array $data): array {
     $xmlRaw = <<<XML
 <?xml version="1.0" encoding="ISO-8859-1"?>
 <LibroCompraVenta version="1.0" xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sii.cl/SiiDte LibroCV_v10.xsd">
-<EnvioLibro ID="\$idLibro">
+<EnvioLibro ID="$idLibro">
 <Caratula>
-  <RutEmisorLibro>\$rutE</RutEmisorLibro>
-  <RutEnvia>\$rutEnvia</RutEnvia>
-  <PeriodoTributario>\$periodo</PeriodoTributario>
-  <FchResol>\$fchR</FchResol>
-  <NroResol>\$nroR</NroResol>
-  <TipoOperacion>\$tipoLibro</TipoOperacion>
+  <RutEmisorLibro>$rutE</RutEmisorLibro>
+  <RutEnvia>$rutEnvia</RutEnvia>
+  <PeriodoTributario>$periodo</PeriodoTributario>
+  <FchResol>$fchR</FchResol>
+  <NroResol>$nroR</NroResol>
+  <TipoOperacion>$tipoLibro</TipoOperacion>
   <TipoLibro>MENSUAL</TipoLibro>
-  <TipoEnvio>\$tipoEnvio</TipoEnvio>
+  <TipoEnvio>$tipoEnvio</TipoEnvio>
 </Caratula>
-\$resumenXml
-\$xmlDetalles
-<TmstFirma>\$tmst</TmstFirma>
+$resumenXml
+$xmlDetalles
+<TmstFirma>$tmst</TmstFirma>
 </EnvioLibro>
 </LibroCompraVenta>
 XML;
