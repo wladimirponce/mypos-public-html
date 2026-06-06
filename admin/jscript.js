@@ -1147,7 +1147,7 @@ const DTE = {
             // El SII requiere que el contenido del PDF417 esté en ISO-8859-1.
             // Para asegurar que bwip-js procese los bytes correctos, usamos el truco de 
             // re-codificar el string UTF-8 a una representación binaria de un solo byte por caracter.
-            const binaryText = unescape(encodeURIComponent(text));
+            const binaryText = text;
 
             bwipjs.toCanvas(canvasId, {
                 bcid: 'pdf417',    // Tipo de código
