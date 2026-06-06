@@ -5115,9 +5115,9 @@ function generateLibro(array $data): array {
             . "  <FchDoc>" . ($d['fecha'] ?? date('Y-m-d')) . "</FchDoc>\n"
             . "  <RUTDoc>" . ($d['rut']   ?? '66666666-6') . "</RUTDoc>\n"
             . "  <RznSoc>" . htmlspecialchars($d['razon'] ?? '', ENT_XML1) . "</RznSoc>\n"
+            . ($exe   > 0 || $exe < 0 ? "  <MntExe>$exe</MntExe>\n"           : "")
             . ($neto  > 0 || $neto < 0 ? "  <MntNeto>$neto</MntNeto>\n"         : "")
             . ($iva   > 0 || $iva < 0 ? "  <MntIVA>$iva</MntIVA>\n"           : "")
-            . ($exe   > 0 || $exe < 0 ? "  <MntExe>$exe</MntExe>\n"           : "")
             . ($codIvaNoRec    !== null ? "  <CodIVANoRec>$codIvaNoRec</CodIVANoRec>\n"       : "")
             . ($mntIvaNoRec    !== null ? "  <MntIVANoRec>$mntIvaNoRec</MntIVANoRec>\n"       : "")
             . ($mntIvaUsoComun !== null ? "  <MntIVAUsoComun>$mntIvaUsoComun</MntIVAUsoComun>\n" : "")
@@ -5134,9 +5134,9 @@ function generateLibro(array $data): array {
         $resumenXml .= "    <TpoDoc>$tipo</TpoDoc>\n";
         $resumenXml .= "    <TotDoc>{$tot['TotDoc']}</TotDoc>\n";
         
-        if ($tot['TotMntExe'] != 0) $resumenXml .= "    <TotMntExe>{$tot['TotMntExe']}</TotMntExe>\n";
-        if ($tot['TotMntNeto'] != 0) $resumenXml .= "    <TotMntNeto>{$tot['TotMntNeto']}</TotMntNeto>\n";
-        if ($tot['TotMntIVA'] != 0) $resumenXml .= "    <TotMntIVA>{$tot['TotMntIVA']}</TotMntIVA>\n";
+        $resumenXml .= "    <TotMntExe>{$tot['TotMntExe']}</TotMntExe>\n";
+        $resumenXml .= "    <TotMntNeto>{$tot['TotMntNeto']}</TotMntNeto>\n";
+        $resumenXml .= "    <TotMntIVA>{$tot['TotMntIVA']}</TotMntIVA>\n";
         
         foreach ($tot['IVANoRecup'] as $cod => $recup) {
             $resumenXml .= "    <TotIVANoRec>\n";
