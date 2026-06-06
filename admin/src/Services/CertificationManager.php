@@ -1005,7 +1005,7 @@ XML;
 
             // Factura de compra 9 - retención total (cód. 6 => ivaRetTotal)
             ['tipo'=>46,'folio'=>9,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>9253,'iva'=>1758,'exe'=>0,'total'=>9253,
+             'neto'=>9253,'iva'=>1758,'exe'=>0,'total'=>11011,
              'ivaRetTotal'=>1758],
 
             // NC papel 211 — descuento sobre FE 32

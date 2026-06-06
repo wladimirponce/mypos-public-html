@@ -5051,6 +5051,7 @@ function generateLibro(array $data): array {
         $rutE = $emp['rut'];
         $fchR = $emp['fch_resol'] ?? FCH_RESOL;
         $nroR = $emp['nro_resol'] ?? NRO_RESOL;
+        if ($globalContext->getAmbiente() === 'CERTIFICACION') $nroR = 0;
     } else {
         $rutE = RUT_EMISOR;
         $fchR = FCH_RESOL;
@@ -5218,6 +5219,7 @@ function generateLibroGuia(array $data): array {
         $rutE = $emp['rut'];
         $fchR = $emp['fch_resol'] ?? FCH_RESOL;
         $nroR = $emp['nro_resol'] ?? NRO_RESOL;
+        if ($globalContext->getAmbiente() === 'CERTIFICACION') $nroR = 0;
     } else {
         $rutE = RUT_EMISOR;
         $fchR = FCH_RESOL;
@@ -5319,6 +5321,7 @@ function generateLibroBoleta(array $data): array {
         $rutE = $emp['rut'];
         $fchR = $emp['fch_resol'] ?? FCH_RESOL;
         $nroR = $emp['nro_resol'] ?? NRO_RESOL;
+        if ($globalContext->getAmbiente() === 'CERTIFICACION') $nroR = 0;
     } else {
         $rutE = RUT_EMISOR;
         $fchR = FCH_RESOL;
