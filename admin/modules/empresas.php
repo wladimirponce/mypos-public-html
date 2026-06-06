@@ -11,8 +11,7 @@ $useSiiTables = false;
 try {
     $stmt = $db->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sii_empresa'");
     if ((int)$stmt->fetchColumn() > 0) {
-        $stmt = $db->query("SELECT COUNT(*) FROM sii_empresa WHERE activo = 1");
-        $useSiiTables = ((int)$stmt->fetchColumn()) > 0;
+        $useSiiTables = true;
     }
 } catch (Exception $e) {}
 
@@ -68,8 +67,8 @@ if (isset($_POST['action']) && $_POST['action'] === 'create_empresa' && $dbOk) {
         if ($useSiiTables) {
             $stmt = $db->prepare("INSERT INTO sii_empresa
                 (rut, razon_social, giro, acteco, direccion_origen, comuna_origen, ciudad_origen,
-                 unidad_sii, email_sii, fecha_resolucion, numero_resolucion, ambiente_default)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                 unidad_sii, email_sii, fecha_resolucion, numero_resolucion, ambiente_default, activo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
             $stmt->execute([
                 $rut, $rs, $_POST['giro'], $actecoToJson($_POST['acteco'] ?? ''),
                 $_POST['direccion'], $_POST['comuna'], $_POST['ciudad'] ?? '',
