@@ -84,14 +84,14 @@ if ($useSiiTables) {
     $siiJoins = $hasSiiSchema
         ? "LEFT JOIN sii_empresa se ON REPLACE(REPLACE(UPPER(se.rut), '.', ''), ' ', '') COLLATE utf8mb4_unicode_ci = REPLACE(REPLACE(UPPER(e.rut), '.', ''), ' ', '') COLLATE utf8mb4_unicode_ci
          LEFT JOIN (
-            SELECT empresa_id, COUNT(*) AS certificados_activos
+            SELECT empresa_id, ambiente_sii, COUNT(*) AS certificados_activos
             FROM sii_certificado
             WHERE activo = 1
-            GROUP BY empresa_id
-         ) cert ON cert.empresa_id = se.id
+            GROUP BY empresa_id, ambiente_sii
+         ) cert ON cert.empresa_id = se.id AND cert.ambiente_sii = se.ambiente_default
          LEFT JOIN (
             SELECT
-                c.empresa_id,
+                c.empresa_id, c.ambiente_sii,
                 COUNT(*) AS cafs_activos,
                 SUM(GREATEST(c.folio_hasta - c.folio_desde + 1 - COALESCE(fc.consumidos, 0), 0)) AS folios_disponibles
             FROM sii_caf c
@@ -101,8 +101,8 @@ if ($useSiiTables) {
                 GROUP BY caf_id
             ) fc ON fc.caf_id = c.id
             WHERE c.activo = 1
-            GROUP BY c.empresa_id
-         ) caf ON caf.empresa_id = se.id"
+            GROUP BY c.empresa_id, c.ambiente_sii
+         ) caf ON caf.empresa_id = se.id AND caf.ambiente_sii = se.ambiente_default"
         : "";
 } else {
     // Para MyPOS SaaS usando tablas nativas

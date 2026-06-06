@@ -13,8 +13,14 @@
 declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit("Solo CLI\n"); }
 
+$empresaId = 0;
+foreach ($argv as $arg) {
+    if (preg_match('/^--empresa-id=(\d+)$/', $arg, $m)) $empresaId = (int)$m[1];
+}
+if ($empresaId <= 0) exit("Uso: php emitir_boleta.php --empresa-id=ID\n");
 session_start();
-$_SESSION['active_empresa_id'] = 1;          // empresa ALCAINO (producción)
+$_SESSION['admin_id'] = 'cli';
+$_SESSION['active_empresa_id'] = $empresaId;
 require __DIR__ . '/api.php';
 
 $data = [

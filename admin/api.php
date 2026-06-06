@@ -24,36 +24,27 @@ unset($parse_errors, $r);
 // ============================================================
 //  RUTAS DE ARCHIVOS LOCALES (no dependen de la empresa)
 // ============================================================
-// RUT_ENVIA_MANUAL: vacío => se extrae automáticamente del certificado vigente
+// RUT_ENVIA_MANUAL: vacÃ­o => se extrae automÃ¡ticamente del certificado vigente
 // (serialNumber). Solo definir si el cert no expone el RUT y se requiere override.
 define('RUT_ENVIA_MANUAL', '');
 
-// Archivos locales:
-//   cert/firma.pfx  → su certificado digital (.pfx/.p12) emitido por el SII
-//   caf/caf_33.xml  → CAF para facturas (tipo 33)
-//   caf/caf_39.xml  → CAF para boletas (tipo 39)
-//   ... etc.
-define('CERT_PFX',  __DIR__ . '/cert/firma.pfx');
-define('CAF_DIR',   __DIR__ . '/caf/');
-define('TMP_DIR',   __DIR__ . '/tmp/');
-
-// Contraseña se lee automáticamente desde cert/cert.conf (guardado por setup.php)
-// Si no existe el archivo de configuración, getCertPass() lanzará error explícito.
+// ContraseÃ±a se lee automÃ¡ticamente desde cert/cert.conf (guardado por setup.php)
+// Si no existe el archivo de configuraciÃ³n, getCertPass() lanzarÃ¡ error explÃ­cito.
 define('CERT_PASS_FALLBACK', '');
 
 /**
- * Resuelve qué certificado usar según el TipoDTE.
+ * Resuelve quÃ© certificado usar segÃºn el TipoDTE.
  *
  *  - Boletas (39/41) y utilidades sin tipo  -> certificado POR DEFECTO
- *      firma.pfx + cert.conf      (en producción: certificado de Cristina)
- *  - Resto de DTE (52 guía, 33/34 factura, 56/61 NC-ND, 110/111/112 export)
- *      firma_dte.pfx + cert_dte.conf   (en producción: certificado de David)
+ *      firma.pfx + cert.conf      (en producciÃ³n: certificado de Cristina)
+ *  - Resto de DTE (52 guÃ­a, 33/34 factura, 56/61 NC-ND, 110/111/112 export)
+ *      firma_dte.pfx + cert_dte.conf   (en producciÃ³n: certificado de David)
  *
- * Si el certificado DTE aún no fue cargado, cae al por defecto (no rompe nada:
+ * Si el certificado DTE aÃºn no fue cargado, cae al por defecto (no rompe nada:
  * el sistema sigue operando con un solo certificado como antes).
  */
 /**
- * Carga el mapeo certificado<->tipo desde configuración (NO hardcodeado).
+ * Carga el mapeo certificado<->tipo desde configuraciÃ³n (NO hardcodeado).
  * Busca, en orden: certs.json del directorio del cert (por-RUT) y luego el
  * del directorio padre (global). Si no hay archivo, retorna [] y se usa el
  * fallback seguro (comportamiento previo a un solo certificado).
@@ -73,7 +64,7 @@ define('CERT_PASS_FALLBACK', '');
 function loadCertConfig(): array {
     global $actualCertPfx;
     $dir = dirname($actualCertPfx);
-    foreach ([$dir . '/certs.json', dirname($dir) . '/certs.json'] as $f) {
+    foreach ([$dir . '/certs.json'] as $f) {
         if (is_file($f)) {
             $j = json_decode((string)file_get_contents($f), true);
             if (is_array($j) && (!empty($j['perfiles']) || !empty($j['default']))) {
@@ -127,7 +118,7 @@ function certBundleForTipo(?int $tipo = null): array {
         return $mk($cfg['default'], 'cfg:default');
     }
 
-    // ── Fallback seguro SIN config: comportamiento previo (un solo cert) ──
+    // â”€â”€ Fallback seguro SIN config: comportamiento previo (un solo cert) â”€â”€
     if ($tipo === null || in_array($tipo, [39, 41], true)) {
         return ['pfx' => $actualCertPfx, 'conf' => $defConf, 'rut' => null, 'kind' => 'default'];
     }
@@ -147,16 +138,16 @@ function getCertPass(?int $tipo = null): string {
         if (!empty($conf['pass'])) return $conf['pass'];
     }
     if (CERT_PASS_FALLBACK !== '') return CERT_PASS_FALLBACK;
-    throw new Exception('No se encontró contraseña del certificado en ' . $b['conf']
-        . '. Suba el certificado nuevamente desde la pantalla de Configuración.');
+    throw new Exception('No se encontrÃ³ contraseÃ±a del certificado en ' . $b['conf']
+        . '. Suba el certificado nuevamente desde la pantalla de ConfiguraciÃ³n.');
 }
 
 // Hosts SII
 define('HOST_CERTIF', 'maullin.sii.cl');
 define('HOST_PROD',   'palena.sii.cl');
 
-// SII exige TLS 1.2+ desde nov-2021 (cert) / ene-2022 (prod) — Instructivo Boleta Electrónica.
-// Esta constante se aplica a todas las llamadas SII vía siiCurlSetOpts().
+// SII exige TLS 1.2+ desde nov-2021 (cert) / ene-2022 (prod) â€” Instructivo Boleta ElectrÃ³nica.
+// Esta constante se aplica a todas las llamadas SII vÃ­a siiCurlSetOpts().
 define('SII_MIN_TLS', CURL_SSLVERSION_TLSv1_2);
 
 // Ruta al bundle CA Mozilla (descargado de curl.se/ca/cacert.pem).
@@ -197,22 +188,21 @@ require_once __DIR__ . '/autoload.php';
 use App\Core\Context;
 use App\Repositories\EmpresaRepository;
 
-// Inicialización de Contexto Dinámico (Multi-Cliente)
+// InicializaciÃ³n de Contexto DinÃ¡mico (Multi-Cliente)
 $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? $_SESSION['active_api_key'] ?? $_GET['api_key'] ?? $_POST['api_key'] ?? '';
 
-// Resolución del empresa_id solicitado en la petición. El cliente (APK u otro
+// ResoluciÃ³n del empresa_id solicitado en la peticiÃ³n. El cliente (APK u otro
 // consumidor) puede pasar `empresa_id` por GET, POST o body JSON para indicar
-// explícitamente sobre qué empresa operar. Si no se envía, se cae a la cadena
-// habitual: sesión activa → empresa del API key → fallback a constantes
-// (ALCAINO Y ARAYA SPA por defecto).
+// explÃ­citamente sobre quÃ© empresa operar. Si no se envÃ­a, se cae a la cadena
+// habitual: sesiÃ³n activa â†’ empresa del API key â†’ fallback a constantes
 $requestedEmpresaId = null;
 if (isset($_GET['empresa_id']) && is_numeric($_GET['empresa_id'])) {
     $requestedEmpresaId = (int)$_GET['empresa_id'];
 } elseif (isset($_POST['empresa_id']) && is_numeric($_POST['empresa_id'])) {
     $requestedEmpresaId = (int)$_POST['empresa_id'];
 } else {
-    // php://input se puede leer múltiples veces en PHP 5.6+; la lectura
-    // posterior del body en línea 526 seguirá funcionando.
+    // php://input se puede leer mÃºltiples veces en PHP 5.6+; la lectura
+    // posterior del body en lÃ­nea 526 seguirÃ¡ funcionando.
     $earlyBody = @file_get_contents('php://input');
     if ($earlyBody !== false && $earlyBody !== '') {
         $earlyJson = @json_decode($earlyBody, true);
@@ -225,43 +215,38 @@ if (isset($_GET['empresa_id']) && is_numeric($_GET['empresa_id'])) {
 $globalContext = null;
 
 try {
-    if ($requestedEmpresaId !== null && $requestedEmpresaId > 0) {
-        // Prioridad máxima: el cliente indicó explícitamente la empresa.
+    $isAdminRequest = !empty($_SESSION['admin_id']);
+    if ($isAdminRequest && $requestedEmpresaId !== null && $requestedEmpresaId > 0) {
+        // Prioridad mÃ¡xima: el cliente indicÃ³ explÃ­citamente la empresa.
         $globalContext = new Context($requestedEmpresaId);
-    } elseif (isset($_SESSION['active_empresa_id'])) {
+    } elseif ($isAdminRequest && isset($_SESSION['active_empresa_id'])) {
         $globalContext = new Context((int)$_SESSION['active_empresa_id']);
     } elseif (!empty($apiKey)) {
         $globalContext = new Context($apiKey);
+        if ($requestedEmpresaId !== null && $requestedEmpresaId > 0
+            && $globalContext->getEmpresaId() !== $requestedEmpresaId) {
+            throw new Exception('Acceso denegado: la API key no pertenece a la empresa solicitada.');
+        }
     }
 } catch (Exception $e) {
     if (defined('DTE_API_BOOTSTRAP_ONLY') && DTE_API_BOOTSTRAP_ONLY) {
         unset($_SESSION['active_empresa_id']);
         $globalContext = null;
 
-        try {
-            $repoFallback = new EmpresaRepository();
-            $fallbackEmpresa = $repoFallback->getByAmbiente('CERTIFICACION') ?: $repoFallback->getByAmbiente('PRODUCCION');
-            if ($fallbackEmpresa && !empty($fallbackEmpresa['id'])) {
-                $_SESSION['active_empresa_id'] = (int)$fallbackEmpresa['id'];
-                $globalContext = new Context((int)$fallbackEmpresa['id']);
-            }
-        } catch (Throwable $ignored) {
-            $globalContext = null;
-        }
     } elseif (PHP_SAPI !== 'cli') {
         http_response_code(401);
         echo json_encode([
             'ok'    => false,
             'error' => $e->getMessage(),
             'hint'  => $requestedEmpresaId !== null
-                ? "El empresa_id=$requestedEmpresaId no existe o no está activo en sii_empresa"
-                : "Sin contexto de empresa: revise sesión, API key o pase 'empresa_id' explícito"
+                ? "El empresa_id=$requestedEmpresaId no existe o no estÃ¡ activo en sii_empresa"
+                : "Sin contexto de empresa: revise sesiÃ³n, API key o pase 'empresa_id' explÃ­cito"
         ]);
         exit;
     }
 }
 
-// ─── Definir constantes de empresa desde la BD (o valores neutros) ──────────
+// â”€â”€â”€ Definir constantes de empresa desde la BD (o valores neutros) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // NUNCA se definen valores hardcodeados de empresa: todo viene de sii_empresa.
 if ($globalContext) {
     $emp = $globalContext->getEmpresa();
@@ -279,9 +264,9 @@ if ($globalContext) {
     define('UNIDAD_SII',   $emp['unidad_sii'] ?? '');
     unset($emp, $actecoRaw);
 } else {
-    // Sin contexto: constantes vacías / neutras (CLI, BOOTSTRAP_ONLY sin empresa).
-    // En petición HTTP real, el bloque de try/catch ya habrá redirigido o retornado 401.
-    define('AMBIENTE',     'PRODUCCION');
+    // Sin contexto: constantes vacÃ­as / neutras (CLI, BOOTSTRAP_ONLY sin empresa).
+    // En peticiÃ³n HTTP real, el bloque de try/catch ya habrÃ¡ redirigido o retornado 401.
+    define('AMBIENTE',     '');
     define('RUT_EMISOR',   '');
     define('RAZON_SOCIAL', '');
     define('GIRO_EMISOR',  '');
@@ -294,103 +279,31 @@ if ($globalContext) {
     define('UNIDAD_SII',   '');
 }
 
-// Fallback para rutas si no hay contexto
-if (!$globalContext) {
-    if (!is_dir(TMP_DIR)) @mkdir(TMP_DIR, 0755, true);
-    if (!is_dir(CAF_DIR)) @mkdir(CAF_DIR, 0755, true);
+if (!$globalContext && PHP_SAPI !== 'cli' && !defined('DTE_API_BOOTSTRAP_ONLY')) {
+    $emptyAction = (string)($_GET['action'] ?? $_POST['action'] ?? '');
+    $emptyResponses = [
+        'history'      => ['ok' => true, 'entries' => [], 'history' => []],
+        'list_files'   => ['ok' => true, 'files' => []],
+        'get_sii_logs' => ['ok' => true, 'logs' => []],
+    ];
+    if (isset($emptyResponses[$emptyAction])) {
+        header('Content-Type: application/json; charset=UTF-8');
+        echo json_encode($emptyResponses[$emptyAction]);
+        exit;
+    }
 }
 
-// Redirigir a login si petición HTTP sin contexto y sin modo BOOTSTRAP_ONLY
+// Redirigir a login si peticiÃ³n HTTP sin contexto y sin modo BOOTSTRAP_ONLY
 if (!$globalContext && PHP_SAPI !== 'cli' && !defined('DTE_API_BOOTSTRAP_ONLY')) {
     header('Location: login.php');
     exit;
 }
 
-// Rutas dinámicas basadas en contexto
-$actualTmpDir = $globalContext ? $globalContext->getTmpPath() : TMP_DIR;
-$actualCafDir = $globalContext ? dirname($globalContext->getCafPath(0)) . '/' : CAF_DIR;
-$actualCertPfx = $globalContext ? $globalContext->getCertPath() : CERT_PFX;
-
-// ── Lógica de Autorreparación (Emergencia Certificación RUT 77776321-0) ──
-if (isset($globalContext) && $globalContext->getRut() === '77776321-0') {
-    // Asegurar certificado en ruta del contexto (copia desde raíz si no existe)
-    $certPathFix = $globalContext->getCertPath();
-    $certDirFix  = dirname($certPathFix);
-    if (!is_dir($certDirFix)) @mkdir($certDirFix, 0755, true);
-    if (!file_exists($certPathFix) && file_exists(CERT_PFX)) {
-        @copy(CERT_PFX, $certPathFix);
-    }
-    // Copiar cert.conf (contraseña) si no está en la ruta del contexto
-    $certConfFix = $certDirFix . '/cert.conf';
-    if (!file_exists($certConfFix)) {
-        $rootConf = dirname(CERT_PFX) . '/cert.conf';
-        if (file_exists($rootConf)) @copy($rootConf, $certConfFix);
-    }
-
-    $dirFix = dirname($globalContext->getCafPath(0));
-    if (!is_dir($dirFix)) @mkdir($dirFix, 0755, true);
-
-    // Clave RSA A (usada para tipos 33, 39, 61)
-    $rsaA_pk  = '3cK4NoPav7Xl1Z8OGq0VNU3TbixZxp7cfZYT5CcuAwMfOd7AvuHBZfauEapXWvIK8s5c+Lmw8JBzlVAyKHKSyw==';
-    $rsaA_sk  = "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAN3CuDaD2r+15dWfDhqtFTVN024sWcae3H2WE+QnLgMDHznewL7h\nwWX2rhGqV1ryCvLOXPi5sPCQc5VQMihykssCAQMCQQCT1yV5rTx/zpk5FLQRyLjO\nM+JJcuaEaehTuWKYGh6sq4EdXnfSWMiHHB0RZQOWRA8iHc1u/O7976QfpMqs3bxb\nAiEA/mOJcdu4siXay7ZcsY1jIhWMfWUHW0+fKzRkkZ3ybDcCIQDfKkebJ6PidXG2\nwTYgbCjSKhUrbTbvJAnSMXRwhzOMDQIhAKmXsPaSeyFukd0kPcuzl2wOXajuBOeK\nahzNmGET9vLPAiEAlMbaZ2/Clvj2edYkFZ1wjBwOHPN59MKxNsui9a93srMCIDVF\n06GJ1hzM5sDU6iItK3EJ3wlMAs0nWcWlFviL6DCT\n-----END RSA PRIVATE KEY-----";
-    $rsaA_frm = 'MB4YC53cPSn7Wrp4uK1NYO/MIzUWx8MiHqUDd9tGmfahShJUT2expR/5PqWnqqDWn0y5X2OTjeiFHWfUYkAUHg==';
-
-    // Clave RSA B (usada para tipos 52, 56)
-    $rsaB_pk  = 't/bA/ntKmLrGVhxesG4yMOFIwRX64Yg61ddjkLyR+MAFQ4flagjZW+mcceH2IqVQ40t52MMK+nVA5DY9Ig+rcw==';
-    $rsaB_sk  = "-----BEGIN RSA PRIVATE KEY-----\nMIIBOQIBAAJBALf2wP57Spi6xlYcXrBuMjDhSMEV+uGIOtXXY5C8kfjABUOH5WoI\n2VvpnHHh9iKlUONLedjDCvp1QOQ2PSIPq3MCAQMCQHqkgKmnhxB8hDloPyBJdstA\n2ytj/JZa0ePk7QsoYVB+4iWWOi1mHFbC8aO2FkhoTBsWYdbxEoCQLZ0G2sV/82sC\nIQDa8eZEVYPwaUc8fllFMWCojy+cbIi9z3cS5tZchFFlwwIhANcZQEnQa75wffV9\n94+EqDYrekqp0LFqJemR1Zh1fliRAiEAkfaZguOtSvDaKFQ7g3ZAcF91EvMF09+k\nt0SO6Fg2Q9cCIQCPZirb4EfUSv6jqU+1AxrOx6bccTXLnBlGYTkQTlQ7CwIgA2E/\n1XW5iNRscvHq6yZ/KbBtSiMdvOJ5gitt0tdVmpA=\n-----END RSA PRIVATE KEY-----";
-    $rsaB_frm = 'vKom/WYx+wp7HvLgNHG8JMIIKpv4cc2Pbk5wlfGcjPOAZVFlGSe9rTtdicDm+yMLM8KJtZd0c600UJEUJO3rXA==';
-
-    $buildCaf = function(int $td, string $pk, string $sk, string $frm): string {
-        return '<?xml version="1.0" encoding="UTF-8"?><AUTORIZACION><CAF version="1.0"><DA>'
-            . '<RE>77776321-0</RE><RS>INGENIER&#205;A Y ORIENTACION INTEGRAL SPA</RS>'
-            . "<TD>$td</TD><RNG><D>1</D><H>2000</H></RNG><FA>2026-05-14</FA>"
-            . "<RSAPK><M>$pk</M><E>Aw==</E></RSAPK><IDK>100</IDK></DA>"
-            . "<FRMA algoritmo=\"SHA1withRSA\">$frm</FRMA></CAF>"
-            . "<RSASK>$sk</RSASK></AUTORIZACION>";
-    };
-
-    $cafsToFix = [
-        33 => $buildCaf(33, $rsaA_pk, $rsaA_sk, $rsaA_frm),
-        39 => $buildCaf(39, $rsaA_pk, $rsaA_sk, $rsaA_frm),
-        52 => $buildCaf(52, $rsaB_pk, $rsaB_sk, $rsaB_frm),
-        56 => $buildCaf(56, $rsaB_pk, $rsaB_sk, $rsaB_frm),
-        61 => $buildCaf(61, $rsaA_pk, $rsaA_sk, $rsaA_frm),
-    ];
-
-    $repoFix = new EmpresaRepository();
-    foreach ($cafsToFix as $tFix => $xmlFix) {
-        $pathFix  = $globalContext->getCafPath($tFix);
-        $dbExists = $repoFix->getCAFConEstado($globalContext->getEmpresaId(), $tFix, $globalContext->getAmbiente());
-
-        // Crear archivo fake SOLO si no existe uno ya (puede ser CAF oficial del SII)
-        if (!file_exists($pathFix)) {
-            file_put_contents($pathFix, $xmlFix);
-        }
-
-        // Leer rango real del archivo en disco
-        $xmlParsed = @simplexml_load_string(normalizeCafXmlContent((string)file_get_contents($pathFix)));
-        $desdeReal = $xmlParsed ? (int)$xmlParsed->CAF->DA->RNG->D : 1;
-        $hastaReal = $xmlParsed ? (int)$xmlParsed->CAF->DA->RNG->H : 2000;
-        $faReal    = $xmlParsed ? (string)$xmlParsed->CAF->DA->FA  : '2026-05-17';
-
-        $needsRegister = !$dbExists
-            || (int)$dbExists['folio_desde'] !== $desdeReal
-            || (int)$dbExists['folio_hasta'] !== $hastaReal;
-
-        if ($needsRegister) {
-            $repoFix->registrarCAF([
-                'empresa_id' => $globalContext->getEmpresaId(),
-                'tipo_dte'   => $tFix,
-                'desde'      => $desdeReal,
-                'hasta'      => $hastaReal,
-                'xml_path'   => $pathFix,
-                'ambiente'   => $globalContext->getAmbiente(),
-                'fecha_auth' => $faReal,
-            ]);
-        }
-    }
-}
-
+// Rutas dinÃ¡micas basadas en contexto
+$noCompanyDir = __DIR__ . '/var/no-company/';
+$actualTmpDir = $globalContext ? $globalContext->getTmpPath() : ($noCompanyDir . 'tmp/');
+$actualCafDir = $globalContext ? dirname($globalContext->getCafPath(0)) . '/' : ($noCompanyDir . 'caf/');
+$actualCertPfx = $globalContext ? $globalContext->getCertPath() : ($noCompanyDir . 'cert/firma.pfx');
 
 function listStoredFiles(): array {
     global $actualTmpDir;
@@ -428,18 +341,18 @@ function listStoredFiles(): array {
 }
 
 /**
- * Reenvía un DTE almacenado al SII con todas las capas de defensa:
+ * ReenvÃ­a un DTE almacenado al SII con todas las capas de defensa:
  *   - Lock por folio (anti race-condition)
- *   - Bloqueo si el doc ya está aceptado por el SII (a menos que force=true)
+ *   - Bloqueo si el doc ya estÃ¡ aceptado por el SII (a menos que force=true)
  *   - Boletas DOK/REC: bloqueo duro (no se pueden anular)
- *   - Razón obligatoria si force=true
- *   - Validación XSD local previa
- *   - Detección de XML modificado entre intentos (hash mismatch)
+ *   - RazÃ³n obligatoria si force=true
+ *   - ValidaciÃ³n XSD local previa
+ *   - DetecciÃ³n de XML modificado entre intentos (hash mismatch)
  *   - Dry-run mode (valida + reporta sin enviar)
  *   - Registro de cada intento con todo el contexto
  *
  * @param int   $tipo  Tipo DTE (33,39,52,etc.)
- * @param int   $folio Número de folio
+ * @param int   $folio NÃºmero de folio
  * @param array $opts  ['force'=>bool, 'reason'=>string, 'dry_run'=>bool, 'user'=>string]
  */
 function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
@@ -457,19 +370,19 @@ function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
     $xml = file_get_contents($file);
     $hashActual = xmlContentHash($xml);
 
-    // ── Pre-flight: cargar historial previo ──
+    // â”€â”€ Pre-flight: cargar historial previo â”€â”€
     $prev      = getDTETracking($tipo, $folio);
     $okEstados = ['REC', 'DOK', 'EPR', 'FOK', 'SOK', 'CRT'];
     $yaOk      = $prev && in_array((string)($prev['estado'] ?? ''), $okEstados, true) && !empty($prev['last_ok_trackId']);
     $esBoleta  = in_array($tipo, [39, 41], true);
 
-    // ── Capa 1: Bloqueo si ya está aceptado ──
+    // â”€â”€ Capa 1: Bloqueo si ya estÃ¡ aceptado â”€â”€
     if ($yaOk && !$force) {
         $msg = $esBoleta
             ? "Boleta T{$tipo}F{$folio} YA fue aceptada por el SII (TrackID {$prev['last_ok_trackId']}, estado {$prev['estado']}). "
-              . "Las boletas no se pueden anular: si fue emitida con error, se debe regenerar una nota de crédito (tipo 61). "
+              . "Las boletas no se pueden anular: si fue emitida con error, se debe regenerar una nota de crÃ©dito (tipo 61). "
               . "Si insiste en reenviar, use force=true con motivo."
-            : "DTE T{$tipo}F{$folio} ya tiene envío aceptado por el SII (TrackID {$prev['last_ok_trackId']}, estado {$prev['estado']}). "
+            : "DTE T{$tipo}F{$folio} ya tiene envÃ­o aceptado por el SII (TrackID {$prev['last_ok_trackId']}, estado {$prev['estado']}). "
               . "Use force=true con motivo para reenviar.";
         return [
             'ok'           => false,
@@ -482,43 +395,43 @@ function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
         ];
     }
 
-    // ── Capa 1b: si force, exigir motivo válido ──
+    // â”€â”€ Capa 1b: si force, exigir motivo vÃ¡lido â”€â”€
     if ($force) {
         if (strlen($reason) < 5) {
             return [
                 'ok'    => false,
                 'code'  => 'MOTIVO_REQUERIDO',
-                'error' => 'Reenvío forzado requiere un motivo de al menos 5 caracteres.',
+                'error' => 'ReenvÃ­o forzado requiere un motivo de al menos 5 caracteres.',
             ];
         }
     }
 
-    // ── Capa 2: detección de XML modificado entre intentos ──
+    // â”€â”€ Capa 2: detecciÃ³n de XML modificado entre intentos â”€â”€
     $hashPrev = $prev['xml_hash'] ?? null;
     $hashMismatch = $hashPrev && $hashPrev !== $hashActual;
     if ($hashMismatch && !$force) {
         return [
             'ok'    => false,
             'code'  => 'XML_MODIFICADO',
-            'error' => "El XML del folio T{$tipo}F{$folio} cambió desde el último envío (hash previo {$hashPrev} → actual {$hashActual}). "
-                     . "Si la modificación fue intencional, use force=true con motivo. Si no, regenere el DTE.",
+            'error' => "El XML del folio T{$tipo}F{$folio} cambiÃ³ desde el Ãºltimo envÃ­o (hash previo {$hashPrev} â†’ actual {$hashActual}). "
+                     . "Si la modificaciÃ³n fue intencional, use force=true con motivo. Si no, regenere el DTE.",
             'hash_previo' => $hashPrev,
             'hash_actual' => $hashActual,
         ];
     }
 
-    // ── Capa 4: adquirir lock ──
+    // â”€â”€ Capa 4: adquirir lock â”€â”€
     $lock = acquireFolioLock($tipo, $folio, 15);
     if (!$lock) {
         return [
             'ok'    => false,
             'code'  => 'LOCK_TIMEOUT',
-            'error' => "Otro proceso está enviando T{$tipo}F{$folio} en este momento. Reintente en unos segundos.",
+            'error' => "Otro proceso estÃ¡ enviando T{$tipo}F{$folio} en este momento. Reintente en unos segundos.",
         ];
     }
 
     try {
-        // Certificado según tipo: boletas (39/41) -> Cristina ; guías/facturas -> David
+        // Certificado segÃºn tipo: boletas (39/41) -> Cristina ; guÃ­as/facturas -> David
         $GLOBALS['SII_CERT_TIPO'] = $tipo;
         [$cert, $privKey] = loadCertificate($tipo);
 
@@ -526,18 +439,18 @@ function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
         $envio        = buildEnvioDTE($xml, $tipo, $folio, $cert);
         $envioFirmado = signDTE($envio, $cert, $privKey, 'SetDoc');
 
-        // ── Capa 2b: validación XSD del sobre ──
+        // â”€â”€ Capa 2b: validaciÃ³n XSD del sobre â”€â”€
         $val = validateXmlAgainstXSD($envioFirmado);
         if (!$val['valid'] && !$val['skipped']) {
             return [
                 'ok'         => false,
                 'code'       => 'XSD_INVALID',
-                'error'      => 'El sobre no pasa la validación XSD: ' . implode('; ', array_slice($val['errors'], 0, 3)),
+                'error'      => 'El sobre no pasa la validaciÃ³n XSD: ' . implode('; ', array_slice($val['errors'], 0, 3)),
                 'xsd_errors' => $val['errors'],
             ];
         }
 
-        // ── Capa 2c: validación de límite de DTEs (boletas) ──
+        // â”€â”€ Capa 2c: validaciÃ³n de lÃ­mite de DTEs (boletas) â”€â”€
         if ($esBoleta) {
             $lim = validateEnvioBoletaLimit($envioFirmado);
             if (!$lim['ok']) {
@@ -551,12 +464,12 @@ function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
             }
         }
 
-        // ── Capa 6: dry-run ──
+        // â”€â”€ Capa 6: dry-run â”€â”€
         if ($dryRun) {
             return [
                 'ok'          => true,
                 'dry_run'     => true,
-                'mensaje'     => "[DRY-RUN] T{$tipo}F{$folio} pasaría todos los checks. NO se envió al SII.",
+                'mensaje'     => "[DRY-RUN] T{$tipo}F{$folio} pasarÃ­a todos los checks. NO se enviÃ³ al SII.",
                 'xsd_valid'   => true,
                 'xml_hash'    => $hashActual,
                 'hash_match'  => !$hashMismatch,
@@ -566,7 +479,7 @@ function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
             ];
         }
 
-        // ── Envío real ──
+        // â”€â”€ EnvÃ­o real â”€â”€
         $sem = getSemilla();
         $tok = getToken($sem, $cert, $privKey);
 
@@ -586,7 +499,7 @@ function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
             [
                 'via'      => $via,
                 'http'     => $result['http'] ?? null,
-                'reason'   => $reason ?: ($force ? 'reenvío forzado' : ($prev ? 'reenvío' : 'envío inicial')),
+                'reason'   => $reason ?: ($force ? 'reenvÃ­o forzado' : ($prev ? 'reenvÃ­o' : 'envÃ­o inicial')),
                 'user'     => $user,
                 'xml_hash' => $hashActual,
             ]
@@ -632,7 +545,7 @@ function getStoredDTE(int $tipo, int $folio): array {
 }
 
 if (!defined('DTE_API_BOOTSTRAP_ONLY')) {
-    // Registro de qué funciones crítico existen AL FINAL del archivo (antes del try)
+    // Registro de quÃ© funciones crÃ­tico existen AL FINAL del archivo (antes del try)
     file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . ' | TOPLEVEL funcs: emisorInfo=' . (function_exists('emisorInfo')?'YES':'NO') . ' generateDTE=' . (function_exists('generateDTE')?'YES':'NO') . ' sendDTE=' . (function_exists('sendDTE')?'YES':'NO') . ' validateDTE=' . (function_exists('validateDTE')?'YES':'NO') . ' loadCertificate=' . (function_exists('loadCertificate')?'YES':'NO') . PHP_EOL, FILE_APPEND);
 
     $body = file_get_contents('php://input');
@@ -649,14 +562,21 @@ if (!defined('DTE_API_BOOTSTRAP_ONLY')) {
         error_log('DTE_API: funciones faltantes: ' . implode(', ', $missingFuncs) . ' | included: ' . implode(',', get_included_files()));
     }
 
-    // Mostrar TODAS las funciones disponibles al inicio (sin límite)
+    // Mostrar TODAS las funciones disponibles al inicio (sin lÃ­mite)
     $allFuncs = get_defined_functions();
     file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . ' | TOTAL funcs: ' . count($allFuncs['user']) . ' | generateDTE? ' . (in_array('generateDTE', $allFuncs['user']) ? 'YES' : 'NO') . ' | ALL: ' . implode(', ', $allFuncs['user']) . PHP_EOL, FILE_APPEND);
 
 if ($action) {
     try {
+        $legacyPoolActions = [
+            'caf_disponibles', 'caf_descargar', 'caf_solicitar', 'caf_consumir',
+            'caf_distribuir', 'caf_resumen', 'caf_recalcular_consumo', 'caf_pedido_optimo',
+        ];
+        if (in_array($action, $legacyPoolActions, true)) {
+            throw new Exception('Accion de pool CAF legacy deshabilitada: use CAF asociados a la empresa y ambiente activos.');
+        }
         switch ($action) {
-        // ─── Módulo SaaS / Usuarios / Empresas ───────────────────────
+        // â”€â”€â”€ MÃ³dulo SaaS / Usuarios / Empresas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'listar_usuarios':
             $repo = new \App\Repositories\UsuarioRepository();
             $empId = (int)($data['empresa_id'] ?? $_GET['empresa_id'] ?? 0);
@@ -751,7 +671,7 @@ if ($action) {
         case 'sendLibro':  echo json_encode(sendLibro($data));    break;
         case 'caf_status': echo json_encode(getCAFStatus());  break;
 
-        // ─── CAFs centralizados (multi-sucursal) ─────────────────────────────
+        // â”€â”€â”€ CAFs centralizados (multi-sucursal) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'caf_subir': {
             // POST: xml (raw o multipart), sucursal_id (opcional), origen
             $svc = new \App\Services\CafCentralManager();
@@ -782,25 +702,25 @@ if ($action) {
             break;
         }
         /**
-         * caf_solicitar — La sucursal pide un bloque nuevo de folios al pool central.
+         * caf_solicitar â€” La sucursal pide un bloque nuevo de folios al pool central.
          *
-         * Cuándo lo llama el APK:
-         *   - Stock local llega a nivel CRITICO (< 20 folios o < 1 día)
-         *   - Stock local llega a nivel BAJO    (< 100 folios o < 3 días)
-         *   - Primera ejecución (migración): tras subir los CAFs legacy
+         * CuÃ¡ndo lo llama el APK:
+         *   - Stock local llega a nivel CRITICO (< 20 folios o < 1 dÃ­a)
+         *   - Stock local llega a nivel BAJO    (< 100 folios o < 3 dÃ­as)
+         *   - Primera ejecuciÃ³n (migraciÃ³n): tras subir los CAFs legacy
          *
-         * Qué hace dte_php:
+         * QuÃ© hace dte_php:
          *   1. autoAsignarDesdePool(): toma folios del pool central y los asigna
-         *      a esta sucursal. Cuota = max(50, consumo_medio_30d * 30 días).
-         *      Si no hay historial → 100 folios por defecto.
+         *      a esta sucursal. Cuota = max(50, consumo_medio_30d * 30 dÃ­as).
+         *      Si no hay historial â†’ 100 folios por defecto.
          *   2. descargarCaf(): devuelve el XML completo en la misma respuesta.
          *
          * Respuesta exitosa:
          *   { ok: true, caf_id, desde, hasta, cantidad, xml, pool_restante }
          *
          * Errores posibles:
-         *   { ok: false, reason: 'pool_vacio' }   → no hay CAFs en pool para este tipo
-         *   { ok: false, reason: 'sin_sucursal' }  → falta sucursal_id
+         *   { ok: false, reason: 'pool_vacio' }   â†’ no hay CAFs en pool para este tipo
+         *   { ok: false, reason: 'sin_sucursal' }  â†’ falta sucursal_id
          */
         case 'caf_solicitar': {
             $svc     = new \App\Services\CafCentralManager();
@@ -829,7 +749,7 @@ if ($action) {
                 break;
             }
 
-            // 3) Cuántos folios quedan en el pool para este tipo (info para el dashboard)
+            // 3) CuÃ¡ntos folios quedan en el pool para este tipo (info para el dashboard)
             $pdo = \App\Core\Database::getInstance();
             $stPool = $pdo->prepare(
                 "SELECT COALESCE(SUM(folio_hasta - folio_actual + 1), 0) AS restantes
@@ -865,15 +785,15 @@ if ($action) {
             break;
         }
         /**
-         * folio_ultimo_usado — ¿Cuál es el último folio conocido para esta sucursal?
+         * folio_ultimo_usado â€” Â¿CuÃ¡l es el Ãºltimo folio conocido para esta sucursal?
          *
          * Consultado por el APK al sincronizar, para sembrar el contador local
-         * en caso de reinstalación (SharedPreferences/SQLite borrados).
+         * en caso de reinstalaciÃ³n (SharedPreferences/SQLite borrados).
          *
-         * Cruza tres fuentes y devuelve el MÁXIMO para minimizar riesgo de reuso:
-         *   1. caf_consumos   — notificaciones fire-and-forget del dispositivo
-         *   2. cafs.folio_actual-1 — último folio entregado a esta sucursal por el pool
-         *   3. sii_dte        — DTEs que llegaron al servidor (más fiables)
+         * Cruza tres fuentes y devuelve el MÃXIMO para minimizar riesgo de reuso:
+         *   1. caf_consumos   â€” notificaciones fire-and-forget del dispositivo
+         *   2. cafs.folio_actual-1 â€” Ãºltimo folio entregado a esta sucursal por el pool
+         *   3. sii_dte        â€” DTEs que llegaron al servidor (mÃ¡s fiables)
          *
          * GET ?action=folio_ultimo_usado&sucursal_id=X&tipo_dte=39
          */
@@ -889,35 +809,30 @@ if ($action) {
             $pdo = \App\Core\Database::getInstance();
 
             // Fuente 1: caf_consumos (notificaciones fire-and-forget del APK)
+            if (!$globalContext) {
+                echo json_encode(['ok' => false, 'error' => 'Contexto de empresa requerido']);
+                break;
+            }
+            $empresaId = $globalContext->getEmpresaId();
+            $ambiente = strtolower($globalContext->getAmbiente());
             $st1 = $pdo->prepare(
-                "SELECT COALESCE(MAX(folio), 0) FROM caf_consumos
-                 WHERE sucursal_id = ? AND tipo_dte = ?"
+                "SELECT COALESCE(MAX(folio), 0) FROM sii_folio_consumo
+                 WHERE empresa_id = ? AND tipo_dte = ? AND ambiente = ?"
             );
-            $st1->execute([$suc, $tipo]);
+            $st1->execute([$empresaId, $tipo, $ambiente]);
             $maxConsumo = (int)$st1->fetchColumn();
 
-            // Fuente 2: cafs.folio_actual - 1 (pool central: último folio ya entregado)
-            $st2 = $pdo->prepare(
-                "SELECT COALESCE(MAX(folio_actual - 1), 0) FROM cafs
-                 WHERE sucursal_id = ? AND tipo_dte = ?"
-            );
-            $st2->execute([$suc, $tipo]);
-            $maxPool = (int)$st2->fetchColumn();
-
+            // Fuente 2: cafs.folio_actual - 1 (pool central: Ãºltimo folio ya entregado)
             // Fuente 3: sii_dte cruzado con los rangos CAF de esta sucursal
-            // (más fiable: solo DTEs realmente enviados al SII)
+            // (mÃ¡s fiable: solo DTEs realmente enviados al SII)
             $st3 = $pdo->prepare(
-                "SELECT COALESCE(MAX(d.folio), 0)
-                 FROM sii_dte d
-                 JOIN cafs c ON c.sucursal_id = :suc
-                             AND c.tipo_dte   = :tipo
-                             AND d.folio BETWEEN c.folio_desde AND c.folio_hasta
-                 WHERE d.tipo_dte = :tipo2"
+                "SELECT COALESCE(MAX(folio), 0) FROM sii_dte
+                 WHERE empresa_id = ? AND tipo_dte = ? AND ambiente = ?"
             );
-            $st3->execute([':suc' => $suc, ':tipo' => $tipo, ':tipo2' => $tipo]);
+            $st3->execute([$empresaId, $tipo, $ambiente]);
             $maxDte = (int)$st3->fetchColumn();
 
-            $ultimo = max($maxConsumo, $maxPool, $maxDte);
+            $ultimo = max($maxConsumo, $maxDte);
 
             echo json_encode([
                 'ok'           => true,
@@ -987,12 +902,12 @@ if ($action) {
         case 'sync_xsd':
             $force = !empty($data['force']) || !empty($_GET['force']);
             $rep = syncSIISchemas($force);
-            // Si EnvioBOLETA está disponible, también reportar el límite extraído
+            // Si EnvioBOLETA estÃ¡ disponible, tambiÃ©n reportar el lÃ­mite extraÃ­do
             $rep['envio_boleta_max_dte'] = readEnvioBoletaMaxDTE();
             echo json_encode($rep);
             break;
         case 'emit_nc':
-            // Emite Nota de Crédito (61) sobre una boleta existente
+            // Emite Nota de CrÃ©dito (61) sobre una boleta existente
             $tipo  = (int)($data['tipo_orig']  ?? 0);
             $folio = (int)($data['folio_orig'] ?? 0);
             $cod   = (int)($data['cod_ref']    ?? 1);
@@ -1081,7 +996,7 @@ if ($action) {
         case 'cs50':
         case 'cert_simulation':
             if (!$globalContext) {
-                echo json_encode(['ok' => false, 'error' => 'Debe seleccionar una empresa para realizar la certificación.']);
+                echo json_encode(['ok' => false, 'error' => 'Debe seleccionar una empresa para realizar la certificaciÃ³n.']);
                 break;
             }
             $mgr = new \App\Services\CertificationManager($globalContext);
@@ -1092,7 +1007,7 @@ if ($action) {
         case 'cc':
         case 'cert_case':
             if (!$globalContext) {
-                echo json_encode(['ok' => false, 'error' => 'Debe seleccionar una empresa para emitir casos de certificación.']);
+                echo json_encode(['ok' => false, 'error' => 'Debe seleccionar una empresa para emitir casos de certificaciÃ³n.']);
                 break;
             }
             $caseId = $data['cid'] ?? $_GET['cid'] ?? $data['case'] ?? $_GET['case'] ?? '';
@@ -1100,21 +1015,21 @@ if ($action) {
             echo json_encode(generateDTE($caseData));
             break;
         case 'historial':
-            // Historial de DTEs emitidos con paginación (para APK Android).
+            // Historial de DTEs emitidos con paginaciÃ³n (para APK Android).
             $page      = (int)($data['page']    ?? $_GET['page']    ?? 1);
             $tipo      = isset($data['tipo'])   ? (int)$data['tipo']   : null;
             $sucursalQ = $data['sucursal']       ?? $_GET['sucursal']   ?? null;
             echo json_encode(getHistorialPaginado($page, $tipo, $sucursalQ));
             break;
 
-        // ── POS Local: recibir DTE generado en APK ───────────────────────────────
+        // â”€â”€ POS Local: recibir DTE generado en APK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'dte_recibir': {
             $mgr = new \App\Services\DteLocalQueueManager();
             echo json_encode($mgr->recibirDte($data));
             break;
         }
 
-        // ── POS Local: estado de la cola de DTEs ─────────────────────────────────
+        // â”€â”€ POS Local: estado de la cola de DTEs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'dte_cola_estado': {
             $mgr = new \App\Services\DteLocalQueueManager();
             $suc = $data['sucursal_id'] ?? $_GET['sucursal_id'] ?? null;
@@ -1122,7 +1037,7 @@ if ($action) {
             break;
         }
 
-        // ── POS Local: procesar cola → enviar al SII ──────────────────────────────
+        // â”€â”€ POS Local: procesar cola â†’ enviar al SII â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'dte_cola_procesar': {
             $max  = (int)($data['max'] ?? $_GET['max'] ?? 10);
             $mgr  = new \App\Services\DteLocalQueueManager();
@@ -1149,7 +1064,7 @@ if ($action) {
                     ];
                     $gen = generateDTE($dteData);
                     if (empty($gen['ok'])) {
-                        $mgr->marcarError($itemId, $gen['error'] ?? 'generateDTE falló');
+                        $mgr->marcarError($itemId, $gen['error'] ?? 'generateDTE fallÃ³');
                         $resultados[] = ['id'=>$itemId,'folio'=>$folio,'resultado'=>'ERROR_GEN','error'=>$gen['error']??''];
                         continue;
                     }
@@ -1170,7 +1085,7 @@ if ($action) {
             break;
         }
 
-        // ── POS Local: reenviar manualmente UN documento puntual ─────────────────
+        // â”€â”€ POS Local: reenviar manualmente UN documento puntual â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'dte_cola_procesar_uno': {
             $id = (int)($data['id'] ?? $_GET['id'] ?? 0);
             if ($id <= 0) {
@@ -1183,7 +1098,7 @@ if ($action) {
                 echo json_encode(['ok'=>false,'error'=>'Documento no encontrado en la cola']);
                 break;
             }
-            // Reintento manual: el operador interviene, se ignora el límite automático.
+            // Reintento manual: el operador interviene, se ignora el lÃ­mite automÃ¡tico.
             $mgr->resetParaReintento($id);
 
             $tipoDte = (int)$item['tipo_dte'];
@@ -1204,7 +1119,7 @@ if ($action) {
                 ];
                 $gen = generateDTE($dteData);
                 if (empty($gen['ok'])) {
-                    $mgr->marcarError($id, $gen['error'] ?? 'generateDTE falló');
+                    $mgr->marcarError($id, $gen['error'] ?? 'generateDTE fallÃ³');
                     echo json_encode(['ok'=>true,'id'=>$id,'folio'=>$folio,'resultado'=>'ERROR_GEN','error'=>$gen['error']??'']);
                     break;
                 }
@@ -1223,26 +1138,26 @@ if ($action) {
             break;
         }
 
-        // ── POS Local: reportar stock de folios desde APK ─────────────────────────
+        // â”€â”€ POS Local: reportar stock de folios desde APK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'folios_alerta': {
             $mgr = new \App\Services\FoliosAlertaManager();
             echo json_encode($mgr->reportar($data));
             break;
         }
 
-        // ── POS Local: urgencia global de folios (para dashboard y APK) ──────────
+        // â”€â”€ POS Local: urgencia global de folios (para dashboard y APK) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'folios_urgencia': {
             $mgr = new \App\Services\FoliosAlertaManager();
             echo json_encode($mgr->urgenciaGlobal());
             break;
         }
 
-        // ════════════════════════════════════════════════════════════════════
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         //  ENROLAMIENTO DE DISPOSITIVOS
-        //  Flujo: Admin genera token → APK lo presenta → recibe API key
-        // ════════════════════════════════════════════════════════════════════
+        //  Flujo: Admin genera token â†’ APK lo presenta â†’ recibe API key
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-        // ── Generar token de activación (requiere API key de admin) ──────────
+        // â”€â”€ Generar token de activaciÃ³n (requiere API key de admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'dispositivo_generar_token': {
             if (!$globalContext) {
                 http_response_code(401);
@@ -1263,7 +1178,7 @@ if ($action) {
                 break;
             }
 
-            // Código legible de 6 chars (sin caracteres ambiguos: 0/O/I/1/L)
+            // CÃ³digo legible de 6 chars (sin caracteres ambiguos: 0/O/I/1/L)
             $chars  = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
             $codigo = '';
             for ($i = 0; $i < 6; $i++) {
@@ -1290,8 +1205,8 @@ if ($action) {
             break;
         }
 
-        // ── Enrolar dispositivo con token (NO requiere API key) ──────────────
-        //    El APK presenta el token de activación y recibe su API key permanente.
+        // â”€â”€ Enrolar dispositivo con token (NO requiere API key) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        //    El APK presenta el token de activaciÃ³n y recibe su API key permanente.
         case 'dispositivo_enrolar': {
             $pdo       = \App\Core\Database::getInstance();
             $codigo    = strtoupper(trim($data['codigo'] ?? ''));
@@ -1301,7 +1216,7 @@ if ($action) {
 
             if (empty($codigo)) {
                 http_response_code(400);
-                echo json_encode(['ok' => false, 'error' => 'Código de activación requerido']);
+                echo json_encode(['ok' => false, 'error' => 'CÃ³digo de activaciÃ³n requerido']);
                 break;
             }
 
@@ -1321,7 +1236,7 @@ if ($action) {
 
             if (!$disp) {
                 http_response_code(400);
-                echo json_encode(['ok' => false, 'error' => 'Código inválido, expirado o ya utilizado']);
+                echo json_encode(['ok' => false, 'error' => 'CÃ³digo invÃ¡lido, expirado o ya utilizado']);
                 break;
             }
 
@@ -1374,7 +1289,7 @@ if ($action) {
             break;
         }
 
-        // ── Listar dispositivos de la empresa (requiere API key) ─────────────
+        // â”€â”€ Listar dispositivos de la empresa (requiere API key) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'dispositivo_lista': {
             if (!$globalContext) {
                 http_response_code(401);
@@ -1398,7 +1313,7 @@ if ($action) {
             break;
         }
 
-        // ── Desactivar un dispositivo (requiere API key) ──────────────────────
+        // â”€â”€ Desactivar un dispositivo (requiere API key) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'dispositivo_desactivar': {
             if (!$globalContext) {
                 http_response_code(401);
@@ -1419,7 +1334,7 @@ if ($action) {
             $st->execute([$id, $empresaId]);
             $afectadas = $st->rowCount();
 
-            // Revocar también la API key en sii_api_key
+            // Revocar tambiÃ©n la API key en sii_api_key
             if ($afectadas > 0) {
                 $stHash = $pdo->prepare(
                     "SELECT api_key_hash FROM sii_dispositivo WHERE id = ?"
@@ -1436,7 +1351,7 @@ if ($action) {
             break;
         }
 
-        // ── Heartbeat del dispositivo (actualiza ultimo_contacto) ────────────
+        // â”€â”€ Heartbeat del dispositivo (actualiza ultimo_contacto) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'dispositivo_heartbeat': {
             $pdo       = \App\Core\Database::getInstance();
             $dispId    = (int) ($data['dispositivo_id'] ?? 0);
@@ -1455,7 +1370,7 @@ if ($action) {
 
         default:
             http_response_code(400);
-            echo json_encode(['ok' => false, 'error' => "Acción '$action' no reconocida"]);
+            echo json_encode(['ok' => false, 'error' => "AcciÃ³n '$action' no reconocida"]);
     }
 } catch (Throwable $e) {
     $code = ($e instanceof Exception) ? 400 : 500;
@@ -1477,9 +1392,9 @@ if ($action) {
 }
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // INFO EMISOR
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . ' | REACHED EMISOR INFO SECTION. function_exists(generateDTE)=' . (function_exists('generateDTE')?'YES':'NO') . PHP_EOL, FILE_APPEND);
 function emisorInfo(): array {
     global $globalContext;
@@ -1518,13 +1433,13 @@ function emisorInfo(): array {
     ];
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // GENERAR DTE
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function generateDTE(array $data): array {
-    global $globalContext;
+    global $globalContext, $actualTmpDir;
     
-    // FORZADO DE RECEPTOR PARA CERTIFICACIÓN (Seguridad total)
+    // FORZADO DE RECEPTOR PARA CERTIFICACIÃ“N (Seguridad total)
     if (isset($globalContext) && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $tipoDTE = (int)($data['tipoDTE'] ?? 33);
         $rutRecepCorrecto = in_array($tipoDTE, [39, 41]) ? '66666666-6' : '55555555-5';
@@ -1539,7 +1454,7 @@ function generateDTE(array $data): array {
     $tipo    = (int)($data['tipoDTE'] ?? $data['tipo'] ?? 0);
     $folio   = (int)($data['folio']   ?? 0);
     $fecha   = $data['fecha']   ?? date('Y-m-d');
-    // Modo certificación: NO consumir folios (no registrar DTE ni consumo en BD)
+    // Modo certificaciÃ³n: NO consumir folios (no registrar DTE ni consumo en BD)
     // para poder REUTILIZAR siempre los mismos primeros folios del CAF en cada
     // reintento, sin perderlos. El XML igual se guarda en tmp/ para las muestras.
     $certNoConsume = !empty($data['certNoConsume']);
@@ -1547,19 +1462,19 @@ function generateDTE(array $data): array {
     $recep   = $data['receptor'] ?? [];
 
     if (!in_array($tipo, [33, 34, 39, 41, 43, 46, 52, 56, 61, 110, 111, 112])) {
-        throw new Exception('Tipo de DTE inválido: ' . $tipo);
+        throw new Exception('Tipo de DTE invÃ¡lido: ' . $tipo);
     }
     if (empty($items)) {
-        throw new Exception('Debe ingresar al menos un ítem');
+        throw new Exception('Debe ingresar al menos un Ã­tem');
     }
     if (count($items) > 60) {
-        throw new Exception('El DTE no puede tener más de 60 líneas de detalle (máximo XSD SII). Tiene ' . count($items) . '.');
+        throw new Exception('El DTE no puede tener mÃ¡s de 60 lÃ­neas de detalle (mÃ¡ximo XSD SII). Tiene ' . count($items) . '.');
     }
 
     $referencias = $data['referencias'] ?? [];
     $advertencias = [];
 
-    // GiroRecep es opcional en el XSD pero SII suele rechazar facturas sin él
+    // GiroRecep es opcional en el XSD pero SII suele rechazar facturas sin Ã©l
     if (in_array($tipo, [33, 34, 46, 52, 56, 61]) && empty($recep['giro'])) {
         $advertencias[] = 'GiroRecep no proporcionado. El SII puede rechazar este documento si el receptor no tiene giro registrado.';
     }
@@ -1567,17 +1482,17 @@ function generateDTE(array $data): array {
     if (in_array($tipo, [56, 61, 111, 112]) && empty($referencias)) {
         throw new Exception(
             in_array($tipo, [61, 112], true)
-                ? 'Una Nota de Crédito (tipo 61) requiere al menos una <Referencia> al documento original que modifica o anula.'
-                : 'Una Nota de Débito (tipo 56) requiere al menos una <Referencia> al documento original que modifica.'
+                ? 'Una Nota de CrÃ©dito (tipo 61) requiere al menos una <Referencia> al documento original que modifica o anula.'
+                : 'Una Nota de DÃ©bito (tipo 56) requiere al menos una <Referencia> al documento original que modifica.'
         );
     }
     $descuentoGlobal = $data['descuentoGlobal'] ?? null;
 
-    // Certificado según tipo: boletas (39/41) -> Cristina ; guías/facturas -> David
+    // Certificado segÃºn tipo: boletas (39/41) -> Cristina ; guÃ­as/facturas -> David
     $GLOBALS['SII_CERT_TIPO'] = $tipo;
     [$cert, $privKey] = loadCertificate($tipo);
 
-    // Multi-CAF: si el consumidor pidió un folio específico, se carga el CAF
+    // Multi-CAF: si el consumidor pidiÃ³ un folio especÃ­fico, se carga el CAF
     // cuyo rango lo contiene; si no, se elige el primer CAF activo con folios
     // disponibles y se autoasigna el siguiente folio dentro de ese rango.
     $caf      = loadCAF($tipo, $folio > 0 ? $folio : 0);
@@ -1622,16 +1537,16 @@ function generateDTE(array $data): array {
     $xmlFirmado = signDTE($xmlDoc, $cert, $privKey, $idDte);
 
     // Guardar en archivo (como respaldo)
-    $tmpDir = $globalContext ? $globalContext->getTmpPath() : TMP_DIR;
+    $tmpDir = $actualTmpDir;
     $tmpFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
     file_put_contents($tmpFile, $xmlFirmado);
 
     // PERSISTENCIA EN BASE DE DATOS CENTRAL
-    // En certificación con folios reutilizables se omite: no se registra el DTE
-    // ni se marca el folio como consumido (así el mismo folio se reusa al reintentar).
+    // En certificaciÃ³n con folios reutilizables se omite: no se registra el DTE
+    // ni se marca el folio como consumido (asÃ­ el mismo folio se reusa al reintentar).
     // Segunda guardia: en ambiente CERTIFICACION nunca persistir, aunque certNoConsume
-    // no se haya propagado por algún path de código futuro (el XML va en Latin-1 y
-    // json_encode del payload rompería el CHECK json_valid de documentos_emitidos).
+    // no se haya propagado por algÃºn path de cÃ³digo futuro (el XML va en Latin-1 y
+    // json_encode del payload romperÃ­a el CHECK json_valid de documentos_emitidos).
     if ($globalContext && !$certNoConsume && $globalContext->getAmbiente() !== 'CERTIFICACION') {
         $repo = new EmpresaRepository();
         $dteId = $repo->registrarDTE([
@@ -1646,7 +1561,7 @@ function generateDTE(array $data): array {
             'xml'            => $xmlFirmado
         ]);
         
-        $repo->registrarConsumoFolio($caf['id_db'], $globalContext->getEmpresaId(), $tipo, $folio, $dteId);
+        $repo->registrarConsumoFolio($caf['id_db'], $globalContext->getEmpresaId(), $tipo, $folio, $dteId, $globalContext->getAmbiente());
     }
 
     return [
@@ -1661,9 +1576,9 @@ function generateDTE(array $data): array {
     ];
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // ENVIAR AL SII
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function sendDTE(array $data): array {
     $xml   = $data['xml']   ?? '';
     $tipo  = (int)($data['tipo']  ?? 0);
@@ -1671,7 +1586,7 @@ function sendDTE(array $data): array {
 
     if (!$xml) throw new Exception('No hay XML de DTE para enviar');
 
-    // Certificado según tipo: boletas (39/41) → Cristina ; guías/facturas → David
+    // Certificado segÃºn tipo: boletas (39/41) â†’ Cristina ; guÃ­as/facturas â†’ David
     $GLOBALS['SII_CERT_TIPO'] = $tipo;
     [$cert, $privKey] = loadCertificate($tipo);
 
@@ -1679,30 +1594,30 @@ function sendDTE(array $data): array {
     $envio        = buildEnvioDTE($xml, $tipo, $folio, $cert);
     $envioFirmado = signDTE($envio, $cert, $privKey, 'SetDoc');
 
-    // ── Validación XSD local del sobre ──
+    // â”€â”€ ValidaciÃ³n XSD local del sobre â”€â”€
     $val = validateXmlAgainstXSD($envioFirmado);
     if (!$val['valid'] && !$val['skipped']) {
         saveSiiLog('sendDTE', "T{$tipo}F{$folio} rechazado por XSD local: " . implode('; ', array_slice($val['errors'], 0, 3)), 'ERROR');
         return [
             'ok'         => false,
-            'error'      => 'XSD inválido: ' . implode('; ', array_slice($val['errors'], 0, 5)),
+            'error'      => 'XSD invÃ¡lido: ' . implode('; ', array_slice($val['errors'], 0, 5)),
             'xsd_errors' => $val['errors'],
-            'mensaje'    => 'DTE no enviado: falló validación XSD local del sobre.',
+            'mensaje'    => 'DTE no enviado: fallÃ³ validaciÃ³n XSD local del sobre.',
         ];
     }
 
-    // ── Boletas (39/41): flujo REST — obtiene su propio token, no usa SOAP ──
+    // â”€â”€ Boletas (39/41): flujo REST â€” obtiene su propio token, no usa SOAP â”€â”€
     if (in_array($tipo, [39, 41], true)) {
-        // Validación de límite solo para boletas
+        // ValidaciÃ³n de lÃ­mite solo para boletas
         $lim = validateEnvioBoletaLimit($envioFirmado);
         if (!$lim['ok']) {
-            saveSiiLog('sendDTE', "T{$tipo}F{$folio} sobre excede límite: {$lim['reason']}", 'ERROR');
+            saveSiiLog('sendDTE', "T{$tipo}F{$folio} sobre excede lÃ­mite: {$lim['reason']}", 'ERROR');
             return [
                 'ok'      => false,
                 'error'   => $lim['reason'],
                 'count'   => $lim['count'],
                 'max'     => $lim['max'],
-                'mensaje' => "Sobre EnvioBOLETA excede el máximo permitido: {$lim['reason']}",
+                'mensaje' => "Sobre EnvioBOLETA excede el mÃ¡ximo permitido: {$lim['reason']}",
             ];
         }
         $result = sendBoletaREST($envioFirmado, $tipo, $folio, '');
@@ -1710,7 +1625,7 @@ function sendDTE(array $data): array {
         return $result;
     }
 
-    // ── Facturas, Guías y otros: flujo SOAP (semilla + token SOAP) ──
+    // â”€â”€ Facturas, GuÃ­as y otros: flujo SOAP (semilla + token SOAP) â”€â”€
     $semilla  = getSemilla();
     $token    = getToken($semilla, $cert, $privKey);
     $resultado = uploadDTE($envioFirmado, $token, $cert);
@@ -1727,7 +1642,7 @@ function sendDTE(array $data): array {
 
 /**
  * Hash determinista del XML del documento (sin <Signature>) para detectar
- * modificaciones manuales entre envíos.
+ * modificaciones manuales entre envÃ­os.
  */
 function xmlContentHash(string $xml): string {
     // Eliminar bloque Signature para que la firma no afecte el hash
@@ -1738,19 +1653,19 @@ function xmlContentHash(string $xml): string {
 }
 
 /**
- * Registra un intento de envío al SII en tracking.json.
+ * Registra un intento de envÃ­o al SII en tracking.json.
  *
  * Estructura por folio:
  *   "T39F123": {
  *     "tipo": 39, "folio": 123,
  *     "xml_hash": "sha256:abc...",
  *     "first_seen": "2026-05-08T12:17:58",
- *     "last_trackId": "...",          (último TrackID — exitoso o no)
- *     "last_ok_trackId": "...",       (último TrackID con result=OK; o null)
+ *     "last_trackId": "...",          (Ãºltimo TrackID â€” exitoso o no)
+ *     "last_ok_trackId": "...",       (Ãºltimo TrackID con result=OK; o null)
  *     "last_result": "OK|FAIL|...",
  *     "estado": "REC|DOK|...",
  *     "enviado": "2026-05-14 23:14:42",
- *     "intentos": [ {ts, trackId, http, result, estado, via, reason, user, xml_hash, response} … ]
+ *     "intentos": [ {ts, trackId, http, result, estado, via, reason, user, xml_hash, response} â€¦ ]
  *   }
  */
 function saveTrackingId(int $tipo, int $folio, ?string $trackId, array $siiResponse = [], array $meta = []): void {
@@ -1767,7 +1682,7 @@ function saveTrackingId(int $tipo, int $folio, ?string $trackId, array $siiRespo
         'intentos'   => [],
     ];
 
-    // MIGRACIÓN: si el entry viejo no tiene 'intentos', lo convertimos
+    // MIGRACIÃ“N: si el entry viejo no tiene 'intentos', lo convertimos
     if (!isset($entry['intentos'])) {
         $intentoLegacy = [
             'ts'          => $entry['enviado'] ?? $now,
@@ -1796,7 +1711,7 @@ function saveTrackingId(int $tipo, int $folio, ?string $trackId, array $siiRespo
         'estado'   => $siiResponse['estado'] ?? null,
         'via'      => $meta['via'] ?? null,
         'http'     => $meta['http'] ?? null,
-        'reason'   => $meta['reason'] ?? 'envío',
+        'reason'   => $meta['reason'] ?? 'envÃ­o',
         'user'     => $meta['user'] ?? null,
         'xml_hash' => $meta['xml_hash'] ?? null,
         'mensaje'  => $siiResponse['mensaje'] ?? null,
@@ -1819,7 +1734,7 @@ function saveTrackingId(int $tipo, int $folio, ?string $trackId, array $siiRespo
         $entry['respuesta_sii']   = $siiResponse['raw'] ?? null;
         $entry['respuesta_sii_raw']= $siiResponse['rawResponse'] ?? null;
 
-        // ── Archivado legal automático tras envío exitoso (retención 6 años) ──
+        // â”€â”€ Archivado legal automÃ¡tico tras envÃ­o exitoso (retenciÃ³n 6 aÃ±os) â”€â”€
         global $actualTmpDir;
         $xmlFile = $actualTmpDir . "dte_T{$tipo}F{$folio}.xml";
         if (file_exists($xmlFile)) {
@@ -1839,7 +1754,7 @@ function saveTrackingId(int $tipo, int $folio, ?string $trackId, array $siiRespo
         $entry['last_result'] = 'FAIL';
     }
 
-    // Tope al historial (últimos 50)
+    // Tope al historial (Ãºltimos 50)
     if (count($entry['intentos']) > 50) {
         $entry['intentos'] = array_slice($entry['intentos'], -50);
     }
@@ -1849,7 +1764,7 @@ function saveTrackingId(int $tipo, int $folio, ?string $trackId, array $siiRespo
 }
 
 /**
- * Lock cooperativo por folio para evitar reenvíos concurrentes.
+ * Lock cooperativo por folio para evitar reenvÃ­os concurrentes.
  * Devuelve un handle (resource) o null si el lock no se pudo adquirir.
  * Es responsabilidad del caller pasar el handle a releaseFolioLock().
  */
@@ -1871,7 +1786,7 @@ function acquireFolioLock(int $tipo, int $folio, int $timeoutSec = 30) {
         usleep(200000); // 200ms
     }
 
-    // Anotar quién y cuándo (informativo, no crítico)
+    // Anotar quiÃ©n y cuÃ¡ndo (informativo, no crÃ­tico)
     ftruncate($fp, 0);
     rewind($fp);
     fwrite($fp, json_encode([
@@ -1929,14 +1844,14 @@ function saveSiiLog(string $accion, string $mensaje, string $estado = 'INFO'): v
         'estado'  => $estado
     ]);
 
-    // Mantener solo los últimos 100 eventos
+    // Mantener solo los Ãºltimos 100 eventos
     $logs = array_slice($logs, 0, 100);
     file_put_contents($file, json_encode($logs, JSON_PRETTY_PRINT));
 }
 
 /**
- * Registra una transacción completa con el SII en NDJSON (una línea por evento).
- * Útil para debug detallado de fallos REST/SOAP — captura request + response.
+ * Registra una transacciÃ³n completa con el SII en NDJSON (una lÃ­nea por evento).
+ * Ãštil para debug detallado de fallos REST/SOAP â€” captura request + response.
  *
  * Rota cuando el archivo supera 5 MB (renombra a .1 y empieza fresco).
  */
@@ -1948,10 +1863,10 @@ function saveSiiTransaction(array $tx): void {
         @rename($logFile, $logFile . '.1');
     }
 
-    // Recortar body grande para evitar logs gigantes (máx 2KB por dirección)
+    // Recortar body grande para evitar logs gigantes (mÃ¡x 2KB por direcciÃ³n)
     $trimBody = function ($s) {
         if (!is_string($s)) return $s;
-        return strlen($s) > 2048 ? substr($s, 0, 2048) . '… [+' . (strlen($s) - 2048) . ' bytes]' : $s;
+        return strlen($s) > 2048 ? substr($s, 0, 2048) . 'â€¦ [+' . (strlen($s) - 2048) . ' bytes]' : $s;
     };
 
     $entry = array_merge([
@@ -1969,7 +1884,7 @@ function saveSiiTransaction(array $tx): void {
 }
 
 /**
- * Lee últimas N transacciones del log NDJSON (más recientes primero).
+ * Lee Ãºltimas N transacciones del log NDJSON (mÃ¡s recientes primero).
  */
 function loadSiiTransactions(int $limit = 50, ?string $filterOp = null): array {
     global $actualTmpDir;
@@ -1991,9 +1906,9 @@ function loadSiiTransactions(int $limit = 50, ?string $filterOp = null): array {
     return $out;
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // VALIDAR ESTADO EN SII
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function validateDTE(array $data): array {
     $tipo    = (int)($data['tipo']  ?? 0);
     $folio   = (int)($data['folio'] ?? 0);
@@ -2007,12 +1922,12 @@ function validateDTE(array $data): array {
         ];
     }
     
-    // Parámetros obligatorios para consultar un DTE individual
+    // ParÃ¡metros obligatorios para consultar un DTE individual
     $rutRecep = $data['rutReceptor'] ?? '66666666-6';
     $fecha    = $data['fecha']       ?? date('Y-m-d');
     $monto    = (int)($data['monto'] ?? 0);
 
-    // Certificado según tipo: boletas (39/41) -> Cristina ; guías/facturas -> David
+    // Certificado segÃºn tipo: boletas (39/41) -> Cristina ; guÃ­as/facturas -> David
     $GLOBALS['SII_CERT_TIPO'] = $tipo;
     [$cert, $privKey] = loadCertificate($tipo);
 
@@ -2037,9 +1952,9 @@ function validateDTE(array $data): array {
     ];
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // CERTIFICADO Y CAF
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function loadCertificate(?int $tipo = null): array {
     $t   = $tipo ?? ($GLOBALS['SII_CERT_TIPO'] ?? null);
     $b   = certBundleForTipo($t);
@@ -2053,20 +1968,20 @@ function loadCertificate(?int $tipo = null): array {
     $certs = [];
     if (!openssl_pkcs12_read(file_get_contents($pfx), $certs, getCertPass($t))) {
         $err = openssl_error_string() ?: 'Error desconocido';
-        throw new Exception('OpenSSL Falló: ' . $err . '. Verifique contraseña o formato en setup.php');
+        throw new Exception('OpenSSL FallÃ³: ' . $err . '. Verifique contraseÃ±a o formato en setup.php');
     }
     return [$certs['cert'], $certs['pkey']];
 }
 
 function getRutCertificado(string $certPem): string {
-    // Si se definió manualmente (por errores de detección), usar ese.
+    // Si se definiÃ³ manualmente (por errores de detecciÃ³n), usar ese.
     if (defined('RUT_ENVIA_MANUAL') && !empty(RUT_ENVIA_MANUAL)) {
         return RUT_ENVIA_MANUAL;
     }
 
     $certData = openssl_x509_parse($certPem);
     
-    // Función recursiva para buscar RUT en cualquier parte del array
+    // FunciÃ³n recursiva para buscar RUT en cualquier parte del array
     $findRut = function($item) use (&$findRut) {
         if (is_array($item)) {
             foreach ($item as $v) {
@@ -2084,12 +1999,12 @@ function getRutCertificado(string $certPem): string {
     $rut = $findRut($certData);
     if ($rut) return $rut;
     
-    throw new Exception("No se pudo extraer el RUT del certificado digital. El certificado no parece contener un RUT válido en sus campos visibles.");
+    throw new Exception("No se pudo extraer el RUT del certificado digital. El certificado no parece contener un RUT vÃ¡lido en sus campos visibles.");
 }
 
 function getRutCertificadoSeguro(string $certPem): string {
     // 1) RUT declarado en el perfil de certs.json (autoritativo y parametrizable).
-    //    Necesario para certificados cuyo RUT está en una extensión que
+    //    Necesario para certificados cuyo RUT estÃ¡ en una extensiÃ³n que
     //    openssl_x509_parse no expone (ej. E-Certchile otherName).
     $b = certBundleForTipo($GLOBALS['SII_CERT_TIPO'] ?? null);
     if (!empty($b['rut']) && preg_match('/(\d{7,8})-([0-9Kk])/', $b['rut'], $m)) {
@@ -2147,14 +2062,14 @@ function loadCAF(int $tipo, int $folio = 0): array {
         $empId = $globalContext->getEmpresaId();
         $amb   = $globalContext->getAmbiente();
 
-        // Multi-CAF: si viene un folio específico, se elige el CAF cuyo rango
+        // Multi-CAF: si viene un folio especÃ­fico, se elige el CAF cuyo rango
         // lo contiene; si no, el primer CAF activo con folios disponibles.
         if ($folio > 0) {
             $dbCaf = $repo->getCAFForFolio($empId, $tipo, $amb, $folio);
             if (!$dbCaf) {
                 throw new Exception(
                     "No hay CAF autorizado que contenga el folio $folio (tipo $tipo, ambiente $amb). "
-                    . "Cargue el CAF correspondiente en Configuración."
+                    . "Cargue el CAF correspondiente en ConfiguraciÃ³n."
                 );
             }
         } else {
@@ -2162,7 +2077,7 @@ function loadCAF(int $tipo, int $folio = 0): array {
             if (!$dbCaf) {
                 throw new Exception(
                     "No hay folios disponibles para tipo $tipo en ambiente $amb. "
-                    . "Solicite y cargue un nuevo CAF en Configuración."
+                    . "Solicite y cargue un nuevo CAF en ConfiguraciÃ³n."
                 );
             }
         }
@@ -2197,14 +2112,14 @@ function loadCAF(int $tipo, int $folio = 0): array {
     $file = $actualCafDir . "caf_{$tipo}.xml";
     if (!file_exists($file)) {
         $tipoNombre = [
-            33=>'Factura Electrónica', 34=>'Factura Exenta',
-            39=>'Boleta Electrónica', 41=>'Boleta Exenta',
-            52=>'Guía de Despacho',   56=>'Nota de Débito',
-            61=>'Nota de Crédito',
+            33=>'Factura ElectrÃ³nica', 34=>'Factura Exenta',
+            39=>'Boleta ElectrÃ³nica', 41=>'Boleta Exenta',
+            52=>'GuÃ­a de Despacho',   56=>'Nota de DÃ©bito',
+            61=>'Nota de CrÃ©dito',
         ][$tipo] ?? "DTE tipo $tipo";
         throw new Exception(
             "No hay folios disponibles para emitir $tipoNombre (tipo $tipo). "
-            . "Solicite folios al SII (Mi SII → Factura Electrónica → Administración de Folios) "
+            . "Solicite folios al SII (Mi SII â†’ Factura ElectrÃ³nica â†’ AdministraciÃ³n de Folios) "
             . "y cargue el CAF .xml en setup.php. Archivo esperado: $file"
         );
     }
@@ -2220,7 +2135,7 @@ function loadCAF(int $tipo, int $folio = 0): array {
 
     if ($disponibles <= 0) {
         throw new Exception(
-            "CAF tipo $tipo agotado (rango $desde-$hasta, último usado $lastUsed). "
+            "CAF tipo $tipo agotado (rango $desde-$hasta, Ãºltimo usado $lastUsed). "
             . "Solicite un nuevo rango de folios al SII y cargue el CAF en setup.php."
         );
     }
@@ -2236,13 +2151,13 @@ function loadCAF(int $tipo, int $folio = 0): array {
     ];
 }
 
-// ────────────────────────────────────────────────────────────
-// CÁLCULO DE MONTOS
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// CÃLCULO DE MONTOS
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function calcularMontos(array $items, int $tipo): array {
-    // Separar afecto y exento por ítem (la marca 'exento' la fija el formulario,
-    // el set de pruebas o el nombre del ítem). Necesario para boletas/facturas
-    // con líneas mixtas (ej. CASO-4 del set de boletas: 1 afecto + 1 exento).
+    // Separar afecto y exento por Ã­tem (la marca 'exento' la fija el formulario,
+    // el set de pruebas o el nombre del Ã­tem). Necesario para boletas/facturas
+    // con lÃ­neas mixtas (ej. CASO-4 del set de boletas: 1 afecto + 1 exento).
     $sumaAfecta = 0;
     $sumaExenta = 0;
     foreach ($items as $it) {
@@ -2257,14 +2172,14 @@ function calcularMontos(array $items, int $tipo): array {
         }
     }
 
-    // Documentos completamente exentos (factura/boleta exenta, exportación)
+    // Documentos completamente exentos (factura/boleta exenta, exportaciÃ³n)
     $docExento = in_array($tipo, [34, 41, 110, 111, 112], true);
     if ($docExento) {
         $exe = $sumaAfecta + $sumaExenta;
         return ['mntNeto' => 0, 'mntExe' => $exe, 'tasaIVA' => 0, 'iva' => 0, 'mntTotal' => $exe];
     }
 
-    // Boleta afecta (39): el precio ingresado INCLUYE IVA → se desglosa.
+    // Boleta afecta (39): el precio ingresado INCLUYE IVA â†’ se desglosa.
     if ($tipo === 39) {
         $neto = $sumaAfecta > 0 ? (int)round($sumaAfecta / 1.19) : 0;
         $iva  = $sumaAfecta > 0 ? $sumaAfecta - $neto : 0;
@@ -2277,7 +2192,7 @@ function calcularMontos(array $items, int $tipo): array {
         ];
     }
 
-    // Factura afecta, guía, nota — el precio es NETO; el IVA se agrega.
+    // Factura afecta, guÃ­a, nota â€” el precio es NETO; el IVA se agrega.
     $neto = $sumaAfecta;
     $iva  = (int)round($neto * 0.19);
     return [
@@ -2289,9 +2204,9 @@ function calcularMontos(array $items, int $tipo): array {
     ];
 }
 
-// ────────────────────────────────────────────────────────────
-// CONSTRUCCIÓN DEL XML DTE
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// CONSTRUCCIÃ“N DEL XML DTE
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function siiExportCurrency(?string $moneda): string {
     $moneda = strtoupper(trim((string)($moneda ?: 'DOLAR USA')));
     return match ($moneda) {
@@ -2545,7 +2460,7 @@ function buildDocumentoXML(
     }
 
     if (!in_array($tipo, [39, 41]) && ($rRut === '66666666-6' || empty($rRut))) {
-        throw new Exception("El RUT 66.666.666-6 solo es válido para Boletas Electrónicas. Para otros documentos como la Guía de Despacho (Tipo $tipo), debe ingresar un RUT de receptor válido.");
+        throw new Exception("El RUT 66.666.666-6 solo es vÃ¡lido para Boletas ElectrÃ³nicas. Para otros documentos como la GuÃ­a de Despacho (Tipo $tipo), debe ingresar un RUT de receptor vÃ¡lido.");
     }
     $rGiro = $h($recep['giro']     ?? '');
     $rDir  = $h($recep['direccion'] ?? '');
@@ -2574,7 +2489,7 @@ function buildDocumentoXML(
         $mnt  = $bruto - $dscMonto;
         $lin  = $i + 1;
 
-        // Orden requerido por XSD: NroLinDet → IndExe → NmbItem → DscItem
+        // Orden requerido por XSD: NroLinDet â†’ IndExe â†’ NmbItem â†’ DscItem
         $xmlDet .= "<Detalle>\n  <NroLinDet>$lin</NroLinDet>\n";
         if ($esExento || ($it['exento'] ?? false)) $xmlDet .= "  <IndExe>1</IndExe>\n";
         $xmlDet .= "  <NmbItem>$nom</NmbItem>\n";
@@ -2611,8 +2526,8 @@ function buildDocumentoXML(
 
     // Descuento / Recargo Global
     // Acepta:
-    //   - Número escalar (legacy): se asume Descuento porcentual
-    //   - Array: ['tipoMov'=>'D|R', 'tipoVal'=>'%|$', 'valor'=>n, 'glosa'=>'…']
+    //   - NÃºmero escalar (legacy): se asume Descuento porcentual
+    //   - Array: ['tipoMov'=>'D|R', 'tipoVal'=>'%|$', 'valor'=>n, 'glosa'=>'â€¦']
     $xmlDscGlb = '';
     if ($descuentoGlobal) {
         if (is_array($descuentoGlobal)) {
@@ -2625,7 +2540,7 @@ function buildDocumentoXML(
             $valor   = (float)$descuentoGlobal;
             $glosa   = 'Descuento Global';
         }
-        // En el schema SII: TpoValor = '%' (porcentaje) o '$' (monto). Se mantiene '%' legacy también.
+        // En el schema SII: TpoValor = '%' (porcentaje) o '$' (monto). Se mantiene '%' legacy tambiÃ©n.
         $tpoValorXml = $tipoVal === '%' ? '%' : '$';
         $xmlDscGlb = "<DscRcgGlobal>\n"
             . "  <NroLinDR>1</NroLinDR>\n"
@@ -2636,7 +2551,7 @@ function buildDocumentoXML(
             . "</DscRcgGlobal>\n";
     }
 
-    // Timbre electrónico
+    // Timbre electrÃ³nico
     $it1 = substr($items[0]['nombre'] ?? 'Item', 0, 40);
     $ted = generateTimbre($tipo, $folio, $fecha, $rRut, $rNom, $m['mntTotal'], $it1, $caf, $privKey);
 
@@ -2644,7 +2559,7 @@ function buildDocumentoXML(
     $xmlFmaPago     = (!in_array($tipo, [39, 41])) ? "\n  <FmaPago>1</FmaPago>" : "";
     $xmlTipoDesp    = ($tipoDespacho > 0) ? "\n  <TipoDespacho>$tipoDespacho</TipoDespacho>" : "";
     // IndServicio requerido en boletas (EnvioBOLETA_v11.xsd, sin minOccurs=0)
-    // 1=Boleta servicios periódicos, 2=Boleta servicios no periódicos,
+    // 1=Boleta servicios periÃ³dicos, 2=Boleta servicios no periÃ³dicos,
     // 3=Boleta venta y servicios, 4=Boleta venta (sin servicios)
     $xmlIndServ = in_array($tipo, [39, 41])
         ? "\n  <IndServicio>$indServicio</IndServicio>"
@@ -2654,14 +2569,14 @@ function buildDocumentoXML(
         throw new Exception('ACTECO no configurado para la empresa. Edite la ficha en Empresas y registre el codigo de actividad economica SII antes de certificar facturas/notas/guias.');
     }
 
-    // Sección Transporte (Solo si hay datos o es Guía)
+    // SecciÃ³n Transporte (Solo si hay datos o es GuÃ­a)
     $xmlTrans = "";
     if ($tipo == 52 || $patente || $rutTranspor) {
         $xmlTrans .= "\n<Transporte>";
         if ($patente)     $xmlTrans .= "\n  <Patente>" . htmlspecialchars(substr($patente, 0, 8)) . "</Patente>";
         if ($rutTranspor) $xmlTrans .= "\n  <RUTTrans>" . htmlspecialchars($rutTranspor) . "</RUTTrans>";
         
-        // Si es traslado interno, ponemos dirección de destino del receptor
+        // Si es traslado interno, ponemos direcciÃ³n de destino del receptor
         if ($indTraslado == 5) {
             if ($rDir) $xmlTrans .= "\n  <DirDest>$rDir</DirDest>";
             if ($rCom) $xmlTrans .= "\n  <CmnaDest>$rCom</CmnaDest>";
@@ -2717,9 +2632,9 @@ $ted
 XML;
 }
 
-// ────────────────────────────────────────────────────────────
-// LIQUIDACIÓN (Tipo 43) — DocumentoLiquidacion
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// LIQUIDACIÃ“N (Tipo 43) â€” DocumentoLiquidacion
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function buildLiquidacionXML(
     int $tipo, int $folio, string $fecha,
     array $recep, array $items, array $m, array $caf, string $idDte, $privKey,
@@ -2749,11 +2664,11 @@ function buildLiquidacionXML(
         $acteco = ACTECO;
     }
 
-    // Receptor — tipo 43 siempre requiere RUT válido (el mandante)
+    // Receptor â€” tipo 43 siempre requiere RUT vÃ¡lido (el mandante)
     $rRut  = $h($recep['rut']    ?? '');
     $rNom  = $h($recep['nombre'] ?? '');
     if (empty($rRut) || $rRut === '66666666-6') {
-        throw new Exception('La Liquidación (tipo 43) requiere RUT de receptor válido (el mandante).');
+        throw new Exception('La LiquidaciÃ³n (tipo 43) requiere RUT de receptor vÃ¡lido (el mandante).');
     }
     $rGiro = $h($recep['giro']     ?? '');
     $rDir  = $h($recep['direccion'] ?? '');
@@ -2790,13 +2705,13 @@ function buildLiquidacionXML(
         $xmlDet .= "  <MontoItem>$mnt</MontoItem>\n</Detalle>\n";
     }
 
-    // Comisiones — sección exclusiva de DocumentoLiquidacion
-    // TipoMovim: C = Cargo (comisión cobrada al mandante), O = Abono (devolución al mandante)
+    // Comisiones â€” secciÃ³n exclusiva de DocumentoLiquidacion
+    // TipoMovim: C = Cargo (comisiÃ³n cobrada al mandante), O = Abono (devoluciÃ³n al mandante)
     $xmlCom = '';
     foreach ($comisiones as $i => $com) {
         $lin      = $i + 1;
         $tipoMov  = strtoupper($com['tipoMovim'] ?? 'C') === 'O' ? 'O' : 'C';
-        $glosa    = $h(substr($com['glosa'] ?? 'Comisión', 0, 60));
+        $glosa    = $h(substr($com['glosa'] ?? 'ComisiÃ³n', 0, 60));
         $neto     = (int)round((float)($com['valComNeto'] ?? 0));
         $exe      = (int)round((float)($com['valComExe']  ?? 0));
         $iva      = isset($com['valComIVA']) ? (int)round((float)$com['valComIVA']) : null;
@@ -2869,9 +2784,9 @@ $xmlRef
 XML;
 }
 
-// ────────────────────────────────────────────────────────────
-// TIMBRE ELECTRÓNICO (TED)
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// TIMBRE ELECTRÃ“NICO (TED)
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function generateTimbre(
     int $tipo, int $folio, string $fecha,
     string $rRut, string $rNom, int $mntTotal,
@@ -2884,14 +2799,14 @@ function generateTimbre(
     $it  = $h(mb_substr($it1, 0, 40, 'UTF-8'));
     $ts  = date('Y-m-d\TH:i:s');
 
-    // Extraer el bloque <CAF> y limpiarlo (quitar saltos de línea y espacios entre etiquetas)
+    // Extraer el bloque <CAF> y limpiarlo (quitar saltos de lÃ­nea y espacios entre etiquetas)
     if (!preg_match('/<CAF.*?>([\s\S]*?)<\/CAF>/i', $caf['xml'], $m)) {
         throw new Exception("No se pudo extraer el bloque <CAF> del archivo original.");
     }
     // Normalizar bloque CAF: eliminar espacios entre etiquetas para evitar rotura de firma en C14N
     $cafBlock = preg_replace('/>\s+</', '><', trim($m[0]));
 
-    // Construir DD en una sola línea y sin espacios innecesarios
+    // Construir DD en una sola lÃ­nea y sin espacios innecesarios
     $dd = "<DD><RE>$rE</RE><TD>$tipo</TD><F>$folio</F><FE>$fecha</FE>"
         . "<RR>$rRut</RR><RSR>$rN</RSR><MNT>$mntTotal</MNT>"
         . "<IT1>$it</IT1>$cafBlock<TSTED>$ts</TSTED></DD>";
@@ -2909,9 +2824,9 @@ function generateTimbre(
     return "<TED version=\"1.0\">$dd<FRMT algoritmo=\"SHA1withRSA\">$frmt</FRMT></TED>";
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // FIRMA DIGITAL XML (XMLDSig)
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function signDTE(string $xml, string $certPem, $privKey, string $idToSign): string {
     // Reemplazar placeholder de ACTECO
     $xml = str_replace('ACTECO_VAL', ACTECO, $xml);
@@ -2942,7 +2857,7 @@ function signDTE(string $xml, string $certPem, $privKey, string $idToSign): stri
     }
     
     if (!$nodeToSign) {
-        throw new Exception("No se encontró el nodo con ID='$idToSign' para firmar.");
+        throw new Exception("No se encontrÃ³ el nodo con ID='$idToSign' para firmar.");
     }
 
     $c14n    = $nodeToSign->C14N();
@@ -2977,7 +2892,7 @@ function signDTE(string $xml, string $certPem, $privKey, string $idToSign): stri
         $exponent = base64_encode($details['rsa']['e']);
     }
 
-    // Construir nodo <Signature> con SignatureValue VACÍO (se firma después).
+    // Construir nodo <Signature> con SignatureValue VACÃO (se firma despuÃ©s).
     $sigXml = '<Signature xmlns="' . $nsSig . '">'
             . $signedInfoXml
             . '<SignatureValue></SignatureValue>'
@@ -2996,16 +2911,16 @@ function signDTE(string $xml, string $certPem, $privKey, string $idToSign): stri
     $sigDom->loadXML($sigXml);
     $sigNode = $dom->importNode($sigDom->documentElement, true);
 
-    // Posición de la firma:
-    // En DTE va dentro de <DTE> (después de <Documento>)
+    // PosiciÃ³n de la firma:
+    // En DTE va dentro de <DTE> (despuÃ©s de <Documento>)
     // En Libro va al final del Root <LibroCompraVenta>
     $dom->documentElement->appendChild($sigNode);
 
-    // CRÍTICO: canonicalizar el <SignedInfo> YA INSERTADO en su contexto real.
+    // CRÃTICO: canonicalizar el <SignedInfo> YA INSERTADO en su contexto real.
     // La C14N inclusiva hereda los namespaces de los ancestros (p.ej. xmlns:xsi
-    // declarado en <EnvioDTE>). Firmar el SignedInfo aislado producía bytes
+    // declarado en <EnvioDTE>). Firmar el SignedInfo aislado producÃ­a bytes
     // distintos a los que recanonicaliza el SII -> RFR. Firmando en contexto,
-    // los bytes coinciden exactamente con la validación del SII.
+    // los bytes coinciden exactamente con la validaciÃ³n del SII.
     $xpSig = new DOMXPath($dom);
     $xpSig->registerNamespace('dsig', $nsSig);
     $siInCtx = $xpSig->query(".//dsig:SignedInfo", $sigNode)->item(0);
@@ -3064,9 +2979,9 @@ function aplicarDescuentoGlobalMontos(array $montos, $descuentoGlobal): array {
     return $montos;
 }
 
-// ────────────────────────────────────────────────────────────
-// SOBRE DE ENVÍO (EnvioDTE)
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// SOBRE DE ENVÃO (EnvioDTE)
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function siiFormatDate(string $date, string $fallback = '2026-06-04'): string {
     $date = trim($date);
     if ($date === '') return $fallback;
@@ -3106,7 +3021,7 @@ function buildEnvioDTE(string $dteXml, int $tipo, int $folio, string $certPem): 
     }
     $tmst       = date('Y-m-d\TH:i:s');
 
-    // Remover la declaración XML del DTE interior para no invalidar el sobre
+    // Remover la declaraciÃ³n XML del DTE interior para no invalidar el sobre
     $dteXmlClean = preg_replace('/<\?xml.*?\?>\s*/i', '', $dteXml);
 
     $isBoleta = in_array($tipo, [39, 41], true);
@@ -3141,11 +3056,11 @@ XML;
 }
 
 /**
- * Arma UN sobre EnvioBOLETA con MÚLTIPLES boletas firmadas (Set de certificación).
- * El SII exige que el set de prueba de boletas se envíe en un solo archivo (sobre).
+ * Arma UN sobre EnvioBOLETA con MÃšLTIPLES boletas firmadas (Set de certificaciÃ³n).
+ * El SII exige que el set de prueba de boletas se envÃ­e en un solo archivo (sobre).
  *
  * @param array  $dtesXml  Lista de XML de <Documento> ya firmados (tipo 39/41).
- * @param string $certPem  Certificado para extraer el RUT que envía.
+ * @param string $certPem  Certificado para extraer el RUT que envÃ­a.
  */
 /**
  * Arma UN sobre EnvioDTE con multiples DTE firmados, usado para reportar el
@@ -3222,7 +3137,7 @@ function buildEnvioBoletaSet(array $dtesXml, string $certPem): string {
     }
     $tmst = date('Y-m-d\TH:i:s');
 
-    // Limpiar declaración XML de cada documento y concatenar
+    // Limpiar declaraciÃ³n XML de cada documento y concatenar
     $docs = '';
     foreach ($dtesXml as $d) {
         $docs .= preg_replace('/<\?xml.*?\?>\s*/i', '', $d) . "\n";
@@ -3253,9 +3168,9 @@ $docs</SetDTE>
 XML;
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // RCOF (Resumen de Consumo de Folios para Boletas)
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function generateRCOF(array $data): array {
     $fechaEmision = $data['fecha'] ?? date('Y-m-d');
     $resumenes    = $data['resumenes'] ?? []; // Ej: [['tipo' => 39, 'neto' => 1000, 'iva' => 190, 'total' => 1190, 'emitidos' => 5, 'anulados' => 0, 'utilizados' => 5, 'rango_desde' => 1, 'rango_hasta' => 5]]
@@ -3285,7 +3200,7 @@ function generateRCOF(array $data): array {
         $xmlResumen .= "<Resumen>\n"
             . "  <TipoDocumento>$tipo</TipoDocumento>\n";
 
-        // Totales monetarios (solo cuando hay emisión con monto)
+        // Totales monetarios (solo cuando hay emisiÃ³n con monto)
         if ($emit > 0 && $total > 0) {
             $mntNeto = (int)($r['neto'] ?? 0);
             $mntIva  = (int)($r['iva']  ?? 0);
@@ -3355,7 +3270,7 @@ $xmlResumen</DocumentoConsumoFolios>
 XML;
 
     $xmlFirmado = signDTE($xmlRaw, $cert, $privKey, $idRcof);
-    // signDTE ya inserta el xmlns del namespace XMLDSig — no duplicarlo.
+    // signDTE ya inserta el xmlns del namespace XMLDSig â€” no duplicarlo.
 
     return [
         'ok'  => true,
@@ -3364,9 +3279,9 @@ XML;
     ];
 }
 
-// ────────────────────────────────────────────────────────────
-// RCOF DIARIO — Escaneo, envío y persistencia
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// RCOF DIARIO â€” Escaneo, envÃ­o y persistencia
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function rcofRegistryPath(): string {
     global $actualTmpDir;
     return rtrim($actualTmpDir, '/\\') . DIRECTORY_SEPARATOR . 'rcof_log.json';
@@ -3384,14 +3299,14 @@ function saveRCOFRegistry(array $reg): void {
 }
 
 /**
- * Escanea tmp/ y agrupa boletas (39/41) por fecha de emisión.
+ * Escanea tmp/ y agrupa boletas (39/41) por fecha de emisiÃ³n.
  * Por defecto incluye solo boletas con TrackID registrado en tracking.json
  * (es decir, recepcionadas por el SII). Pasar $soloConTrackId=false para
- * incluir todas las boletas físicamente generadas en disco.
+ * incluir todas las boletas fÃ­sicamente generadas en disco.
  */
 function listBoletasDelDia(string $fecha, bool $soloConTrackId = true): array {
     global $actualTmpDir;
-    // Tipos 39 y 41 (boletas) + tipo 61 (NC de boleta) para RCOF según ConsumoFolio_v10.xsd
+    // Tipos 39 y 41 (boletas) + tipo 61 (NC de boleta) para RCOF segÃºn ConsumoFolio_v10.xsd
     $pattern = rtrim($actualTmpDir, '/\\') . DIRECTORY_SEPARATOR . 'dte_T{39,41,61}F*.xml';
     $files = glob($pattern, GLOB_BRACE) ?: [];
 
@@ -3446,7 +3361,7 @@ function listBoletasDelDia(string $fecha, bool $soloConTrackId = true): array {
         $r['rango_hasta']= end($r['folios']) ?: 0;
     }
 
-    // Excluir tipo 61 del resumen si no hubo NCs de boleta ese día
+    // Excluir tipo 61 del resumen si no hubo NCs de boleta ese dÃ­a
     if (empty($resumen[61]['folios'])) {
         unset($resumen[61]);
     }
@@ -3454,12 +3369,12 @@ function listBoletasDelDia(string $fecha, bool $soloConTrackId = true): array {
     return array_values($resumen);
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // REGISTRO DE FOLIOS ANULADOS (para incluir en RCOF)
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Un folio CAF puede "quemarse" sin haber sido emitido: errores de
-// generación, sistema caído, etc. El SII exige reportarlos como anulados
+// generaciÃ³n, sistema caÃ­do, etc. El SII exige reportarlos como anulados
 // en el RCOF para mantener consistencia del rango utilizado.
 
 function foliosAnuladosPath(): string {
@@ -3481,15 +3396,15 @@ function saveFoliosAnulados(array $d): void {
 /**
  * Marca un folio como anulado. Idempotente.
  * Si el folio fue emitido al SII (TrackID OK), bloquea: anular requiere
- * emitir nota de crédito, no es lo mismo que anular el folio CAF.
+ * emitir nota de crÃ©dito, no es lo mismo que anular el folio CAF.
  */
 function anularFolio(int $tipo, int $folio, string $razon, ?string $fecha = null): array {
     if (strlen(trim($razon)) < 5) {
-        return ['ok' => false, 'error' => 'Razón debe tener al menos 5 caracteres'];
+        return ['ok' => false, 'error' => 'RazÃ³n debe tener al menos 5 caracteres'];
     }
 
     // Bloquear si ya fue enviado al SII (consultar tanto last_ok_trackId nuevo
-    // como trackId legacy para compatibilidad con tracking pre-migración)
+    // como trackId legacy para compatibilidad con tracking pre-migraciÃ³n)
     $tr = getDTETracking($tipo, $folio);
     $trackIdEfectivo = $tr['last_ok_trackId'] ?? $tr['trackId'] ?? null;
     if ($tr && !empty($trackIdEfectivo)) {
@@ -3497,7 +3412,7 @@ function anularFolio(int $tipo, int $folio, string $razon, ?string $fecha = null
             'ok' => false,
             'code' => 'FOLIO_YA_ENVIADO',
             'error' => "Folio T{$tipo}F{$folio} ya fue enviado al SII (TrackID {$trackIdEfectivo}). " .
-                       "No se puede anular el folio: emita una Nota de Crédito (61) para reversar el efecto tributario.",
+                       "No se puede anular el folio: emita una Nota de CrÃ©dito (61) para reversar el efecto tributario.",
         ];
     }
 
@@ -3528,8 +3443,8 @@ function listarFoliosAnulados(?int $tipo = null, ?string $fecha = null): array {
 }
 
 /**
- * Hook: inyectar folios anulados en el resumen del RCOF de un día.
- * Modifica el array de resúmenes que generaría submitDailyRCOF.
+ * Hook: inyectar folios anulados en el resumen del RCOF de un dÃ­a.
+ * Modifica el array de resÃºmenes que generarÃ­a submitDailyRCOF.
  */
 function aplicarFoliosAnuladosARCOF(array $resumenes, string $fecha): array {
     $anulados = listarFoliosAnulados(null, $fecha);
@@ -3554,26 +3469,29 @@ function aplicarFoliosAnuladosARCOF(array $resumenes, string $fecha): array {
     return $resumenes;
 }
 
-// ────────────────────────────────────────────────────────────
-// BACKUPS AUTOMÁTICOS — Tracking, registros y configuración
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// BACKUPS AUTOMÃTICOS â€” Tracking, registros y configuraciÃ³n
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
-// Genera snapshots zip de los archivos críticos para poder recuperar
-// el estado en caso de corrupción. NO toca archive/ (los DTEs ya están
-// inmutables, comprimirlos no aporta valor frente a la duplicación).
+// Genera snapshots zip de los archivos crÃ­ticos para poder recuperar
+// el estado en caso de corrupciÃ³n. NO toca archive/ (los DTEs ya estÃ¡n
+// inmutables, comprimirlos no aporta valor frente a la duplicaciÃ³n).
 
 function backupBaseDir(): string {
-    $d = __DIR__ . DIRECTORY_SEPARATOR . 'backups';
+    global $globalContext, $noCompanyDir;
+    $d = $globalContext
+        ? __DIR__ . DIRECTORY_SEPARATOR . 'backups' . DIRECTORY_SEPARATOR . $globalContext->getRut() . DIRECTORY_SEPARATOR . $globalContext->getAmbiente()
+        : $noCompanyDir . 'backups';
     if (!is_dir($d)) @mkdir($d, 0755, true);
     return $d;
 }
 
 /**
  * Crea un backup .zip con tracking, rcof_log, registry CAF, sii_logs, etc.
- * Mantiene los últimos N backups y borra los más viejos.
+ * Mantiene los Ãºltimos N backups y borra los mÃ¡s viejos.
  */
 function createBackup(int $keepLast = 14): array {
-    global $actualTmpDir;
+    global $actualTmpDir, $actualCafDir;
     $base = backupBaseDir();
     $stamp = date('Y-m-d_His');
 
@@ -3584,8 +3502,8 @@ function createBackup(int $keepLast = 14): array {
         'sii_transactions.ndjson' => $actualTmpDir . 'sii_transactions.ndjson',
         'retry_queue.json'        => $actualTmpDir . 'retry_queue.json',
         'archive_index.ndjson'    => archiveBaseDir() . DIRECTORY_SEPARATOR . 'index.ndjson',
-        'caf_registry.json'       => CAF_DIR . 'registry.json',
-        'history.json'            => CAF_DIR . 'history.json',
+        'caf_registry.json'       => $actualCafDir . 'registry.json',
+        'history.json'            => $actualCafDir . 'history.json',
     ];
 
     $manifest = [
@@ -3638,10 +3556,10 @@ function createBackup(int $keepLast = 14): array {
         $fmt = 'dir';
     }
 
-    // Rotación
+    // RotaciÃ³n
     $pattern = $useZip ? 'backup_*.zip' : 'backup_*';
     $existing = glob($base . DIRECTORY_SEPARATOR . $pattern) ?: [];
-    // Filtrar para no incluir el directorio recién creado en zip mode
+    // Filtrar para no incluir el directorio reciÃ©n creado en zip mode
     $existing = array_values(array_filter($existing, fn($p) => $useZip ? str_ends_with($p, '.zip') : is_dir($p)));
     sort($existing);
     $deleted = 0;
@@ -3660,7 +3578,7 @@ function createBackup(int $keepLast = 14): array {
     $finalSize = $useZip ? filesize($resultPath) : $size;
 
     saveSiiLog('createBackup',
-        "Backup $stamp ($fmt) con " . count($included) . " archivos (" . number_format($finalSize) . " bytes); rotación -$deleted",
+        "Backup $stamp ($fmt) con " . count($included) . " archivos (" . number_format($finalSize) . " bytes); rotaciÃ³n -$deleted",
         'SUCCESS');
 
     return [
@@ -3693,45 +3611,46 @@ function listBackups(): array {
     return $out;
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // SISTEMA DE ALERTAS PROACTIVAS
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Genera alertas sobre el estado operativo del sistema. Cada alerta tiene:
 //   - level: critical | warning | info
-//   - code: identificador único
-//   - title, body, action (qué hacer)
+//   - code: identificador Ãºnico
+//   - title, body, action (quÃ© hacer)
 
 function generateAlerts(): array {
+    global $actualCertPfx;
     $alerts = [];
     $now = time();
 
     // 1. Certificado por vencer
     try {
-        $confFile = dirname(CERT_PFX) . '/cert.conf';
-        if (file_exists(CERT_PFX) && file_exists($confFile)) {
+        $confFile = dirname($actualCertPfx) . '/cert.conf';
+        if (file_exists($actualCertPfx) && file_exists($confFile)) {
             $conf = json_decode(file_get_contents($confFile), true);
             if (!empty($conf['pass'])) {
                 $certs = [];
-                if (openssl_pkcs12_read(file_get_contents(CERT_PFX), $certs, $conf['pass'])) {
+                if (openssl_pkcs12_read(file_get_contents($actualCertPfx), $certs, $conf['pass'])) {
                     $parsed = openssl_x509_parse($certs['cert']);
                     $dias = (int)(($parsed['validTo_time_t'] - $now) / 86400);
-                    $cn = $parsed['subject']['CN'] ?? '—';
+                    $cn = $parsed['subject']['CN'] ?? 'â€”';
                     if ($dias <= 0) {
                         $alerts[] = ['level'=>'critical','code'=>'CERT_EXPIRED',
                             'title'=>'Certificado digital VENCIDO',
-                            'body'=>"El cert de $cn venció hace " . abs($dias) . " días.",
+                            'body'=>"El cert de $cn venciÃ³ hace " . abs($dias) . " dÃ­as.",
                             'action'=>'Renovar en E-Certchile/E-Sign y subir el nuevo .pfx en setup.php'];
                     } elseif ($dias < 7) {
                         $alerts[] = ['level'=>'critical','code'=>'CERT_NEAR_EXPIRY',
-                            'title'=>"Certificado vence en $dias días",
-                            'body'=>"$cn — fecha vencimiento " . date('Y-m-d', $parsed['validTo_time_t']),
+                            'title'=>"Certificado vence en $dias dÃ­as",
+                            'body'=>"$cn â€” fecha vencimiento " . date('Y-m-d', $parsed['validTo_time_t']),
                             'action'=>'Renovar AHORA en E-Certchile/E-Sign'];
                     } elseif ($dias < 30) {
                         $alerts[] = ['level'=>'warning','code'=>'CERT_EXPIRING',
-                            'title'=>"Certificado vence en $dias días",
-                            'body'=>"$cn — coordinar renovación antes del vencimiento",
-                            'action'=>'Iniciar trámite de renovación con la AC'];
+                            'title'=>"Certificado vence en $dias dÃ­as",
+                            'body'=>"$cn â€” coordinar renovaciÃ³n antes del vencimiento",
+                            'action'=>'Iniciar trÃ¡mite de renovaciÃ³n con la AC'];
                     }
                 }
             }
@@ -3745,7 +3664,7 @@ function generateAlerts(): array {
         $alerts[] = ['level'=>'warning','code'=>'CERT_CHECK_FAILED','title'=>'No se pudo verificar certificado','body'=>$e->getMessage(),'action'=>'Revisar setup.php'];
     }
 
-    // 2. CAFs faltantes o agotándose
+    // 2. CAFs faltantes o agotÃ¡ndose
     try {
         $cafs = getCAFStatus();
         foreach ($cafs['cafs'] ?? [] as $c) {
@@ -3753,7 +3672,7 @@ function generateAlerts(): array {
                 $alerts[] = ['level'=>'critical','code'=>'CAF_DEPLETED',
                     'title'=>"CAF tipo {$c['tipo']} ({$c['nombre']}) AGOTADO",
                     'body'=>"Sin folios disponibles para emitir.",
-                    'action'=>"Solicitar nuevo rango en sii.cl → Administración de Folios"];
+                    'action'=>"Solicitar nuevo rango en sii.cl â†’ AdministraciÃ³n de Folios"];
             } elseif ($c['estado'] === 'CRITICO') {
                 $alerts[] = ['level'=>'critical','code'=>'CAF_CRITICAL',
                     'title'=>"CAF tipo {$c['tipo']} con solo {$c['restantes']} folios",
@@ -3786,14 +3705,14 @@ function generateAlerts(): array {
             if (($r['emitidos'] ?? 0) > 0) { $haboBoletasAyer = true; break; }
         }
     }
-    // El RVD se envía al día siguiente. Si ya pasaron las 12:00 hoy y no se envió el de ayer, alertar.
+    // El RVD se envÃ­a al dÃ­a siguiente. Si ya pasaron las 12:00 hoy y no se enviÃ³ el de ayer, alertar.
     $deadline = strtotime("$today 12:00:00");
     if ($now > $deadline) {
         $rcofAyer = $rcofLog[$yesterday] ?? null;
         if (!$rcofAyer || empty($rcofAyer['ok'])) {
             $alerts[] = ['level'=>'critical','code'=>'RCOF_MISSING',
                 'title'=>"RCOF del $yesterday no enviado al SII",
-                'body'=>"Vencido el plazo (12:00 del día siguiente). El SII puede multar." . ($haboBoletasAyer ? " Hubo boletas emitidas." : " (Sin boletas — RVD de cero también es obligatorio)."),
+                'body'=>"Vencido el plazo (12:00 del dÃ­a siguiente). El SII puede multar." . ($haboBoletasAyer ? " Hubo boletas emitidas." : " (Sin boletas â€” RVD de cero tambiÃ©n es obligatorio)."),
                 'action'=>'Ejecutar rcof_cron.bat o ?action=rcof_submit&fecha=' . $yesterday . '&force=1'];
         }
     }
@@ -3803,7 +3722,7 @@ function generateAlerts(): array {
         $info = json_decode(@file_get_contents(contingencyFlagPath()) ?: '{}', true);
         $alerts[] = ['level'=>'critical','code'=>'CONTINGENCY_ON',
             'title'=>'Modo contingencia ACTIVO',
-            'body'=>'El sistema detectó fallos repetidos con el SII. Razón: ' . ($info['reason'] ?? 'auto'),
+            'body'=>'El sistema detectÃ³ fallos repetidos con el SII. RazÃ³n: ' . ($info['reason'] ?? 'auto'),
             'action'=>'Revisar healthcheck SII (?action=health_sii) y procesar cola (retry_cron.bat)'];
     }
 
@@ -3814,8 +3733,8 @@ function generateAlerts(): array {
             $level = count($queue) >= 5 ? 'critical' : 'warning';
             $alerts[] = ['level'=>$level,'code'=>'RETRY_QUEUE_NONEMPTY',
                 'title'=>'Cola de reintentos con ' . count($queue) . ' DTE(s)',
-                'body'=>'Hay envíos al SII pendientes de reintento.',
-                'action'=>'Verificar retry_cron.bat esté programado, o ejecutar manualmente ?action=retry_process'];
+                'body'=>'Hay envÃ­os al SII pendientes de reintento.',
+                'action'=>'Verificar retry_cron.bat estÃ© programado, o ejecutar manualmente ?action=retry_process'];
         }
     }
 
@@ -3859,19 +3778,19 @@ function generateAlerts(): array {
     if (!file_exists($envioBoletaXsd)) {
         $alerts[] = ['level'=>'info','code'=>'XSD_ENVIO_BOLETA_MISSING',
             'title'=>'XSD EnvioBOLETA_v11 no disponible localmente',
-            'body'=>'La validación XSD local del sobre boleta no se aplica (el SII valida server-side).',
+            'body'=>'La validaciÃ³n XSD local del sobre boleta no se aplica (el SII valida server-side).',
             'action'=>'Bajar Schemas.zip del portal sii.cl tras inscribirse y extraer EnvioBOLETA_v11.xsd a schemas/'];
     }
 
     return $alerts;
 }
 
-// ────────────────────────────────────────────────────────────
-// NOTAS DE CRÉDITO (tipo 61) PARA ANULAR/CORREGIR BOLETAS
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// NOTAS DE CRÃ‰DITO (tipo 61) PARA ANULAR/CORREGIR BOLETAS
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
-// Las boletas (39/41) no se pueden anular directamente. La única forma de
-// reversar el efecto tributario es emitir una Nota de Crédito Electrónica
+// Las boletas (39/41) no se pueden anular directamente. La Ãºnica forma de
+// reversar el efecto tributario es emitir una Nota de CrÃ©dito ElectrÃ³nica
 // que la referencie con CodRef={1:anula, 2:corrige texto, 3:corrige montos}.
 
 /**
@@ -3902,19 +3821,19 @@ function loadStoredDTEData(int $tipo, int $folio): ?array {
         'neto'     => (int)($get('/<MntNeto>(\d+)<\/MntNeto>/')      ?? 0),
         'iva'      => (int)($get('/<IVA>(\d+)<\/IVA>/')              ?? 0),
         'total'    => (int)($get('/<MntTotal>(\d+)<\/MntTotal>/')    ?? 0),
-        'items'    => [],  // (parseo simplificado: copiamos descripción del primer item)
+        'items'    => [],  // (parseo simplificado: copiamos descripciÃ³n del primer item)
     ];
 }
 
 /**
- * Emite una Nota de Crédito Electrónica (tipo 61) que referencia una boleta
- * previamente emitida. Valida que la boleta exista y la NC se firma + envía.
+ * Emite una Nota de CrÃ©dito ElectrÃ³nica (tipo 61) que referencia una boleta
+ * previamente emitida. Valida que la boleta exista y la NC se firma + envÃ­a.
  *
  * @param int    $tipoOrig   Tipo original (39 o 41)
  * @param int    $folioOrig  Folio de la boleta a anular/corregir
  * @param int    $codRef     1=Anula, 2=Corrige texto, 3=Corrige montos
- * @param string $razon      Glosa de la razón
- * @param array  $opts       ['items'=>[…], 'fecha'=>'YYYY-MM-DD', 'dry_run'=>bool]
+ * @param string $razon      Glosa de la razÃ³n
+ * @param array  $opts       ['items'=>[â€¦], 'fecha'=>'YYYY-MM-DD', 'dry_run'=>bool]
  */
 function emitirNotaCreditoSobreBoleta(int $tipoOrig, int $folioOrig, int $codRef, string $razon, array $opts = []): array {
     if (!in_array($tipoOrig, [39, 41], true)) {
@@ -3924,7 +3843,7 @@ function emitirNotaCreditoSobreBoleta(int $tipoOrig, int $folioOrig, int $codRef
         return ['ok' => false, 'error' => 'CodRef debe ser 1 (anula), 2 (corrige texto) o 3 (corrige montos)'];
     }
     if (strlen(trim($razon)) < 5) {
-        return ['ok' => false, 'error' => 'La razón debe tener al menos 5 caracteres'];
+        return ['ok' => false, 'error' => 'La razÃ³n debe tener al menos 5 caracteres'];
     }
 
     $orig = loadStoredDTEData($tipoOrig, $folioOrig);
@@ -3937,11 +3856,11 @@ function emitirNotaCreditoSobreBoleta(int $tipoOrig, int $folioOrig, int $codRef
     $items = $opts['items'] ?? null;
     if (!$items) {
         if ($codRef === 2) {
-            $items = [['nombre' => 'Corrección de texto', 'cantidad' => 1, 'precio' => 0]];
+            $items = [['nombre' => 'CorrecciÃ³n de texto', 'cantidad' => 1, 'precio' => 0]];
         } else {
             // Reversar el total bruto de la boleta original
             $items = [[
-                'nombre' => "Anulación T{$tipoOrig}F{$folioOrig}",
+                'nombre' => "AnulaciÃ³n T{$tipoOrig}F{$folioOrig}",
                 'cantidad' => 1,
                 'precio' => $orig['total'],
             ]];
@@ -3968,14 +3887,14 @@ function emitirNotaCreditoSobreBoleta(int $tipoOrig, int $folioOrig, int $codRef
     if (!empty($opts['dry_run'])) {
         return [
             'ok' => true, 'dry_run' => true,
-            'payload' => $payload, 'mensaje' => "[DRY-RUN] NC sobre T{$tipoOrig}F{$folioOrig} preparada — no se firmó ni envió.",
+            'payload' => $payload, 'mensaje' => "[DRY-RUN] NC sobre T{$tipoOrig}F{$folioOrig} preparada â€” no se firmÃ³ ni enviÃ³.",
         ];
     }
 
     // Generar + enviar
     $gen = generateDTE($payload);
     if (empty($gen['ok'])) {
-        return ['ok' => false, 'error' => 'Falló generación NC: ' . ($gen['error'] ?? 'sin detalle'), 'gen' => $gen];
+        return ['ok' => false, 'error' => 'FallÃ³ generaciÃ³n NC: ' . ($gen['error'] ?? 'sin detalle'), 'gen' => $gen];
     }
     $send = sendDTE(['xml' => $gen['xml'], 'tipo' => 61, 'folio' => $gen['folio']]);
     $send['nc_folio']       = $gen['folio'];
@@ -3986,17 +3905,17 @@ function emitirNotaCreditoSobreBoleta(int $tipoOrig, int $folioOrig, int $codRef
     return $send;
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // COLA DE REINTENTOS + MODO CONTINGENCIA SII
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
-// Cuando un envío al SII falla por error transitorio (timeout, 5xx,
+// Cuando un envÃ­o al SII falla por error transitorio (timeout, 5xx,
 // "Acceso Denegado from client"), el DTE se encola para reintento con
 // backoff exponencial. Si la cola acumula muchos fallos seguidos, el
 // sistema entra en MODO CONTINGENCIA: las nuevas emisiones se firman
-// y archivan localmente, marcadas como "pendientes upload" — el flujo
-// sigue operando aunque el SII esté caído. Al volver el SII (vía
-// healthcheck), procesa los pendientes automáticamente.
+// y archivan localmente, marcadas como "pendientes upload" â€” el flujo
+// sigue operando aunque el SII estÃ© caÃ­do. Al volver el SII (vÃ­a
+// healthcheck), procesa los pendientes automÃ¡ticamente.
 
 function retryQueuePath(): string {
     global $actualTmpDir;
@@ -4020,8 +3939,8 @@ function saveRetryQueue(array $q): void {
 }
 
 /**
- * Backoff exponencial en segundos según número de intentos previos.
- * 0→60s, 1→300s (5m), 2→900s (15m), 3→3600s (1h), 4→21600s (6h)
+ * Backoff exponencial en segundos segÃºn nÃºmero de intentos previos.
+ * 0â†’60s, 1â†’300s (5m), 2â†’900s (15m), 3â†’3600s (1h), 4â†’21600s (6h)
  */
 function retryBackoffSeconds(int $intentos): int {
     $tabla = [60, 300, 900, 3600, 21600];
@@ -4029,8 +3948,8 @@ function retryBackoffSeconds(int $intentos): int {
 }
 
 /**
- * Encola un DTE para reintento automático tras fallo transitorio.
- * Errores NO encolables (definitivos): rechazo de schema, firma inválida, etc.
+ * Encola un DTE para reintento automÃ¡tico tras fallo transitorio.
+ * Errores NO encolables (definitivos): rechazo de schema, firma invÃ¡lida, etc.
  */
 function enqueueRetry(int $tipo, int $folio, string $errorMsg, int $httpCode = 0): array {
     $q = loadRetryQueue();
@@ -4067,7 +3986,7 @@ function isErrorTransitorio(int $httpCode, string $errorMsg): bool {
     foreach ($definitivos as $kw) {
         if (stripos($errorMsg, $kw) !== false) return false;
     }
-    // Códigos HTTP transitorios
+    // CÃ³digos HTTP transitorios
     if ($httpCode >= 500 && $httpCode < 600) return true;
     if ($httpCode === 0)   return true;  // timeout/red
     if ($httpCode === 429) return true;  // rate limit
@@ -4077,15 +3996,15 @@ function isErrorTransitorio(int $httpCode, string $errorMsg): bool {
 }
 
 /**
- * MODO CONTINGENCIA: activa cuando hay N o más fallos consecutivos del SII
- * en un período corto, o cuando el healthcheck reporta degradación crítica.
+ * MODO CONTINGENCIA: activa cuando hay N o mÃ¡s fallos consecutivos del SII
+ * en un perÃ­odo corto, o cuando el healthcheck reporta degradaciÃ³n crÃ­tica.
  */
 function isInContingencyMode(): bool {
     $f = contingencyFlagPath();
     if (!file_exists($f)) return false;
     $info = json_decode(file_get_contents($f), true);
     if (!is_array($info)) return false;
-    // Auto-desactivar después de 24h sin renovación
+    // Auto-desactivar despuÃ©s de 24h sin renovaciÃ³n
     if (isset($info['ts']) && (time() - strtotime($info['ts'])) > 86400) {
         @unlink($f);
         return false;
@@ -4108,7 +4027,7 @@ function setContingencyMode(bool $on, string $reason = ''): void {
 }
 
 /**
- * Decide automáticamente si entrar/salir del modo contingencia según
+ * Decide automÃ¡ticamente si entrar/salir del modo contingencia segÃºn
  * el healthcheck del SII y la cola de reintentos.
  */
 function autoToggleContingency(): array {
@@ -4117,9 +4036,9 @@ function autoToggleContingency(): array {
     $totalFails = 0;
     foreach ($queue as $e) $totalFails += (int)($e['intentos'] ?? 0);
 
-    // Activar si: healthcheck no OK + 3 o más fallos en cola, o 10+ fallos
+    // Activar si: healthcheck no OK + 3 o mÃ¡s fallos en cola, o 10+ fallos
     $shouldActivate = (!$health['ok'] && $totalFails >= 3) || $totalFails >= 10;
-    // Desactivar si: healthcheck OK + cola vacía (o solo con backoff largo)
+    // Desactivar si: healthcheck OK + cola vacÃ­a (o solo con backoff largo)
     $shouldDeactivate = $health['ok'] && count($queue) === 0;
 
     $currentlyOn = isInContingencyMode();
@@ -4129,13 +4048,13 @@ function autoToggleContingency(): array {
     }
     if ($currentlyOn && $shouldDeactivate) {
         setContingencyMode(false);
-        return ['action' => 'DEACTIVATED', 'reason' => 'SII operativo y cola vacía'];
+        return ['action' => 'DEACTIVATED', 'reason' => 'SII operativo y cola vacÃ­a'];
     }
     return ['action' => 'UNCHANGED', 'contingency' => $currentlyOn];
 }
 
 /**
- * Procesa la cola: reintenta los DTEs cuya hora de next_retry_at ya pasó.
+ * Procesa la cola: reintenta los DTEs cuya hora de next_retry_at ya pasÃ³.
  */
 function processRetryQueue(int $maxPerRun = 20): array {
     $queue = loadRetryQueue();
@@ -4146,13 +4065,13 @@ function processRetryQueue(int $maxPerRun = 20): array {
     foreach ($queue as $key => $entry) {
         if ($report['processed'] >= $maxPerRun) break;
         $nextTs = strtotime($entry['next_retry_at'] ?? '1970-01-01');
-        if ($nextTs > $now) continue;  // aún no toca
+        if ($nextTs > $now) continue;  // aÃºn no toca
 
-        // Dropear si superó el máximo de intentos
+        // Dropear si superÃ³ el mÃ¡ximo de intentos
         if (($entry['intentos'] ?? 0) >= $maxIntentos) {
             dequeueRetry((int)$entry['tipo'], (int)$entry['folio']);
             $report['dropped']++;
-            $report['results'][] = ['doc' => $key, 'result' => 'DROPPED', 'razon' => "Superó $maxIntentos intentos"];
+            $report['results'][] = ['doc' => $key, 'result' => 'DROPPED', 'razon' => "SuperÃ³ $maxIntentos intentos"];
             saveSiiLog('processRetryQueue', "$key drop tras {$entry['intentos']} intentos", 'ERROR');
             continue;
         }
@@ -4182,16 +4101,16 @@ function processRetryQueue(int $maxPerRun = 20): array {
     return $report;
 }
 
-// ────────────────────────────────────────────────────────────
-// POLLER DE ESTADO DTE — Reconsulta SII hasta llegar a estado final
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// POLLER DE ESTADO DTE â€” Reconsulta SII hasta llegar a estado final
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
-// Estados intermedios del SII: REC, EPR, SOK, CRT (envío recibido, en proceso).
+// Estados intermedios del SII: REC, EPR, SOK, CRT (envÃ­o recibido, en proceso).
 // Estados finales: DOK (datos coinciden), DNK (no coinciden), FAU, FNA, FAN,
 //                  RSC (rechazado por schema), RFR (rechazado firma), RCT.
 
 /**
- * Códigos del SII que NO requieren reconsultar (estado terminal).
+ * CÃ³digos del SII que NO requieren reconsultar (estado terminal).
  */
 function siiEstadoEsTerminal(?string $estado): bool {
     $finales = ['DOK', 'DNK', 'FAU', 'FNA', 'FAN', 'RSC', 'RFR', 'RCT', 'EMP'];
@@ -4200,7 +4119,7 @@ function siiEstadoEsTerminal(?string $estado): bool {
 
 /**
  * Recorre tracking.json y reconsulta el estado de DTEs no terminales.
- * @param int $maxPerRun Máx DTEs a procesar por ejecución (evita bombardear SII).
+ * @param int $maxPerRun MÃ¡x DTEs a procesar por ejecuciÃ³n (evita bombardear SII).
  * @return array Reporte de cambios.
  */
 function pollEstadoDTEs(int $maxPerRun = 50): array {
@@ -4214,7 +4133,7 @@ function pollEstadoDTEs(int $maxPerRun = 50): array {
     $report = ['scanned' => 0, 'skipped_final' => 0, 'updated' => 0, 'unchanged' => 0, 'errors' => 0, 'changes' => []];
     $processed = 0;
 
-    // Dos certificados: boletas (Cristina) y DTE SOAP/guías (David).
+    // Dos certificados: boletas (Cristina) y DTE SOAP/guÃ­as (David).
     // Si no hay cert DTE separado, ambos resuelven al mismo (sin romper nada).
     [$certBol, $keyBol] = loadCertificate(39);
     [$certSoap, $keySoap] = loadCertificate(52);
@@ -4232,17 +4151,17 @@ function pollEstadoDTEs(int $maxPerRun = 50): array {
 
         if (!$tipo || !$folio || !$trackId) continue;
 
-        // Skip si ya está en estado terminal
+        // Skip si ya estÃ¡ en estado terminal
         if (siiEstadoEsTerminal($estadoActual)) {
             $report['skipped_final']++;
             continue;
         }
 
-        // Backoff: solo poll si pasaron al menos N segundos desde el último poll
+        // Backoff: solo poll si pasaron al menos N segundos desde el Ãºltimo poll
         // (5 min recientemente, 1 hora si ya hicimos varios polls)
         $polls = (int)($entry['polls'] ?? 0);
         $lastPoll = $entry['last_poll_ts'] ?? null;
-        $minInterval = $polls < 3 ? 300 : ($polls < 10 ? 3600 : 21600); // 5m → 1h → 6h
+        $minInterval = $polls < 3 ? 300 : ($polls < 10 ? 3600 : 21600); // 5m â†’ 1h â†’ 6h
         if ($lastPoll && (time() - strtotime($lastPoll)) < $minInterval) {
             continue;
         }
@@ -4253,7 +4172,7 @@ function pollEstadoDTEs(int $maxPerRun = 50): array {
         try {
             if ($esBoleta) {
                 $tokenBoletaRest = $tokenBoletaRest ?: getBoletaRestToken($certBol, $keyBol);
-                // Para boletas, consultar por folio (más confiable según diagnóstico previo)
+                // Para boletas, consultar por folio (mÃ¡s confiable segÃºn diagnÃ³stico previo)
                 // Necesitamos rutReceptor + fecha + monto del XML almacenado
                 $xmlFile = $actualTmpDir . "dte_T{$tipo}F{$folio}.xml";
                 $rutRecep = '66666666-6'; $fecha = date('Y-m-d'); $monto = 0;
@@ -4283,11 +4202,11 @@ function pollEstadoDTEs(int $maxPerRun = 50): array {
                 $report['updated']++;
                 $report['changes'][] = [
                     'doc'    => $key,
-                    'antes'  => $estadoActual ?: '(vacío)',
+                    'antes'  => $estadoActual ?: '(vacÃ­o)',
                     'despues'=> $estadoNuevo,
                     'glosa'  => $res['glosa'] ?? '',
                 ];
-                saveSiiLog('pollEstadoDTEs', "$key: $estadoActual → $estadoNuevo ({$res['glosa']})", siiEstadoEsTerminal($estadoNuevo) ? 'SUCCESS' : 'INFO');
+                saveSiiLog('pollEstadoDTEs', "$key: $estadoActual â†’ $estadoNuevo ({$res['glosa']})", siiEstadoEsTerminal($estadoNuevo) ? 'SUCCESS' : 'INFO');
             } else {
                 $report['unchanged']++;
             }
@@ -4302,18 +4221,21 @@ function pollEstadoDTEs(int $maxPerRun = 50): array {
     return $report;
 }
 
-// ────────────────────────────────────────────────────────────
-// ARCHIVO LEGAL — Retención de DTEs por 6 años (Art. 17 CT + Res. 74)
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ARCHIVO LEGAL â€” RetenciÃ³n de DTEs por 6 aÃ±os (Art. 17 CT + Res. 74)
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Estructura: archive/YYYY/MM/T{tipo}/T{tipo}F{folio}.xml + .meta.json
-// Índice:     archive/index.ndjson (append-only, una línea por DTE archivado)
+// Ãndice:     archive/index.ndjson (append-only, una lÃ­nea por DTE archivado)
 //
-// Política de retención: 6 años desde fecha de emisión (FchEmis del DTE).
-// El sistema NUNCA elimina automáticamente XMLs que estén dentro de ese rango.
+// PolÃ­tica de retenciÃ³n: 6 aÃ±os desde fecha de emisiÃ³n (FchEmis del DTE).
+// El sistema NUNCA elimina automÃ¡ticamente XMLs que estÃ©n dentro de ese rango.
 
 function archiveBaseDir(): string {
-    return __DIR__ . DIRECTORY_SEPARATOR . 'archive';
+    global $globalContext, $noCompanyDir;
+    return $globalContext
+        ? __DIR__ . DIRECTORY_SEPARATOR . 'archive' . DIRECTORY_SEPARATOR . $globalContext->getRut() . DIRECTORY_SEPARATOR . $globalContext->getAmbiente()
+        : $noCompanyDir . 'archive';
 }
 
 function archiveDirFor(int $tipo, string $fchEmis): string {
@@ -4336,14 +4258,14 @@ function extractFchEmisFromXML(string $xml): ?string {
 }
 
 /**
- * Archiva un DTE en la estructura legal de 6 años.
- * Es idempotente: si ya está archivado, retorna 'already_archived'.
+ * Archiva un DTE en la estructura legal de 6 aÃ±os.
+ * Es idempotente: si ya estÃ¡ archivado, retorna 'already_archived'.
  *
  * @param int    $tipo
  * @param int    $folio
  * @param string $xml         XML firmado del DTE
  * @param array  $meta        ['trackId', 'sii_response', 'enviado_ts', etc.]
- * @return array Estado de la operación
+ * @return array Estado de la operaciÃ³n
  */
 function archiveDTE(int $tipo, int $folio, string $xml, array $meta = []): array {
     $fchEmis = $meta['fch_emis'] ?? extractFchEmisFromXML($xml);
@@ -4359,16 +4281,16 @@ function archiveDTE(int $tipo, int $folio, string $xml, array $meta = []): array
 
     $alreadyExists = file_exists($xmlFile);
 
-    // Hash del XML antes de archivar (auditoría: detectar futuras modificaciones del archivo)
+    // Hash del XML antes de archivar (auditorÃ­a: detectar futuras modificaciones del archivo)
     $hash = 'sha256:' . hash('sha256', $xml);
 
     if ($alreadyExists) {
         $prevHash = 'sha256:' . hash('sha256', file_get_contents($xmlFile));
         if ($prevHash !== $hash) {
-            // El XML existe pero es diferente — guardamos versión con timestamp para no perder evidencia
+            // El XML existe pero es diferente â€” guardamos versiÃ³n con timestamp para no perder evidencia
             $xmlFile = $dir . DIRECTORY_SEPARATOR . "T{$tipo}F{$folio}_v" . date('YmdHis') . ".xml";
         } else {
-            // Idempotente: ya archivado idéntico, solo actualizamos meta si hay datos nuevos
+            // Idempotente: ya archivado idÃ©ntico, solo actualizamos meta si hay datos nuevos
             file_put_contents($metaFile, json_encode(array_merge(
                 json_decode(file_get_contents($metaFile), true) ?: [],
                 $meta,
@@ -4387,7 +4309,7 @@ function archiveDTE(int $tipo, int $folio, string $xml, array $meta = []): array
         'xml_hash'    => $hash,
     ], $meta), JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE));
 
-    // Append al índice NDJSON
+    // Append al Ã­ndice NDJSON
     $idx = [
         'ts'       => date('Y-m-d\TH:i:s'),
         'tipo'     => $tipo,
@@ -4404,7 +4326,7 @@ function archiveDTE(int $tipo, int $folio, string $xml, array $meta = []): array
 
 /**
  * Backfill: recorre tmp/ + tracking.json y archiva todos los DTEs ya enviados
- * que aún no estén en archive/. Útil para inicializar el archivo legal.
+ * que aÃºn no estÃ©n en archive/. Ãštil para inicializar el archivo legal.
  */
 function backfillArchive(): array {
     global $actualTmpDir;
@@ -4422,8 +4344,8 @@ function backfillArchive(): array {
         $key  = "T{$tipo}F{$folio}";
 
         $track = $tracking[$key] ?? null;
-        // Política: solo archivamos DTEs que tuvieron al menos un envío al SII (con TrackID).
-        // Los que están en tmp/ sin TrackID son "borradores" no oficiales.
+        // PolÃ­tica: solo archivamos DTEs que tuvieron al menos un envÃ­o al SII (con TrackID).
+        // Los que estÃ¡n en tmp/ sin TrackID son "borradores" no oficiales.
         if (!$track || empty($track['last_ok_trackId'] ?? $track['trackId'] ?? null)) {
             $report['skipped_no_track']++;
             continue;
@@ -4450,8 +4372,8 @@ function backfillArchive(): array {
 }
 
 /**
- * Estado del archivo legal: cuenta DTEs por año/mes/tipo, espacio usado,
- * y reporta XMLs no archivados que deberían estarlo (alerta de cumplimiento).
+ * Estado del archivo legal: cuenta DTEs por aÃ±o/mes/tipo, espacio usado,
+ * y reporta XMLs no archivados que deberÃ­an estarlo (alerta de cumplimiento).
  */
 function archiveStatus(): array {
     $base = archiveBaseDir();
@@ -4489,7 +4411,7 @@ function archiveStatus(): array {
         }
     }
 
-    // Detectar DTEs en tmp/ con TrackID que NO están archivados (gap de cumplimiento)
+    // Detectar DTEs en tmp/ con TrackID que NO estÃ¡n archivados (gap de cumplimiento)
     global $actualTmpDir;
     $tracking = file_exists($actualTmpDir . 'tracking.json')
         ? (json_decode(file_get_contents($actualTmpDir . 'tracking.json'), true) ?? [])
@@ -4513,13 +4435,13 @@ function archiveStatus(): array {
     return $stats;
 }
 
-// ────────────────────────────────────────────────────────────
-// SYNC DE XSDs OFICIALES DESDE EL SII (sin hardcoding, fuente única SII)
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// SYNC DE XSDs OFICIALES DESDE EL SII (sin hardcoding, fuente Ãºnica SII)
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * Lista de XSDs requeridos por el sistema con sus rutas candidatas en el SII.
- * Cada XSD tiene varios URLs posibles porque el SII tiene la documentación
+ * Cada XSD tiene varios URLs posibles porque el SII tiene la documentaciÃ³n
  * distribuida entre /factura_electronica, /boletas_electronicas y /bolcoreinternetui.
  */
 function siiSchemaCandidates(): array {
@@ -4658,8 +4580,8 @@ function countDTEInEnvio(string $envioXml): int {
 }
 
 /**
- * Valida que un sobre no exceda el máximo de DTEs declarado por el XSD oficial.
- * Si el XSD no está disponible, retorna skipped=true (modo permisivo).
+ * Valida que un sobre no exceda el mÃ¡ximo de DTEs declarado por el XSD oficial.
+ * Si el XSD no estÃ¡ disponible, retorna skipped=true (modo permisivo).
  */
 function validateEnvioBoletaLimit(string $envioXml): array {
     $count = countDTEInEnvio($envioXml);
@@ -4671,7 +4593,7 @@ function validateEnvioBoletaLimit(string $envioXml): array {
             'count'   => $count,
             'max'     => null,
             'skipped' => true,
-            'reason'  => 'EnvioBOLETA_v11.xsd no disponible localmente — ejecutar syncSIISchemas() para sincronizar desde SII.',
+            'reason'  => 'EnvioBOLETA_v11.xsd no disponible localmente â€” ejecutar syncSIISchemas() para sincronizar desde SII.',
         ];
     }
 
@@ -4686,19 +4608,19 @@ function validateEnvioBoletaLimit(string $envioXml): array {
     ];
 }
 
-// ────────────────────────────────────────────────────────────
-// VALIDACIÓN XSD LOCAL — atrapa errores antes de enviar al SII
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// VALIDACIÃ“N XSD LOCAL â€” atrapa errores antes de enviar al SII
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
- * Devuelve el archivo XSD apropiado según el root element del XML, o null si
+ * Devuelve el archivo XSD apropiado segÃºn el root element del XML, o null si
  * no hay esquema disponible localmente.
  */
 function detectXSDForXML(string $xml): ?string {
     $schemasDir = __DIR__ . DIRECTORY_SEPARATOR . 'schemas';
     if (!is_dir($schemasDir)) return null;
 
-    // Detectar root element ignorando declaración XML y namespaces
+    // Detectar root element ignorando declaraciÃ³n XML y namespaces
     if (!preg_match('/<\s*([A-Za-z_][\w:-]*)\b/', preg_replace('/<\?[^?]*\?>/', '', $xml), $m)) {
         return null;
     }
@@ -4724,7 +4646,7 @@ function detectXSDForXML(string $xml): ?string {
 }
 
 /**
- * Valida un XML contra su XSD oficial del SII (si está disponible localmente).
+ * Valida un XML contra su XSD oficial del SII (si estÃ¡ disponible localmente).
  * Retorna ['valid' => bool, 'errors' => [...], 'xsd' => path|null, 'skipped' => bool].
  */
 function validateXmlAgainstXSD(string $xml, ?string $xsdPath = null): array {
@@ -4737,7 +4659,7 @@ function validateXmlAgainstXSD(string $xml, ?string $xsdPath = null): array {
             'skipped' => true,
             'errors'  => [],
             'xsd'     => $xsdPath,
-            'reason'  => 'XSD no disponible localmente — validación omitida (el SII la hará server-side).',
+            'reason'  => 'XSD no disponible localmente â€” validaciÃ³n omitida (el SII la harÃ¡ server-side).',
         ];
     }
 
@@ -4774,7 +4696,7 @@ function validateXmlAgainstXSD(string $xml, ?string $xsdPath = null): array {
     libxml_clear_errors();
     libxml_use_internal_errors($prev);
 
-    // Si solo hubo errores internos del XSD (no del documento), tratamos como válido.
+    // Si solo hubo errores internos del XSD (no del documento), tratamos como vÃ¡lido.
     $docValid = empty($errs);
 
     return [
@@ -4787,8 +4709,8 @@ function validateXmlAgainstXSD(string $xml, ?string $xsdPath = null): array {
 }
 
 /**
- * Envía un RCOF al SII. Intenta primero el endpoint REST de boleta.electronica.consumo;
- * si falla, hace fallback al endpoint clásico SOAP/multipart de cgi_dte/UPL/DTEUpload.
+ * EnvÃ­a un RCOF al SII. Intenta primero el endpoint REST de boleta.electronica.consumo;
+ * si falla, hace fallback al endpoint clÃ¡sico SOAP/multipart de cgi_dte/UPL/DTEUpload.
  */
 function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array {
     global $actualTmpDir;
@@ -4802,8 +4724,8 @@ function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array
         global $globalContext;
         $rutCompanyFull = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
         [$rutCompany, $dvCompany] = array_pad(explode('-', $rutCompanyFull, 2), 2, '');
-        // RUT que envía = titular del certificado (no la empresa). Antes quedaba
-        // indefinido y el SII rechazaba el RCOF por rutSender vacío.
+        // RUT que envÃ­a = titular del certificado (no la empresa). Antes quedaba
+        // indefinido y el SII rechazaba el RCOF por rutSender vacÃ­o.
         $rutSenderFull = getRutCertificadoSeguro($cert);
         [$rutSender, $dvSender] = array_pad(explode('-', $rutSenderFull, 2), 2, '');
 
@@ -4813,8 +4735,8 @@ function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array
 
         $urlRest = siiEndpoints()['boleta_envio'];
 
-        // Algunos SDK indican que el RCOF también va al endpoint .envio (es un Documento ConsumoFolios);
-        // si el SII tiene un endpoint específico ?consumo lo probamos como segunda variante.
+        // Algunos SDK indican que el RCOF tambiÃ©n va al endpoint .envio (es un Documento ConsumoFolios);
+        // si el SII tiene un endpoint especÃ­fico ?consumo lo probamos como segunda variante.
         $endpoints = [
             $urlRest,
             str_replace('boleta.electronica.envio', 'boleta.electronica.consumo', $urlRest),
@@ -4882,11 +4804,11 @@ function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array
             }
             $tx['result'] = 'FAIL';
             saveSiiTransaction($tx);
-            saveSiiLog('sendRCOFToSII', "REST $url falló HTTP $http ({$ms}ms): " . substr(strip_tags((string)$resp), 0, 250), 'WARNING');
+            saveSiiLog('sendRCOFToSII', "REST $url fallÃ³ HTTP $http ({$ms}ms): " . substr(strip_tags((string)$resp), 0, 250), 'WARNING');
         }
 
         // -- Intento 2: SOAP/multipart cgi_dte/UPL/DTEUpload --
-        // (mismo flujo que cualquier DTE — el SII detecta que es ConsumoFolios por contenido)
+        // (mismo flujo que cualquier DTE â€” el SII detecta que es ConsumoFolios por contenido)
         $semilla = getSemilla();
         $tokSoap = getToken($semilla, $cert, $privKey);
         $t0 = microtime(true);
@@ -4921,8 +4843,8 @@ function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array
         $tx['result']   = 'FAIL';
         $tx['error_msg']= $resp['error'] ?? 'sin detalle';
         saveSiiTransaction($tx);
-        saveSiiLog('sendRCOFToSII', "RCOF SOAP también falló: " . ($resp['error'] ?? 'sin detalle'), 'ERROR');
-        return ['ok' => false, 'error' => $resp['error'] ?? 'RCOF no aceptado por ningún endpoint'];
+        saveSiiLog('sendRCOFToSII', "RCOF SOAP tambiÃ©n fallÃ³: " . ($resp['error'] ?? 'sin detalle'), 'ERROR');
+        return ['ok' => false, 'error' => $resp['error'] ?? 'RCOF no aceptado por ningÃºn endpoint'];
     } catch (Exception $e) {
         saveSiiTransaction([
             'op'        => 'sendRCOFToSII',
@@ -4931,14 +4853,14 @@ function sendRCOFToSII(string $xmlFirmado, string $fecha, int $secuencia): array
             'result'    => 'EXCEPTION',
             'error_msg' => $e->getMessage(),
         ]);
-        saveSiiLog('sendRCOFToSII', "Excepción: " . $e->getMessage(), 'ERROR');
+        saveSiiLog('sendRCOFToSII', "ExcepciÃ³n: " . $e->getMessage(), 'ERROR');
         return ['ok' => false, 'error' => $e->getMessage()];
     }
 }
 
 /**
- * Orquestador del RCOF diario: arma el resumen del día, lo firma, lo envía y persiste.
- * Idempotente: si ya se envió ese día con éxito, no reenvía (a menos que $force=true,
+ * Orquestador del RCOF diario: arma el resumen del dÃ­a, lo firma, lo envÃ­a y persiste.
+ * Idempotente: si ya se enviÃ³ ese dÃ­a con Ã©xito, no reenvÃ­a (a menos que $force=true,
  * en cuyo caso usa una secuencia incrementada).
  */
 function submitDailyRCOF(?string $fecha = null, bool $force = false): array {
@@ -4957,9 +4879,9 @@ function submitDailyRCOF(?string $fecha = null, bool $force = false): array {
     }
 
     $resumenes = listBoletasDelDia($fecha);
-    // Aplicar folios anulados del día al resumen (si los hay)
+    // Aplicar folios anulados del dÃ­a al resumen (si los hay)
     $resumenes = aplicarFoliosAnuladosARCOF($resumenes, $fecha);
-    // Filtrar tipos sin folios — pero también incluir tipos con anulados (aunque emitidos=0)
+    // Filtrar tipos sin folios â€” pero tambiÃ©n incluir tipos con anulados (aunque emitidos=0)
     $resumenesNoCero = array_values(array_filter($resumenes, fn($r) => ($r['emitidos'] > 0) || (($r['anulados'] ?? 0) > 0)));
 
     $secuencia = $prev ? ((int)($prev['secuencia'] ?? 1) + 1) : 1;
@@ -4977,10 +4899,10 @@ function submitDailyRCOF(?string $fecha = null, bool $force = false): array {
 
     $gen = generateRCOF($genArgs);
     if (empty($gen['ok'])) {
-        return ['ok' => false, 'error' => 'Falló generación RCOF', 'gen' => $gen];
+        return ['ok' => false, 'error' => 'FallÃ³ generaciÃ³n RCOF', 'gen' => $gen];
     }
 
-    // Validación XSD local del RCOF antes de enviar — atrapa errores como SCH-00001
+    // ValidaciÃ³n XSD local del RCOF antes de enviar â€” atrapa errores como SCH-00001
     $val = validateXmlAgainstXSD($gen['xml']);
     if (!$val['valid'] && !$val['skipped']) {
         saveSiiLog('submitDailyRCOF', "RCOF $fecha seq $secuencia rechazado por XSD local: " . implode('; ', $val['errors']), 'ERROR');
@@ -4988,9 +4910,9 @@ function submitDailyRCOF(?string $fecha = null, bool $force = false): array {
             'ok'        => false,
             'fecha'     => $fecha,
             'secuencia' => $secuencia,
-            'error'     => 'XSD inválido: ' . implode('; ', array_slice($val['errors'], 0, 5)),
+            'error'     => 'XSD invÃ¡lido: ' . implode('; ', array_slice($val['errors'], 0, 5)),
             'xsd_errors'=> $val['errors'],
-            'mensaje'   => 'RCOF no enviado: falló validación XSD local.',
+            'mensaje'   => 'RCOF no enviado: fallÃ³ validaciÃ³n XSD local.',
         ];
     }
 
@@ -5020,14 +4942,14 @@ function submitDailyRCOF(?string $fecha = null, bool $force = false): array {
         'resumen'   => $entry['resumen'],
         'error'     => $entry['error'],
         'mensaje'   => $entry['ok']
-            ? "RCOF $fecha seq $secuencia enviado vía {$entry['via']}. TrackID {$entry['trackId']}."
-            : "Falló envío RCOF $fecha seq $secuencia: " . ($entry['error'] ?? 'sin detalle'),
+            ? "RCOF $fecha seq $secuencia enviado vÃ­a {$entry['via']}. TrackID {$entry['trackId']}."
+            : "FallÃ³ envÃ­o RCOF $fecha seq $secuencia: " . ($entry['error'] ?? 'sin detalle'),
     ];
 }
 
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // LIBROS DE COMPRAS Y VENTAS (IECV)
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function generateLibro(array $data): array {
     $tipoLibro = strtoupper($data['tipoLibro'] ?? 'VENTA'); // VENTA, COMPRA, BOLETA, GUIA
     if ($tipoLibro === 'GUIA' || $tipoLibro === 'GUIAS') {
@@ -5058,7 +4980,7 @@ function generateLibro(array $data): array {
         $nroR = NRO_RESOL;
     }
 
-    // Calcular totales reales del período desde los detalles
+    // Calcular totales reales del perÃ­odo desde los detalles
     $totNeto  = 0; $totIVA = 0; $totExe = 0; $totTotal = 0;
     $xmlDetalles = '';
     $resumenPorTipo = [];
@@ -5090,7 +5012,7 @@ function generateLibro(array $data): array {
         $resumenPorTipo[$tipo]['TotMntIVA'] += $iva;
         $resumenPorTipo[$tipo]['TotMntTotal'] += $total;
 
-        // Campos especiales Libro de Compras: IVA uso común, no recuperable, retención
+        // Campos especiales Libro de Compras: IVA uso comÃºn, no recuperable, retenciÃ³n
         $codIvaNoRec   = isset($d['codIvaNoRec'])   ? (int)$d['codIvaNoRec']            : null;
         $mntIvaNoRec   = isset($d['mntIvaNoRec'])   ? (int)$d['mntIvaNoRec']            : null;
         $mntIvaUsoComun= isset($d['mntIvaUsoComun'])? (int)$d['mntIvaUsoComun']         : null;
@@ -5428,7 +5350,7 @@ XML;
 }
 
 /**
- * Genera, firma y envía un Libro de Compras/Ventas (IECV) al SII.
+ * Genera, firma y envÃ­a un Libro de Compras/Ventas (IECV) al SII.
  * Usa el mismo endpoint multipart que el EnvioDTE.
  */
 function sendLibro(array $data): array {
@@ -5441,7 +5363,7 @@ function sendLibro(array $data): array {
     if (!$val['valid'] && !$val['skipped']) {
         return [
             'ok'     => false,
-            'error'  => 'XSD inválido: ' . implode('; ', array_slice($val['errors'], 0, 5)),
+            'error'  => 'XSD invÃ¡lido: ' . implode('; ', array_slice($val['errors'], 0, 5)),
             'errors' => $val['errors'],
         ];
     }
@@ -5468,9 +5390,9 @@ function sendLibro(array $data): array {
     ];
 }
 
-// ────────────────────────────────────────────────────────────
-// COMUNICACIÓN SII
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// COMUNICACIÃ“N SII
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function respuestaEnvioGlosaEnvio(int $estado): string {
     return [
         0 => 'Envio recibido conforme.',
@@ -5881,15 +5803,15 @@ function siiHost(): string {
 
 /**
  * Centraliza todos los endpoints del SII. Permite override por env vars
- * (útil para pruebas/migración cuando el SII cambia hosts).
+ * (Ãºtil para pruebas/migraciÃ³n cuando el SII cambia hosts).
  *
  * Devuelve array con claves:
- *   soap_host        → maullin/palena (SOAP de DTE normal y auth clásica)
- *   boleta_auth      → apicert/api (semilla+token boletas REST)
- *   boleta_envio     → pangal/rahue (POST boleta.electronica.envio)
- *   boleta_consulta  → apicert/api (GET boleta.electronica/.../estado)
+ *   soap_host        â†’ maullin/palena (SOAP de DTE normal y auth clÃ¡sica)
+ *   boleta_auth      â†’ apicert/api (semilla+token boletas REST)
+ *   boleta_envio     â†’ pangal/rahue (POST boleta.electronica.envio)
+ *   boleta_consulta  â†’ apicert/api (GET boleta.electronica/.../estado)
  *
- * Cada uno puede sobreescribirse vía env: SII_SOAP_HOST, SII_BOLETA_AUTH, etc.
+ * Cada uno puede sobreescribirse vÃ­a env: SII_SOAP_HOST, SII_BOLETA_AUTH, etc.
  */
 function siiEndpoints(?string $ambiente = null): array {
     global $globalContext;
@@ -5927,8 +5849,8 @@ function siiEndpoints(?string $ambiente = null): array {
 function siiHealthcheck(): array {
     $ep = siiEndpoints();
     // method GET para todos (HEAD provoca 500 en algunos endpoints SII).
-    // expect: códigos que confirman que el endpoint EXISTE y responde,
-    // aunque la query sin parámetros sea inválida (200/4xx esperados).
+    // expect: cÃ³digos que confirman que el endpoint EXISTE y responde,
+    // aunque la query sin parÃ¡metros sea invÃ¡lida (200/4xx esperados).
     $checks = [
         ['name' => 'SOAP getSemilla',     'url' => "https://{$ep['soap_host']}/DTEWS/CrSeed.jws", 'expect' => [200, 405]],
         ['name' => 'REST boleta semilla', 'url' => "{$ep['boleta_auth']}/boleta.electronica.semilla", 'expect' => [200]],
@@ -6007,12 +5929,12 @@ function getSemilla(): string {
     }
     
     if (stripos($resp, '<!DOCTYPE') !== false || stripos($resp, '<html') !== false) {
-        saveSiiLog('getSemilla', 'SII respondió con HTML (posible error de autenticación o mantenimiento)', 'ERROR');
-        throw new Exception('El servidor SII respondió con una página HTML en lugar de XML. Verifique la conectividad con ' . (defined('HOST_CERTIF') ? HOST_CERTIF : 'maullin.sii.cl') . ' o reintente en unos momentos.');
+        saveSiiLog('getSemilla', 'SII respondiÃ³ con HTML (posible error de autenticaciÃ³n o mantenimiento)', 'ERROR');
+        throw new Exception('El servidor SII respondiÃ³ con una pÃ¡gina HTML en lugar de XML. Verifique la conectividad con ' . (defined('HOST_CERTIF') ? HOST_CERTIF : 'maullin.sii.cl') . ' o reintente en unos momentos.');
     }
     $snippet = htmlspecialchars(substr($resp, 0, 250));
     saveSiiLog('getSemilla', "Fallo al obtener semilla: " . $snippet, 'ERROR');
-    throw new Exception("No se encontró <SEMILLA> en respuesta. Recibido: $snippet");
+    throw new Exception("No se encontrÃ³ <SEMILLA> en respuesta. Recibido: $snippet");
 }
 
 function buildSignedTokenXml(string $semilla, string $certPem, $privKey): string {
@@ -6209,11 +6131,11 @@ function getToken(string $semilla, string $certPem, $privKey): string {
         
         $work = html_entity_decode($resp);
         if (preg_match('/TOKEN[^A-Z0-9]+([A-Z0-9]{6,20})/i', $work, $m)) {
-            saveSiiLog('getToken', "Token obtenido con éxito tras " . ($retry+1) . " intentos", 'SUCCESS');
+            saveSiiLog('getToken', "Token obtenido con Ã©xito tras " . ($retry+1) . " intentos", 'SUCCESS');
             return $m[1];
         }
 
-        // Si falló, intentar extraer el estado para el log
+        // Si fallÃ³, intentar extraer el estado para el log
         if (preg_match('/<ESTADO>([^<]+)<\/ESTADO>/i', $work, $m)) {
             $lastError = "Estado " . $m[1] . ": " . (preg_match('/<GLOSA>([^<]+)<\/GLOSA>/i', $work, $m2) ? $m2[1] : 'Sin glosa');
             saveSiiLog('getToken', "Reintento " . ($retry+1) . " fallido: " . $lastError, 'WARNING');
@@ -6226,12 +6148,12 @@ function getToken(string $semilla, string $certPem, $privKey): string {
     }
 
     file_put_contents(__DIR__ . '/dte_token_error.xml', $resp);
-    throw new Exception("Error SII en getToken tras $maxRetries reintentos. Último error: $lastError");
+    throw new Exception("Error SII en getToken tras $maxRetries reintentos. Ãšltimo error: $lastError");
 }
 
 function uploadDTE(string $envioDTE, string $token, ?string $certPem = null): array {
     $host = siiHost();
-    // Vía SOAP = guías/facturas (nunca boletas). Cert de David por defecto.
+    // VÃ­a SOAP = guÃ­as/facturas (nunca boletas). Cert de David por defecto.
     if ($certPem === null) {
         [$certPem] = loadCertificate($GLOBALS['SII_CERT_TIPO'] ?? 52);
     }
@@ -6321,10 +6243,10 @@ function uploadDTE(string $envioDTE, string $token, ?string $certPem = null): ar
         'ok'      => !empty($trackId),
         'trackId' => $trackId,
         'estado'  => $estado,
-        'error'   => "Error en envío: $errMsg",
+        'error'   => "Error en envÃ­o: $errMsg",
         'mensaje' => $trackId
             ? "Enviado. TrackID: $trackId | Estado: $estado"
-            : "Error en envío: $errMsg",
+            : "Error en envÃ­o: $errMsg",
     ];
 }
 
@@ -6338,7 +6260,7 @@ function queryEstadoEnvio(string $trackId, string $token): array {
     $host = siiHost();
     $urlService = "https://{$host}/DTEWS/QueryEstUp.jws";
     
-    // El servicio correcto para consultar un envío por TrackID es QueryEstUp.jws -> getEstUp
+    // El servicio correcto para consultar un envÃ­o por TrackID es QueryEstUp.jws -> getEstUp
     $soap = '<?xml version="1.0" encoding="UTF-8"?>'
           . '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="' . $urlService . '">'
           . '<soapenv:Header/>'
@@ -6375,7 +6297,7 @@ function queryEstadoDTE(string $rutEmisor, int $tipo, int $folio, string $rutRec
     $rutCompany = $rutE_parts[0];
     $dvCompany  = $rutE_parts[1] ?? '';
 
-    // Extraer RUT del consultante (Dueño del certificado)
+    // Extraer RUT del consultante (DueÃ±o del certificado)
     // Es ESENCIAL que el consultante sea la persona natural del certificado
     [$cert, $privKey] = loadCertificate();
     $rutConsultante = $rutCompany;
@@ -6413,7 +6335,7 @@ function queryEstadoDTE(string $rutEmisor, int $tipo, int $folio, string $rutRec
 
     $resp = soapCall("https://{$host}/DTEWS/QueryEstDte.jws", 'getEstDte', $soap, $token);
 
-    // Logging para diagnóstico real en el servidor
+    // Logging para diagnÃ³stico real en el servidor
     file_put_contents('dte_debug_raw.xml', $resp ?: 'SIN RESPUESTA DE SII');
 
     // Convertir respuesta de ISO-8859-1 a UTF-8
@@ -6423,27 +6345,28 @@ function queryEstadoDTE(string $rutEmisor, int $tipo, int $folio, string $rutRec
     // Lo decodificamos para que la Regex funcione.
     $respDecoded = html_entity_decode($respUtf8, ENT_QUOTES, 'UTF-8');
 
-    // Regex más robusta para capturar ESTADO y las glosas de respuesta
+    // Regex mÃ¡s robusta para capturar ESTADO y las glosas de respuesta
     preg_match('/<ESTADO>([^<]+)<\/ESTADO>/i', $respDecoded, $mE);
     preg_match('/<GLOSA_ERR>([^<]*)<\/GLOSA_ERR>/i', $respDecoded, $mGE);
     preg_match('/<GLOSA_ESTADO>([^<]*)<\/GLOSA_ESTADO>/i', $respDecoded, $mGS);
     
     $estado = isset($mE[1]) ? trim($mE[1]) : 'NO ENCONTRADO';
-    // Prioridad a GLOSA_ERR (detallada) sobre GLOSA_ESTADO (genérica)
+    // Prioridad a GLOSA_ERR (detallada) sobre GLOSA_ESTADO (genÃ©rica)
     $glosa = !empty($mGE[1]) ? trim($mGE[1]) : (isset($mGS[1]) ? trim($mGS[1]) : '- Sin glosa reportada por SII -');
 
     return [
         'estado' => $estado, 
         'glosa'  => $glosa,
-        'xml'    => !empty($respDecoded) ? $respDecoded : 'Error: El SII devolvió una respuesta vacía o ilegible'
+        'xml'    => !empty($respDecoded) ? $respDecoded : 'Error: El SII devolviÃ³ una respuesta vacÃ­a o ilegible'
     ];
 }
 
-// ────────────────────────────────────────────────────────────
-// GESTIÓN DE FOLIOS (CAF) - [Fase 2]
-// ────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// GESTIÃ“N DE FOLIOS (CAF) - [Fase 2]
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function updateFolioRegistry(int $tipo, int $folio): void {
-    $file = CAF_DIR . 'registry.json';
+    global $actualCafDir;
+    $file = $actualCafDir . 'registry.json';
     $reg = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
     
     if (!isset($reg[$tipo]) || $folio > $reg[$tipo]) {
@@ -6453,13 +6376,14 @@ function updateFolioRegistry(int $tipo, int $folio): void {
 }
 
 function updateHistory(array $entry): void {
-    $file = CAF_DIR . 'history.json';
+    global $actualCafDir;
+    $file = $actualCafDir . 'history.json';
     $history = file_exists($file) ? json_decode(file_get_contents($file), true) : [];
     
-    // Añadir al inicio para que el más nuevo esté primero
+    // AÃ±adir al inicio para que el mÃ¡s nuevo estÃ© primero
     array_unshift($history, array_merge($entry, ['ts' => date('Y-m-d H:i:s')]));
     
-    // Mantener solo los últimos 200 registros
+    // Mantener solo los Ãºltimos 200 registros
     $history = array_slice($history, 0, 200);
     
     file_put_contents($file, json_encode($history, JSON_PRETTY_PRINT));
@@ -6468,7 +6392,7 @@ function updateHistory(array $entry): void {
 function getHistory(): array {
     global $globalContext;
 
-    // Fuente canónica: tabla sii_dte (multi-tenant). history.json queda como
+    // Fuente canÃ³nica: tabla sii_dte (multi-tenant). history.json queda como
     // fallback legacy solo si no hay Context o si la consulta a BD falla.
     if ($globalContext) {
         try {
@@ -6492,7 +6416,7 @@ function getHistory(): array {
                     'fecha'     => $r['fecha_emision'],
                     'tipo'      => (int)$r['tipo_dte'],
                     'folio'     => (int)$r['folio'],
-                    'receptor'  => $r['razon_receptor'] ?: ($r['rut_receptor'] ?: '—'),
+                    'receptor'  => $r['razon_receptor'] ?: ($r['rut_receptor'] ?: 'â€”'),
                     'total'     => (int)$r['monto_total'],
                     'trackId'   => $r['track_id'],
                     'estado'    => $r['estado_sii'] ?: $r['estado_local'],
@@ -6504,26 +6428,27 @@ function getHistory(): array {
         }
     }
 
-    // LEGACY: archivo plano (solo sin Context o si falló la BD)
-    $file = CAF_DIR . 'history.json';
+    global $actualCafDir;
+    $file = $actualCafDir . 'history.json';
     $history = file_exists($file) ? (json_decode(file_get_contents($file), true) ?: []) : [];
     return ['ok' => true, 'entries' => $history, 'history' => $history];
 }
 
 function getCAFStatus(): array {
+    global $actualCafDir, $actualTmpDir;
     $cafs = [];
-    $regFile = CAF_DIR . 'registry.json';
+    $regFile = $actualCafDir . 'registry.json';
     $registry = file_exists($regFile) ? (json_decode(file_get_contents($regFile), true) ?? []) : [];
 
     $tiposNombre = [
-        33 => 'Factura Electrónica',  34 => 'Factura Exenta',
-        39 => 'Boleta Electrónica',   41 => 'Boleta Exenta',
-        52 => 'Guía de Despacho',     56 => 'Nota de Débito',
-        61 => 'Nota de Crédito',
+        33 => 'Factura ElectrÃ³nica',  34 => 'Factura Exenta',
+        39 => 'Boleta ElectrÃ³nica',   41 => 'Boleta Exenta',
+        52 => 'GuÃ­a de Despacho',     56 => 'Nota de DÃ©bito',
+        61 => 'Nota de CrÃ©dito',
     ];
 
     $tiposCargados = [];
-    foreach (glob(CAF_DIR . 'caf_*.xml') ?: [] as $f) {
+    foreach (glob($actualCafDir . 'caf_*.xml') ?: [] as $f) {
         if (!preg_match('/caf_(\d+)\.xml$/', $f, $m)) continue;
         $tipo = (int)$m[1];
         $tiposCargados[] = $tipo;
@@ -6557,7 +6482,7 @@ function getCAFStatus(): array {
 
     // Detectar tipos con DTEs emitidos pero sin CAF cargado actualmente
     $faltantes = [];
-    foreach (glob(rtrim(TMP_DIR, '/\\') . DIRECTORY_SEPARATOR . 'dte_T*F*.xml') ?: [] as $f) {
+    foreach (glob(rtrim($actualTmpDir, '/\\') . DIRECTORY_SEPARATOR . 'dte_T*F*.xml') ?: [] as $f) {
         if (preg_match('/dte_T(\d+)F\d+\.xml$/', basename($f), $m)) {
             $t = (int)$m[1];
             if (!in_array($t, $tiposCargados, true) && !isset($faltantes[$t])) {
@@ -6581,7 +6506,7 @@ function getCAFStatus(): array {
 function uploadCAF(): array {
     global $globalContext;
     if (empty($_FILES['file']['tmp_name'])) {
-        return ['ok' => false, 'error' => 'No se subió ningún archivo'];
+        return ['ok' => false, 'error' => 'No se subiÃ³ ningÃºn archivo'];
     }
 
     $tmp = $_FILES['file']['tmp_name'];
@@ -6591,7 +6516,7 @@ function uploadCAF(): array {
     libxml_use_internal_errors(true);
     $xml = simplexml_load_string($content);
     if (!$xml || !isset($xml->CAF->DA->TD)) {
-        return ['ok' => false, 'error' => 'El archivo no es un CAF válido del SII'];
+        return ['ok' => false, 'error' => 'El archivo no es un CAF vÃ¡lido del SII'];
     }
 
     $tipo = (int)$xml->CAF->DA->TD;
@@ -6600,6 +6525,11 @@ function uploadCAF(): array {
     $fechaAuth = (string)$xml->CAF->DA->FA;
 
     if ($globalContext) {
+        $cafRut = strtoupper(preg_replace('/[^0-9K]/i', '', (string)$xml->CAF->DA->RE));
+        $empresaRut = strtoupper(preg_replace('/[^0-9K]/i', '', $globalContext->getRut()));
+        if ($cafRut === '' || $cafRut !== $empresaRut) {
+            return ['ok' => false, 'error' => 'El CAF pertenece a un RUT distinto de la empresa autenticada'];
+        }
         $dest = $globalContext->getCafPath($tipo);
         $dir = dirname($dest);
         if (!is_dir($dir)) @mkdir($dir, 0755, true);
@@ -6621,12 +6551,6 @@ function uploadCAF(): array {
                 'mensaje' => "CAF Tipo $tipo cargado correctamente para " . $globalContext->getRut(),
                 'tipo' => $tipo
             ];
-        }
-    } else {
-        // LEGACY Fallback
-        $dest = CAF_DIR . "caf_{$tipo}.xml";
-        if (file_put_contents($dest, $content)) {
-            return ['ok' => true, 'mensaje' => "CAF Tipo $tipo cargado correctamente (Legacy)"];
         }
     }
     
@@ -6657,7 +6581,7 @@ function soapCall(string $url, string $action, string $body, string $token = '')
     if ($resp === false) {
         $err = curl_error($ch);
         curl_close($ch);
-        throw new Exception("Error de conexión (cURL): $err a la URL: $url");
+        throw new Exception("Error de conexiÃ³n (cURL): $err a la URL: $url");
     }
     curl_close($ch);
     return $resp;
@@ -6673,10 +6597,10 @@ function testSIIConnectivity(): array {
               . '<soapenv:Body><def:getSeed/></soapenv:Body>'
               . '</soapenv:Envelope>';
         $resSemilla = soapCall($url, '', $soap); 
-        if (!$resSemilla) throw new Exception("SII no retornó semilla vacía");
+        if (!$resSemilla) throw new Exception("SII no retornÃ³ semilla vacÃ­a");
         return [
             'ok' => true, 
-            'msg' => 'Conexión con SII Exitosa', 
+            'msg' => 'ConexiÃ³n con SII Exitosa', 
             'raw_xml' => htmlspecialchars($resSemilla)
         ];
     } catch (Throwable $e) {
@@ -6685,7 +6609,7 @@ function testSIIConnectivity(): array {
 }
 
 /**
- * Envía una Boleta Electrónica (39/41) mediante la API REST del SII.
+ * EnvÃ­a una Boleta ElectrÃ³nica (39/41) mediante la API REST del SII.
  */
 function sendBoletaREST(string $xml, int $tipo, int $folio, string $token): array {
     global $actualTmpDir, $globalContext;
@@ -6701,7 +6625,7 @@ function sendBoletaREST(string $xml, int $tipo, int $folio, string $token): arra
     [$rutCompany, $dvCompany] = array_pad(explode('-', $rutEmisorFull, 2), 2, '');
 
     $filename = "boleta_{$tipo}_{$folio}.xml";
-    $uploadFile = rtrim($actualTmpDir ?: TMP_DIR, '/\\') . DIRECTORY_SEPARATOR . $filename;
+    $uploadFile = rtrim($actualTmpDir, '/\\') . DIRECTORY_SEPARATOR . $filename;
     file_put_contents($uploadFile, $xml);
 
     $payload = [
@@ -6723,7 +6647,7 @@ function sendBoletaREST(string $xml, int $tipo, int $folio, string $token): arra
         CURLOPT_HTTPHEADER     => [
             "Cookie: TOKEN=$token",
             "Accept: application/json",
-            // SII REQUIERE este UA (PROG 1.0) — con otros UA devuelve 401 NO ESTA AUTENTICADO.
+            // SII REQUIERE este UA (PROG 1.0) â€” con otros UA devuelve 401 NO ESTA AUTENTICADO.
             // Ver manual oficial SII (OI2003_UPDTE_MDE).
             "User-Agent: Mozilla/4.0 (compatible; PROG 1.0; Windows NT 5.0; YComp 5.0.2.4)"
         ],
@@ -6739,7 +6663,7 @@ function sendBoletaREST(string $xml, int $tipo, int $folio, string $token): arra
 
     @unlink($uploadFile);
 
-    // Transacción estructurada (siempre)
+    // TransacciÃ³n estructurada (siempre)
     $tx = [
         'op'           => 'sendBoletaREST',
         'tipo'         => $tipo,
@@ -6782,7 +6706,7 @@ function sendBoletaREST(string $xml, int $tipo, int $folio, string $token): arra
             'glosa'   => $glosaSii,
             'raw' => $res,
             'rawResponse' => $response ?? '',
-            'mensaje' => 'Boleta enviada con éxito mediante API REST'
+            'mensaje' => 'Boleta enviada con Ã©xito mediante API REST'
         ];
     }
 
@@ -6795,13 +6719,13 @@ function sendBoletaREST(string $xml, int $tipo, int $folio, string $token): arra
 
     // (mantener log textual legacy para compat)
     file_put_contents(
-        rtrim($actualTmpDir ?: TMP_DIR, '/\\') . DIRECTORY_SEPARATOR . 'sii_rest_error.log',
+        rtrim($actualTmpDir, '/\\') . DIRECTORY_SEPARATOR . 'sii_rest_error.log',
         "[" . date('Y-m-d H:i:s') . "] HTTP $httpCode | T{$tipo}F{$folio} | $errMsg\n",
         FILE_APPEND
     );
     saveSiiLog('sendBoletaREST', "T{$tipo}F{$folio}: HTTP $httpCode - $errMsg ({$ms}ms)", 'ERROR');
 
-    // ── Auto-enqueue para reintento si el error es transitorio ──
+    // â”€â”€ Auto-enqueue para reintento si el error es transitorio â”€â”€
     if (isErrorTransitorio($httpCode, $errMsg)) {
         enqueueRetry($tipo, $folio, $errMsg, $httpCode);
     }
@@ -6842,7 +6766,7 @@ function _boletaRestGet(string $url, string $token): array {
 
 /**
  * Consulta GET /boleta.electronica/{rut}-{dv}-{tipo}-{folio}/estado
- * Es la consulta más confiable (devuelve códigos DOK/DNK/FAU/etc).
+ * Es la consulta mÃ¡s confiable (devuelve cÃ³digos DOK/DNK/FAU/etc).
  */
 function queryEstadoBoletaPorFolio(string $baseUrl, string $rutCompany, string $dvCompany, int $tipo, int $folio, string $token, string $rutRecep, string $fecha, int $monto): array {
     [$rutReceptor, $dvReceptor] = array_pad(explode('-', $rutRecep, 2), 2, '');
@@ -6872,7 +6796,7 @@ function queryEstadoBoletaPorTrack(string $baseUrl, string $rutCompany, string $
 
 /**
  * Consulta el estado de una boleta mediante API REST.
- * Estrategia: primero intenta por folio (más confiable);
+ * Estrategia: primero intenta por folio (mÃ¡s confiable);
  * si falla y hay TrackID, hace fallback por TrackID.
  */
 function queryEstadoBoletaREST(int $tipo, int $folio, string $trackId, string $token, string $rutRecep = '66666666-6', string $fecha = '', int $monto = 0): array {
@@ -6881,15 +6805,15 @@ function queryEstadoBoletaREST(int $tipo, int $folio, string $trackId, string $t
     $baseUrl = siiEndpoints()['boleta_consulta'];
     [$rutCompany, $dvCompany] = array_pad(explode('-', $rutEmisorFull, 2), 2, '');
 
-    // Códigos del catálogo SII para boletas (estados válidos del documento).
+    // CÃ³digos del catÃ¡logo SII para boletas (estados vÃ¡lidos del documento).
     // FAU = Documento No Recibido por el SII (puede ser temporal mientras se indexa).
-    // Todos estos son respuestas legítimas que NO requieren reintento.
+    // Todos estos son respuestas legÃ­timas que NO requieren reintento.
     $acceptedCodes = ['DOK', 'DNK', 'TMD', 'TMC', 'MMD', 'MMC', 'AND', 'ANC', 'EPR', 'CRT', 'FOK', 'SOK', 'REC', 'RPR'];
     $catalogCodes  = array_merge($acceptedCodes, ['FAU', 'FNA', 'FAN', 'EMP', 'RSC', 'RFR', 'PRD', 'RCT']);
 
     $attempts = [];
 
-    // ── Intento 1: consulta por folio (la confiable) ──
+    // â”€â”€ Intento 1: consulta por folio (la confiable) â”€â”€
     $tryFolio = ($folio > 0 && $fecha !== '');
     if ($tryFolio) {
         $r = queryEstadoBoletaPorFolio($baseUrl, $rutCompany, $dvCompany, $tipo, $folio, $token, $rutRecep, $fecha, $monto);
@@ -6903,7 +6827,7 @@ function queryEstadoBoletaREST(int $tipo, int $folio, string $trackId, string $t
             $estado = $res['estado'] ?? $res['codigo'] ?? null;
             $glosa  = $res['descripcion'] ?? $res['detalle'] ?? "Respuesta SII HTTP {$r['http']}";
 
-            // Si el SII respondió HTTP 200 con un código del catálogo (incluyendo FAU),
+            // Si el SII respondiÃ³ HTTP 200 con un cÃ³digo del catÃ¡logo (incluyendo FAU),
             // esa es la respuesta autoritativa. No buscamos fallback.
             if ($r['http'] === 200 && $isJson && in_array((string)$estado, $catalogCodes, true)) {
                 $ok = in_array((string)$estado, $acceptedCodes, true);
@@ -6919,12 +6843,12 @@ function queryEstadoBoletaREST(int $tipo, int $folio, string $trackId, string $t
                     'via'         => 'folio',
                 ];
             }
-            // Si HTTP fue 200 pero código no es del catálogo, o no fue 200, intentaremos trackId.
+            // Si HTTP fue 200 pero cÃ³digo no es del catÃ¡logo, o no fue 200, intentaremos trackId.
             saveSiiLog('queryEstadoBoletaREST', "T{$tipo}F{$folio} folio HTTP {$r['http']}, intentando TrackID", 'WARNING');
         }
     }
 
-    // ── Intento 2: por TrackID (fallback o si no había datos para folio) ──
+    // â”€â”€ Intento 2: por TrackID (fallback o si no habÃ­a datos para folio) â”€â”€
     if ($trackId) {
         $r = queryEstadoBoletaPorTrack($baseUrl, $rutCompany, $dvCompany, $trackId, $token);
         $attempts[] = ['via' => 'trackid', 'url' => $r['url'], 'http' => $r['http'], 'error' => $r['error']];
@@ -6963,7 +6887,7 @@ function queryEstadoBoletaREST(int $tipo, int $folio, string $trackId, string $t
         ];
     }
 
-    // ── Ninguna vía disponible (sin folio+fecha y sin trackId) ──
+    // â”€â”€ Ninguna vÃ­a disponible (sin folio+fecha y sin trackId) â”€â”€
     return [
         'ok'       => false,
         'estado'   => 'PARAMS_INSUFICIENTES',
@@ -6998,12 +6922,12 @@ function getCertCaseData(string $caseId): array {
             'tipoDTE' => 39, 'referencias' => [['codigo'=>'SET','razon'=>'CASO-5']],
             'items' => [['nombre'=>'Arroz','cantidad'=>5,'precio'=>700,'unidadMedida'=>'Kg']]
         ],
-        // SET BASICO FACTURACION (Atención 4832043)
+        // SET BASICO FACTURACION (AtenciÃ³n 4832043)
         'F-4832043-1' => [
-            'tipoDTE' => 33, 'items' => [['nombre'=>'Cajón AFECTO','cantidad'=>169,'precio'=>3531],['nombre'=>'Relleno AFECTO','cantidad'=>71,'precio'=>5882]]
+            'tipoDTE' => 33, 'items' => [['nombre'=>'CajÃ³n AFECTO','cantidad'=>169,'precio'=>3531],['nombre'=>'Relleno AFECTO','cantidad'=>71,'precio'=>5882]]
         ],
         'F-4832043-2' => [
-            'tipoDTE' => 33, 'items' => [['nombre'=>'Pañuelo AFECTO','cantidad'=>767,'precio'=>5937,'descuento'=>10],['nombre'=>'ITEM 2 AFECTO','cantidad'=>712,'precio'=>4988,'descuento'=>23]]
+            'tipoDTE' => 33, 'items' => [['nombre'=>'PaÃ±uelo AFECTO','cantidad'=>767,'precio'=>5937,'descuento'=>10],['nombre'=>'ITEM 2 AFECTO','cantidad'=>712,'precio'=>4988,'descuento'=>23]]
         ],
         'F-4832043-3' => [
             'tipoDTE' => 33, 'items' => [['nombre'=>'Pintura B&W AFECTO','cantidad'=>65,'precio'=>6938],['nombre'=>'ITEM 2 AFECTO','cantidad'=>238,'precio'=>4041],['nombre'=>'ITEM 3 SERVICIO EXENTO','cantidad'=>1,'precio'=>35301,'exento'=>true]]
@@ -7019,10 +6943,10 @@ function getCertCaseData(string $caseId): array {
         ],
         'F-4832043-6' => [
             'tipoDTE' => 61, 'referencias' => [['tipo'=>33, 'folio'=>'REF_F2', 'codigo'=>1, 'razon'=>'DEVOLUCION DE MERCADERIAS']],
-            'items' => [['nombre'=>'Pañuelo AFECTO','cantidad'=>282,'precio'=>5937],['nombre'=>'ITEM 2 AFECTO','cantidad'=>483,'precio'=>4988]]
+            'items' => [['nombre'=>'PaÃ±uelo AFECTO','cantidad'=>282,'precio'=>5937],['nombre'=>'ITEM 2 AFECTO','cantidad'=>483,'precio'=>4988]]
         ],
-        // Caso 7: NC que anula la factura del caso 3. Los ítems deben replicar
-        // exactamente los de F-4832043-3 para que los montos cuadren (NC de anulación).
+        // Caso 7: NC que anula la factura del caso 3. Los Ã­tems deben replicar
+        // exactamente los de F-4832043-3 para que los montos cuadren (NC de anulaciÃ³n).
         'F-4832043-7' => [
             'tipoDTE' => 61, 'referencias' => [['tipo'=>33, 'folio'=>'REF_F3', 'codigo'=>1, 'razon'=>'ANULA FACTURA']],
             'items' => [
@@ -7035,19 +6959,19 @@ function getCertCaseData(string $caseId): array {
             'tipoDTE' => 56, 'referencias' => [['tipo'=>61, 'folio'=>'REF_NC1', 'codigo'=>1, 'razon'=>'ANULA NOTA DE CREDITO ELECTRONICA']],
             'items' => [['nombre'=>'ANULACION NC','cantidad'=>1,'precio'=>0,'exento'=>true]]
         ],
-        // SET GUIAS DE DESPACHO (Atención 4820753)
+        // SET GUIAS DE DESPACHO (AtenciÃ³n 4820753)
         // IndTraslado 5 = traslado interno: receptor es el propio emisor (XSD lo exige igualmente)
-        'G-4820753-1' => [
+        'G-4879711-1' => [
             'tipoDTE' => 52, 'indTraslado' => 5,
-            'items' => [['nombre'=>'Producto Traslado Interno','cantidad'=>10,'precio'=>5000]],
+            'items' => [['nombre'=>'ITEM 1','cantidad'=>71,'precio'=>0],['nombre'=>'ITEM 2','cantidad'=>102,'precio'=>0],['nombre'=>'ITEM 3','cantidad'=>65,'precio'=>0]],
         ],
-        'G-4820753-2' => [
+        'G-4879711-2' => [
             'tipoDTE' => 52, 'indTraslado' => 1,
-            'items' => [['nombre'=>'Producto Venta Facturada','cantidad'=>5,'precio'=>12000]],
+            'items' => [['nombre'=>'ITEM 1','cantidad'=>261,'precio'=>5514],['nombre'=>'ITEM 2','cantidad'=>501,'precio'=>1411]],
         ],
-        'G-4820753-3' => [
+        'G-4879711-3' => [
             'tipoDTE' => 52, 'indTraslado' => 1,
-            'items' => [['nombre'=>'Producto Venta Anulada','cantidad'=>3,'precio'=>8000]],
+            'items' => [['nombre'=>'ITEM 1','cantidad'=>143,'precio'=>1690],['nombre'=>'ITEM 2','cantidad'=>316,'precio'=>4327]],
         ],
     ];
 
@@ -7056,7 +6980,7 @@ function getCertCaseData(string $caseId): array {
     $caseData = $cases[$caseId];
     global $globalContext;
 
-    // Lógica de Referencia Automática (Busca folios recientes si es necesario)
+    // LÃ³gica de Referencia AutomÃ¡tica (Busca folios recientes si es necesario)
     if (isset($caseData['referencias'])) {
         $repo = new EmpresaRepository();
         foreach ($caseData['referencias'] as &$ref) {
@@ -7072,7 +6996,7 @@ function getCertCaseData(string $caseId): array {
                     $ref['folio'] = $lastDtes[$offset]['folio'] ?? $lastDtes[0]['folio'];
                     $ref['fecha'] = $lastDtes[$offset]['fecha'] ?? $lastDtes[0]['fecha'];
                 } else {
-                    // Fallback para evaluación: si no hay facturas emitidas, referenciamos al folio 1 ficticio
+                    // Fallback para evaluaciÃ³n: si no hay facturas emitidas, referenciamos al folio 1 ficticio
                     $ref['folio'] = 1;
                     $ref['fecha'] = date('Y-m-d');
                 }
@@ -7080,11 +7004,11 @@ function getCertCaseData(string $caseId): array {
         }
     }
     
-    // Forzar RUT de receptor válido según normativa SII para certificación
+    // Forzar RUT de receptor vÃ¡lido segÃºn normativa SII para certificaciÃ³n
     $tDte = (int)$cases[$caseId]['tipoDTE'];
     $rutReceptorCert = in_array($tDte, [39, 41]) ? '66666666-6' : '55555555-5';
     
-    // Guías de despacho (tipo 52) siempre requieren receptor, incluso en traslado interno.
+    // GuÃ­as de despacho (tipo 52) siempre requieren receptor, incluso en traslado interno.
     // Para IndTraslado=5 el SII acepta el mismo RUT del emisor como receptor.
     $recep = [
         'rut'      => $rutReceptorCert,
@@ -7098,14 +7022,14 @@ function getCertCaseData(string $caseId): array {
     return array_merge(['receptor' => $recep], $cases[$caseId]);
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// ENDPOINTS ANDROID – Historial DTE
-// (productos/sucursales/stock → dte_php/fb/index.php)
-// ════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ENDPOINTS ANDROID â€“ Historial DTE
+// (productos/sucursales/stock â†’ dte_php/fb/index.php)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 /**
  * Historial paginado de DTEs emitidos (para el APK).
- * Devuelve en el mismo formato que getHistory() pero con paginación y
+ * Devuelve en el mismo formato que getHistory() pero con paginaciÃ³n y
  * filtro opcional por tipo y sucursal.
  */
 function getHistorialPaginado(int $page = 1, ?int $tipo = null, ?string $sucursalId = null): array {
@@ -7165,4 +7089,5 @@ function getHistorialPaginado(int $page = 1, ?int $tipo = null, ?string $sucursa
         return ['success' => false, 'entries' => [], 'error' => $e->getMessage()];
     }
 }
+
 

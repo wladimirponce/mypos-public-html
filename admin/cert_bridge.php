@@ -14,7 +14,6 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/autoload.php';
 use App\Core\Context;
 use App\Services\CertificationManager;
-use App\Repositories\EmpresaRepository;
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
@@ -25,15 +24,10 @@ $action = $_GET['action'] ?? $_POST['action'] ?? '';
  */
 function resolveCertEmpresaId(): int
 {
-    if (isset($_SESSION['active_empresa_id']) && (int)$_SESSION['active_empresa_id'] > 0) {
+    if (!empty($_SESSION['admin_id']) && isset($_SESSION['active_empresa_id']) && (int)$_SESSION['active_empresa_id'] > 0) {
         return (int)$_SESSION['active_empresa_id'];
     }
-    $repo = new EmpresaRepository();
-    $emp  = $repo->getByAmbiente('CERTIFICACION');
-    if (!$emp) {
-        throw new \Exception('No hay empresa configurada en ambiente CERTIFICACIÓN. Configure una empresa con ambiente CERTIFICACION en la sección Empresas.');
-    }
-    return (int)$emp['id'];
+    throw new \Exception('Seleccione explicitamente una empresa antes de iniciar la certificacion.');
 }
 
 // ── Las muestras impresas ahora se renderizan en el cliente (jscript.js →
@@ -48,6 +42,9 @@ try {
     // Asegurar que api.php no sobreescriba $globalContext con null
     $_SESSION['active_empresa_id'] = $empresaId;
     $globalContext = new Context($empresaId);
+    if ($globalContext->getAmbiente() !== 'CERTIFICACION') {
+        throw new \Exception('La empresa seleccionada no esta en ambiente CERTIFICACION.');
+    }
 
     require_once __DIR__ . '/api.php';
     // api.php re-habilita display_errors; lo suprimimos de nuevo para evitar HTML en la respuesta
@@ -278,8 +275,8 @@ try {
                 $tipo  = (int)$row['tipo_dte'];
                 $folio = (int)$row['folio'];
                 // Eliminar de sii_folio_consumo primero (FK apunta a sii_dte)
-                $db->prepare("DELETE FROM sii_folio_consumo WHERE empresa_id=? AND tipo_dte=? AND folio=?")
-                   ->execute([$empId, $tipo, $folio]);
+                $db->prepare("DELETE FROM sii_folio_consumo WHERE empresa_id=? AND tipo_dte=? AND folio=? AND ambiente=?")
+                   ->execute([$empId, $tipo, $folio, $amb]);
                 // Eliminar de sii_dte
                 $db->prepare("DELETE FROM sii_dte WHERE empresa_id=? AND tipo_dte=? AND folio=? AND ambiente=?")
                    ->execute([$empId, $tipo, $folio, $amb]);

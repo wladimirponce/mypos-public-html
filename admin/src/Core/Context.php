@@ -31,7 +31,10 @@ class Context
         }
         $this->empresa = $empresa;
 
-        $this->ambiente = $this->empresa['ambiente_default'];
+        $this->ambiente = strtoupper(trim((string)($this->empresa['ambiente_default'] ?? '')));
+        if (!in_array($this->ambiente, ['CERTIFICACION', 'PRODUCCION'], true)) {
+            throw new Exception('La empresa no tiene un ambiente SII valido configurado.');
+        }
         $this->basePath = dirname(__DIR__, 2);
         
         $this->ensureDirectories();
@@ -47,7 +50,7 @@ class Context
      */
     public function getCertPath(): string 
     { 
-        $dir = "{$this->basePath}/cert/{$this->getRut()}";
+        $dir = "{$this->basePath}/cert/{$this->getRut()}/{$this->getAmbiente()}";
         $conf = $dir . '/cert.conf';
         if (is_file($conf)) {
             $data = json_decode((string)file_get_contents($conf), true);
@@ -67,7 +70,7 @@ class Context
      */
     public function getCafPath(int $tipo): string 
     { 
-        return "{$this->basePath}/caf/{$this->getRut()}/caf_{$tipo}.xml"; 
+        return "{$this->basePath}/caf/{$this->getRut()}/{$this->getAmbiente()}/caf_{$tipo}.xml";
     }
 
     /**
@@ -75,7 +78,7 @@ class Context
      */
     public function getTmpPath(): string
     {
-        return "{$this->basePath}/tmp/{$this->getRut()}/";
+        return "{$this->basePath}/tmp/{$this->getRut()}/{$this->getAmbiente()}/";
     }
 
     /**
@@ -84,7 +87,7 @@ class Context
      */
     public function getSetPath(): string
     {
-        return "{$this->basePath}/cert_sets/{$this->getRut()}/set.json";
+        return "{$this->basePath}/cert_sets/{$this->getRut()}/{$this->getAmbiente()}/set.json";
     }
 
     /**

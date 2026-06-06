@@ -16,11 +16,11 @@ class UsuarioRepository extends BaseRepository
         return $stmt->fetchAll() ?: [];
     }
 
-    public function getUsuarioPorId(int $id): ?array
+    public function getUsuarioPorId(int $id, int $empresaId): ?array
     {
-        $sql = "SELECT * FROM sii_usuario WHERE id = ?";
+        $sql = "SELECT * FROM sii_usuario WHERE id = ? AND empresa_id = ?";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([$id]);
+        $stmt->execute([$id, $empresaId]);
         return $stmt->fetch() ?: null;
     }
 
@@ -41,10 +41,10 @@ class UsuarioRepository extends BaseRepository
         return (int)$this->db->lastInsertId();
     }
 
-    public function desactivarUsuario(int $id): void
+    public function desactivarUsuario(int $id, int $empresaId): void
     {
-        $sql = "UPDATE sii_usuario SET activo = 0 WHERE id = ?";
+        $sql = "UPDATE sii_usuario SET activo = 0 WHERE id = ? AND empresa_id = ?";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute([$id]);
+        $stmt->execute([$id, $empresaId]);
     }
 }

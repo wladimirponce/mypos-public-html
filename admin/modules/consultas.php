@@ -200,7 +200,7 @@
                     <div class="row g-3 mb-3">
                         <div class="col-md-6">
                             <label class="d-label">RUT al que se responde</label>
-                            <input type="text" id="resp_rut_recibe" class="d-input" placeholder="77020050-4" required>
+                            <input type="text" id="resp_rut_recibe" class="d-input" placeholder="RUT receptor" required>
                         </div>
                         <div class="col-md-6">
                             <label class="d-label">Tipo respuesta</label>

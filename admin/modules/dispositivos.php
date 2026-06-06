@@ -188,17 +188,17 @@ if ($dbOk) {
     }
 
     try {
-        if ($hasDimSucursal) {
-            $sucursales = $db->query(
-                "SELECT id_sucursal AS id, nombre FROM dim_sucursal ORDER BY nombre ASC"
-            )->fetchAll(PDO::FETCH_ASSOC);
+        if ($hasDimSucursal && $empresaId) {
+            $stSuc = $db->prepare(
+                "SELECT id_sucursal AS id, nombre FROM dim_sucursal WHERE empresa_id = ? ORDER BY nombre ASC"
+            );
+            $stSuc->execute([$empresaId]);
+            $sucursales = $stSuc->fetchAll(PDO::FETCH_ASSOC);
         } else {
             if ($empresaId) {
                 $stSuc = $db->prepare("SELECT id, nombre FROM sucursales WHERE empresa_id = ? AND activo = 1 ORDER BY nombre ASC");
                 $stSuc->execute([$empresaId]);
                 $sucursales = $stSuc->fetchAll(PDO::FETCH_ASSOC);
-            } else {
-                $sucursales = $db->query("SELECT id, nombre FROM sucursales WHERE activo = 1 ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
             }
         }
     } catch (Exception $_) {}

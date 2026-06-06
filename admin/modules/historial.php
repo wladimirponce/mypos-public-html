@@ -228,10 +228,21 @@ function esc(s) {
     return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
+async function leerJsonApi(resp) {
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+        const text = await resp.text();
+        throw new Error(resp.redirected
+            ? 'No hay una empresa activa para consultar.'
+            : 'El servidor no devolvio JSON' + (text ? ': ' + text.slice(0, 80) : '.'));
+    }
+    return resp.json();
+}
+
 async function cargarHistorial() {
     try {
         const resp = await fetch('api.php?action=history');
-        const data = await resp.json();
+        const data = await leerJsonApi(resp);
         const tbody = document.getElementById('history-body');
         if (!data.ok || !data.entries?.length) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:40px; color:var(--c-text-muted)">Sin registros</td></tr>';
@@ -273,7 +284,7 @@ async function cargarHistorial() {
 async function cargarArchivosServidor() {
     try {
         const resp = await fetch('api.php?action=list_files');
-        const data = await resp.json();
+        const data = await leerJsonApi(resp);
         const tbody = document.getElementById('archivos-body');
         if (!data.ok || !data.files?.length) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:40px; color:var(--c-text-muted)">Sin archivos XML</td></tr>';
@@ -608,7 +619,7 @@ async function imprimirHistorial(tipo, folio, format, cedible = false) {
 async function cargarSiiLogs() {
     try {
         const resp = await fetch('api.php?action=get_sii_logs');
-        const data = await resp.json();
+        const data = await leerJsonApi(resp);
         const tbody = document.getElementById('logs-body');
         if (!data.ok || !data.logs?.length) {
             tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--c-text-muted)">Sin logs registrados</td></tr>';

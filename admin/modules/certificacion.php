@@ -111,7 +111,7 @@ $certCases = [
           </button>
         </div>
         <div style="font-size:.7rem; color:var(--c-text-muted); margin:8px 0 4px">
-          Paso 2 facturas/notas/guias: ejemplo <code>SIISetDePruebas784350428.txt</code>
+          Paso 2 facturas/notas/guias: ejemplo <code>SIISetDePruebas{RUT}.txt</code>
         </div>
         <div style="display:flex; gap:6px">
           <input type="file" id="set-file-basico" accept=".txt" class="d-input" style="font-size:.78rem">
@@ -506,7 +506,7 @@ async function certLoadSetInfo() {
 
 async function certUploadSet(tipo='boletas') {
   const inputId = tipo === 'basico' ? 'set-file-basico' : 'set-file-boletas';
-  const ejemplo = tipo === 'basico' ? 'SIISetDePruebas784350428.txt' : 'Set Prueba BE.txt';
+  const ejemplo = tipo === 'basico' ? 'SIISetDePruebas{RUT}.txt' : 'Set Prueba BE.txt';
   const input = document.getElementById(inputId);
   const el = document.getElementById('set-info');
   if (!input.files.length) { alert('Seleccione el archivo ' + ejemplo); return; }

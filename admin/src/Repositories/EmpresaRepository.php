@@ -68,16 +68,7 @@ class EmpresaRepository extends BaseRepository
             return $result ?: null;
         }
 
-        // Para MyPOS SaaS: fallback si la API key coincide con la variable global.
-        $envKey = getenv('DTE_ADMIN_API_KEY') ?: 'mypos_dte_key_default';
-        if ($apiKey === $envKey) {
-            $sql = "SELECT e.id, e.rut, e.razon_social, e.nombre_fantasia, e.giro,
-                           e.direccion AS direccion_origen, e.comuna AS comuna_origen, e.ciudad AS ciudad_origen,
-                           e.telefono, e.email AS email_sii, e.activo,
-                           'CERTIFICACION' AS ambiente_default, '[\"emitir\",\"consultar\",\"config\"]' AS permisos
-                    FROM empresas e WHERE e.activo = 1 LIMIT 1";
-            return $this->db->query($sql)->fetch() ?: null;
-        }
+        // El modelo SaaS no dispone de una API key empresarial segura.
         return null;
     }
 
@@ -97,10 +88,10 @@ class EmpresaRepository extends BaseRepository
         $sql = "SELECT e.id, e.rut, e.razon_social, e.nombre_fantasia, e.giro,
                        e.direccion AS direccion_origen, e.comuna AS comuna_origen, e.ciudad AS ciudad_origen,
                        e.telefono, e.email AS email_sii, e.activo,
-                       COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default,
+                       COALESCE(dc.ambiente, '') AS ambiente_default,
                        CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.acteco')), '[]') ELSE '[]' END AS acteco,
-                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.numero_resolucion')), '80') ELSE '80' END AS numero_resolucion,
-                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.fecha_resolucion')), '2026-05-17') ELSE '2026-05-17' END AS fecha_resolucion,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.numero_resolucion')), '') ELSE '' END AS numero_resolucion,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.fecha_resolucion')), '') ELSE '' END AS fecha_resolucion,
                        CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.unidad_sii')), '') ELSE '' END AS unidad_sii
                 FROM empresas e
                 LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id
@@ -124,15 +115,15 @@ class EmpresaRepository extends BaseRepository
         $sql = "SELECT e.id, e.rut, e.razon_social, e.nombre_fantasia, e.giro,
                        e.direccion AS direccion_origen, e.comuna AS comuna_origen, e.ciudad AS ciudad_origen,
                        e.telefono, e.email AS email_sii, e.activo,
-                       COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default,
+                       COALESCE(dc.ambiente, '') AS ambiente_default,
                        CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.acteco')), '[]') ELSE '[]' END AS acteco,
-                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.numero_resolucion')), '80') ELSE '80' END AS numero_resolucion,
-                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.fecha_resolucion')), '2026-05-17') ELSE '2026-05-17' END AS fecha_resolucion,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.numero_resolucion')), '') ELSE '' END AS numero_resolucion,
+                       CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.fecha_resolucion')), '') ELSE '' END AS fecha_resolucion,
                        CASE WHEN JSON_VALID(ec.metadata_json) THEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(ec.metadata_json, '$.unidad_sii')), '') ELSE '' END AS unidad_sii
                 FROM empresas e
                 LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id
                 LEFT JOIN empresa_configuracion ec ON e.id = ec.empresa_id
-                WHERE COALESCE(dc.ambiente, 'CERTIFICACION') = ? AND e.activo = 1 LIMIT 1";
+                WHERE dc.ambiente = ? AND e.activo = 1 LIMIT 1";
         $stmt = $this->db->prepare($sql);
         $stmt->execute([strtoupper($ambiente)]);
         return $stmt->fetch() ?: null;
@@ -141,15 +132,15 @@ class EmpresaRepository extends BaseRepository
     /**
      * Obtiene el certificado vigente de una empresa.
      */
-    public function getCertificado(int $empresaId): ?array
+    public function getCertificado(int $empresaId, ?string $ambiente = null): ?array
     {
         if ($this->useSiiTables) {
-            $sql = "SELECT * FROM sii_certificado 
-                    WHERE empresa_id = ? AND activo = 1 
+            $sql = "SELECT * FROM sii_certificado
+                    WHERE empresa_id = ? AND ambiente_sii = ? AND activo = 1
                     ORDER BY vigencia_hasta DESC LIMIT 1";
             
             $stmt = $this->db->prepare($sql);
-            $stmt->execute([$empresaId]);
+            $stmt->execute([$empresaId, strtolower((string)$ambiente)]);
             
             return $stmt->fetch() ?: null;
         }
@@ -188,12 +179,7 @@ class EmpresaRepository extends BaseRepository
             return (int)$stmt->fetchColumn();
         }
 
-        // Para MyPOS SaaS:
-        $tipoEnum = $this->mapTipoDteToEnum($tipoDte);
-        $sql = "SELECT COALESCE(MAX(CAST(folio AS UNSIGNED)), 0) FROM documentos_emitidos WHERE empresa_id = ? AND tipo_documento = ?";
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute([$empresaId, $tipoEnum]);
-        return (int)$stmt->fetchColumn();
+        return 0;
     }
 
     /**
@@ -215,26 +201,7 @@ class EmpresaRepository extends BaseRepository
             return $stmt->fetch() ?: null;
         }
 
-        // Para MyPOS SaaS:
-        $tipoEnum = $this->mapTipoDteToEnum($tipoDte);
-        $sql = "SELECT c.id, c.empresa_id, ? AS tipo_dte, c.folio_desde, c.folio_hasta,
-                       c.archivo_path AS xml_path, 'produccion' AS ambiente_sii, c.fecha_autorizacion,
-                       (c.folio_hasta - c.folio_desde + 1) AS total_folios,
-                       COALESCE(fc.consumidos, 0) AS consumidos,
-                       GREATEST(c.folio_hasta - c.folio_desde + 1 - COALESCE(fc.consumidos, 0), 0) AS disponibles,
-                       'normal' AS nivel_alerta
-                FROM caf_archivos c
-                LEFT JOIN (
-                    SELECT caf_archivo_id, COUNT(*) AS consumidos
-                    FROM folios_consumidos
-                    GROUP BY caf_archivo_id
-                ) fc ON fc.caf_archivo_id = c.id
-                WHERE c.empresa_id = ? AND c.tipo_documento = ? AND c.estado = 'ACTIVO'
-                ORDER BY c.folio_desde ASC
-                LIMIT 1";
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute([$tipoDte, $empresaId, $tipoEnum]);
-        return $stmt->fetch() ?: null;
+        return null;
     }
 
     /**
@@ -254,25 +221,7 @@ class EmpresaRepository extends BaseRepository
             return $stmt->fetchAll() ?: [];
         }
 
-        // Para MyPOS SaaS:
-        $tipoEnum = $this->mapTipoDteToEnum($tipoDte);
-        $sql = "SELECT c.id, c.empresa_id, ? AS tipo_dte, c.folio_desde, c.folio_hasta,
-                       c.archivo_path AS xml_path, 'produccion' AS ambiente_sii, c.fecha_autorizacion,
-                       (c.folio_hasta - c.folio_desde + 1) AS total_folios,
-                       COALESCE(fc.consumidos, 0) AS consumidos,
-                       GREATEST(c.folio_hasta - c.folio_desde + 1 - COALESCE(fc.consumidos, 0), 0) AS disponibles,
-                       'normal' AS nivel_alerta
-                FROM caf_archivos c
-                LEFT JOIN (
-                    SELECT caf_archivo_id, COUNT(*) AS consumidos
-                    FROM folios_consumidos
-                    GROUP BY caf_archivo_id
-                ) fc ON fc.caf_archivo_id = c.id
-                WHERE c.empresa_id = ? AND c.tipo_documento = ? AND c.estado = 'ACTIVO'
-                ORDER BY c.folio_desde ASC";
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute([$tipoDte, $empresaId, $tipoEnum]);
-        return $stmt->fetchAll() ?: [];
+        return [];
     }
 
     /**
@@ -293,39 +242,11 @@ class EmpresaRepository extends BaseRepository
             $result = $stmt->fetch() ?: null;
             if ($result) return $result;
         } else {
-            // Para MyPOS SaaS:
-            $tipoEnum = $this->mapTipoDteToEnum($tipoDte);
-            $sql = "SELECT c.id, c.empresa_id, ? AS tipo_dte, c.folio_desde, c.folio_hasta,
-                           c.archivo_path AS xml_path, 'produccion' AS ambiente_sii, c.fecha_autorizacion,
-                           (c.folio_hasta - c.folio_desde + 1) AS total_folios,
-                           COALESCE(fc.consumidos, 0) AS consumidos,
-                           GREATEST(c.folio_hasta - c.folio_desde + 1 - COALESCE(fc.consumidos, 0), 0) AS disponibles,
-                           'normal' AS nivel_alerta, NULL AS xml_content
-                    FROM caf_archivos c
-                    LEFT JOIN (
-                        SELECT caf_archivo_id, COUNT(*) AS consumidos
-                        FROM folios_consumidos
-                        GROUP BY caf_archivo_id
-                    ) fc ON fc.caf_archivo_id = c.id
-                    WHERE c.empresa_id = ? AND c.tipo_documento = ? AND c.estado = 'ACTIVO'
-                      AND ? BETWEEN c.folio_desde AND c.folio_hasta
-                    LIMIT 1";
-            $stmt = $this->db->prepare($sql);
-            $stmt->execute([$tipoDte, $empresaId, $tipoEnum, $folio]);
-            $result = $stmt->fetch() ?: null;
-            if ($result) return $result;
+            // El modelo SaaS legacy no separa CAF por ambiente.
+            return null;
         }
 
-        // Fallback: tabla cafs (sistema centralizado)
-        $sql2 = "SELECT id, tipo_dte, folio_desde, folio_hasta, xml_content,
-                        NULL AS xml_path, NULL AS nivel_alerta, NULL AS disponibles
-                 FROM cafs
-                 WHERE tipo_dte = ? AND agotado = 0
-                   AND ? BETWEEN folio_desde AND folio_hasta
-                 LIMIT 1";
-        $stmt2 = $this->db->prepare($sql2);
-        $stmt2->execute([$tipoDte, $folio]);
-        return $stmt2->fetch() ?: null;
+        return null;
     }
 
     /**
@@ -429,13 +350,13 @@ class EmpresaRepository extends BaseRepository
     /**
      * Registra el consumo de un folio.
      */
-    public function registrarConsumoFolio(int $cafId, int $empresaId, int $tipoDte, int $folio, int $dteId): void
+    public function registrarConsumoFolio(int $cafId, int $empresaId, int $tipoDte, int $folio, int $dteId, string $ambiente): void
     {
         if ($this->useSiiTables) {
-            $sql = "INSERT IGNORE INTO sii_folio_consumo (caf_id, empresa_id, tipo_dte, folio, dte_id)
-                    VALUES (?, ?, ?, ?, ?)";
+            $sql = "INSERT IGNORE INTO sii_folio_consumo (caf_id, empresa_id, tipo_dte, folio, dte_id, ambiente)
+                    VALUES (?, ?, ?, ?, ?, ?)";
             $stmt = $this->db->prepare($sql);
-            $stmt->execute([$cafId, $empresaId, $tipoDte, $folio, $dteId]);
+            $stmt->execute([$cafId, $empresaId, $tipoDte, $folio, $dteId, strtolower($ambiente)]);
             return;
         }
 
@@ -584,19 +505,19 @@ class EmpresaRepository extends BaseRepository
     public function registrarCertificado(array $data): int
     {
         if ($this->useSiiTables) {
-            $sqlOff = "UPDATE sii_certificado SET activo = 0 WHERE empresa_id = ?";
+            $sqlOff = "UPDATE sii_certificado SET activo = 0 WHERE empresa_id = ? AND ambiente_sii = ?";
             $stmtOff = $this->db->prepare($sqlOff);
-            $stmtOff->execute([$data['empresa_id']]);
+            $stmtOff->execute([$data['empresa_id'], strtolower($data['ambiente'])]);
 
             $sql = "INSERT INTO sii_certificado (
                         empresa_id, nombre_archivo, ruta_pfx, clave_enc, 
-                        rut_titular, nombre_titular, vigencia_desde, vigencia_hasta, activo
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)";
+                        rut_titular, nombre_titular, vigencia_desde, vigencia_hasta, ambiente_sii, activo
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)";
             
             $stmt = $this->db->prepare($sql);
             $stmt->execute([
                 $data['empresa_id'], $data['original'], $data['ruta_pfx'], $data['pass'], 
-                $data['rut'], $data['nombre'], $data['desde'], $data['hasta']
+                $data['rut'], $data['nombre'], $data['desde'], $data['hasta'], strtolower($data['ambiente'])
             ]);
             
             return (int)$this->db->lastInsertId();

@@ -2,8 +2,9 @@
 /**
  * Módulo Configuración — Certificados, CAF y Sistema
  */
-$cCertPfx = $globalContext ? $globalContext->getCertPath() : CERT_PFX;
-$cCafDir  = $globalContext ? dirname($globalContext->getCafPath(0)) . '/' : CAF_DIR;
+$hasCompanyContext = $globalContext !== null;
+$cCertPfx = $hasCompanyContext ? $globalContext->getCertPath() : '';
+$cCafDir  = $hasCompanyContext ? dirname($globalContext->getCafPath(0)) . '/' : '';
 
 if (!function_exists('normalizeCafXmlContent')) {
     function normalizeCafXmlContent(string $content): string
@@ -36,6 +37,10 @@ if (!function_exists('normalizeCafXmlContent')) {
 // Procesar acciones POST
 if (isset($_POST['action'])) {
     try {
+        if (!$hasCompanyContext) {
+            throw new Exception('No hay empresas registradas o activas. Cree una empresa antes de configurar certificados o CAF.');
+        }
+
         if ($_POST['action'] === 'upload_cert' && !empty($_FILES['cert_file']['tmp_name'])) {
             $pass = $_POST['cert_pass'] ?? '';
             $tmp = $_FILES['cert_file']['tmp_name'];
@@ -96,7 +101,8 @@ if (isset($_POST['action'])) {
                         'rut'        => $rutTitular,
                         'nombre'     => $data['subject']['CN'] ?? 'Titular',
                         'desde'      => date('Y-m-d', $data['validFrom_time_t']),
-                        'hasta'      => date('Y-m-d', $data['validTo_time_t'])
+                        'hasta'      => date('Y-m-d', $data['validTo_time_t']),
+                        'ambiente'   => $globalContext->getAmbiente()
                     ]);
                 }
             } else {
@@ -110,8 +116,13 @@ if (isset($_POST['action'])) {
             $xml = simplexml_load_string($content);
             if (!$xml || !isset($xml->CAF->DA->TD)) throw new Exception("El archivo no parece ser un CAF válido.");
 
+            $cafRut = strtoupper(preg_replace('/[^0-9K]/i', '', (string)$xml->CAF->DA->RE));
+            $empresaRut = strtoupper(preg_replace('/[^0-9K]/i', '', $globalContext->getRut()));
+            if ($cafRut === '' || $cafRut !== $empresaRut) {
+                throw new Exception('El CAF pertenece a un RUT distinto de la empresa seleccionada.');
+            }
             $tipo = (int)$xml->CAF->DA->TD;
-            $dest = $globalContext ? $globalContext->getCafPath($tipo) : CAF_DIR . "caf_{$tipo}.xml";
+            $dest = $globalContext->getCafPath($tipo);
             $dir = dirname($dest);
             
             if (!is_dir($dir)) mkdir($dir, 0755, true);
@@ -147,7 +158,7 @@ if (isset($_POST['action'])) {
 }
 
 // Leer certificado
-$certExists = file_exists($cCertPfx);
+$certExists = $hasCompanyContext && $cCertPfx !== '' && file_exists($cCertPfx);
 $certConf = [];
 $certInfo = null;
 if ($certExists) {
@@ -171,7 +182,7 @@ if ($certExists) {
 // Leer CAFs
 $cafsData = [];
 $tiposN = [33=>'Factura',34=>'Factura Exenta',39=>'Boleta',41=>'Boleta Exenta',52=>'Guía Despacho',56=>'Nota Débito',61=>'Nota Crédito'];
-foreach (glob($cCafDir . 'caf_*.xml') as $f) {
+foreach ($hasCompanyContext ? (glob($cCafDir . 'caf_*.xml') ?: []) : [] as $f) {
     preg_match('/caf_(\d+)\.xml$/', $f, $m);
     $tipo = (int)($m[1] ?? 0);
     $content = normalizeCafXmlContent((string)file_get_contents($f));
@@ -193,17 +204,26 @@ foreach (glob($cCafDir . 'caf_*.xml') as $f) {
     <div class="d-alert success"><i class="bi bi-check-circle"></i> Configuración actualizada correctamente.</div>
 <?php endif; ?>
 
+<?php if (!$hasCompanyContext): ?>
+    <div class="d-alert warning">
+        <i class="bi bi-building-exclamation"></i>
+        No hay empresas registradas o activas. Cree una empresa antes de configurar certificados digitales y folios CAF.
+    </div>
+<?php endif; ?>
+
 <div class="row g-4">
     <!-- Información de Empresa Activa -->
     <div class="col-12 mb-2">
         <div class="d-card" style="background: var(--c-surface); border-left: 4px solid var(--c-primary);">
             <div class="d-card-body py-3 d-flex align-items-center">
                 <div style="flex:1">
-                    <h5 class="mb-0 fw-bold"><?= $razonSocial ?></h5>
-                    <div style="font-size:.75rem; color:var(--c-text-muted)">Configurando parámetros para RUT: <strong><?= $rutEmisor ?></strong></div>
+                    <h5 class="mb-0 fw-bold"><?= $hasCompanyContext ? htmlspecialchars($razonSocial) : 'Sin empresa registrada' ?></h5>
+                    <div style="font-size:.75rem; color:var(--c-text-muted)">
+                        <?= $hasCompanyContext ? 'Configurando parametros para RUT: <strong>' . htmlspecialchars($rutEmisor) . '</strong>' : 'Registre y seleccione una empresa para comenzar.' ?>
+                    </div>
                 </div>
-                <?php if (!$globalContext): ?>
-                    <span class="d-badge warning"><i class="bi bi-exclamation-triangle"></i> Modo Legacy (Global)</span>
+                <?php if (!$hasCompanyContext): ?>
+                    <span class="d-badge warning"><i class="bi bi-building-exclamation"></i> Sin empresa</span>
                 <?php else: ?>
                     <span class="d-badge prod"><i class="bi bi-building-check"></i> Empresa Individual</span>
                 <?php endif; ?>
@@ -235,9 +255,9 @@ foreach (glob($cCafDir . 'caf_*.xml') as $f) {
             <div class="kpi-card">
                 <div class="kpi-icon green"><i class="bi bi-globe"></i></div>
                 <div class="kpi-content">
-                    <div class="kpi-value"><?= $ambiente === 'PRODUCCION' ? 'PROD' : 'CERT' ?></div>
+                    <div class="kpi-value"><?= $hasCompanyContext ? ($ambiente === 'PRODUCCION' ? 'PROD' : 'CERT') : '—' ?></div>
                     <div class="kpi-label">Ambiente Activo</div>
-                    <div class="kpi-trend <?= $ambiente === 'PRODUCCION' ? 'up' : 'down' ?>"><?= $ambiente === 'PRODUCCION' ? 'palena.sii.cl' : 'maullin.sii.cl' ?></div>
+                    <div class="kpi-trend <?= $hasCompanyContext && $ambiente === 'PRODUCCION' ? 'up' : 'down' ?>"><?= $hasCompanyContext ? ($ambiente === 'PRODUCCION' ? 'palena.sii.cl' : 'maullin.sii.cl') : 'Sin configurar' ?></div>
                 </div>
             </div>
         </div>
@@ -260,12 +280,12 @@ foreach (glob($cCafDir . 'caf_*.xml') as $f) {
                             <div style="color:var(--c-text-muted); margin-top:6px">Arrastre su archivo .pfx aquí</div>
                         <?php endif; ?>
                     </div>
-                    <input type="file" name="cert_file" id="cert_file_d" accept=".pfx,.p12" style="display:none">
+                    <input type="file" name="cert_file" id="cert_file_d" accept=".pfx,.p12" style="display:none" <?= $hasCompanyContext ? '' : 'disabled' ?>>
                     <div class="mt-3">
                         <label class="d-label">Contraseña del certificado</label>
-                        <input type="password" name="cert_pass" class="d-input" value="<?= htmlspecialchars($certConf['pass'] ?? '') ?>" placeholder="Contraseña del .pfx">
+                        <input type="password" name="cert_pass" class="d-input" value="<?= htmlspecialchars($certConf['pass'] ?? '') ?>" placeholder="Contraseña del .pfx" <?= $hasCompanyContext ? '' : 'disabled' ?>>
                     </div>
-                    <button type="submit" class="d-btn d-btn-primary w-100 mt-3">
+                    <button type="submit" class="d-btn d-btn-primary w-100 mt-3" <?= $hasCompanyContext ? '' : 'disabled' ?>>
                         <i class="bi bi-cloud-upload"></i> Instalar Certificado
                     </button>
                 </form>
@@ -285,8 +305,8 @@ foreach (glob($cCafDir . 'caf_*.xml') as $f) {
                         <div style="color:var(--c-text-muted); margin-top:6px">Arrastre su archivo CAF .xml aquí</div>
                         <div style="font-size:.7rem; color:var(--c-text-muted)">El tipo se detecta automáticamente</div>
                     </div>
-                    <input type="file" name="caf_file" id="caf_file_d" accept=".xml" style="display:none">
-                    <button type="submit" class="d-btn d-btn-success w-100 mt-3">
+                    <input type="file" name="caf_file" id="caf_file_d" accept=".xml" style="display:none" <?= $hasCompanyContext ? '' : 'disabled' ?>>
+                    <button type="submit" class="d-btn d-btn-success w-100 mt-3" <?= $hasCompanyContext ? '' : 'disabled' ?>>
                         <i class="bi bi-cloud-upload"></i> Instalar CAF
                     </button>
                 </form>

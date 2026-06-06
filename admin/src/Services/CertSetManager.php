@@ -83,9 +83,10 @@ class CertSetManager
         $txt = $this->normalizarTexto($rawContent);
 
         $boletas  = $this->parseBoletas($txt);
-        $facturas = $this->parseSetBasico($txt);
+        $casosGenerales = $this->parseCasosGenerales($txt);
+        $libroCompras = $this->parseLibroCompras($txt);
 
-        if (empty($boletas) && empty($facturas)) {
+        if (empty($boletas) && empty($casosGenerales)) {
             return ['ok' => false, 'error' => 'No se reconocieron casos de boleta ni de facturación en el archivo. Verifique que sea el .txt del Set de Pruebas del SII.'];
         }
 
@@ -95,13 +96,14 @@ class CertSetManager
             'uploaded'         => date('c'),
             'origen'           => $origen,
             'origen_boletas'   => !empty($boletas) ? $origen : ($actual['origen_boletas'] ?? null),
-            'origen_basico'    => !empty($facturas) ? $origen : ($actual['origen_basico'] ?? null),
+            'origen_basico'    => !empty($casosGenerales) ? $origen : ($actual['origen_basico'] ?? null),
             'atencion_basico'  => $this->extraerAtencion($txt, 'SET BASICO') ?? ($actual['atencion_basico'] ?? null),
             'atencion_ventas'  => $this->extraerAtencion($txt, 'SET LIBRO DE VENTAS') ?? ($actual['atencion_ventas'] ?? null),
             'atencion_compras' => $this->extraerAtencion($txt, 'SET LIBRO DE COMPRAS') ?? ($actual['atencion_compras'] ?? null),
             'atencion_guias'   => $this->extraerAtencion($txt, 'SET GUIA DE DESPACHO') ?? ($actual['atencion_guias'] ?? null),
             'boletas'          => !empty($boletas) ? $boletas : ($actual['boletas'] ?? []),
-            'facturas'         => !empty($facturas) ? $facturas : ($actual['facturas'] ?? []),
+            'facturas'         => !empty($casosGenerales) ? $casosGenerales : ($actual['facturas'] ?? []),
+            'libroCompras'     => !empty($libroCompras) ? $libroCompras : ($actual['libroCompras'] ?? []),
         ];
         $this->save($set);
 
@@ -186,19 +188,14 @@ class CertSetManager
     }
 
     // =========================================================
-    //  PARSER — SET BÁSICO (FACTURAS / NC / ND)
+    //  PARSER – SETS GENERALES (FACTURAS / GUÍAS / NC / ND / ETC)
     // =========================================================
 
-    private function parseSetBasico(string $txt): array
+    private function parseCasosGenerales(string $txt): array
     {
-        if (!preg_match('/SET\s+B[ÁA]SICO/iu', $txt)) return [];
-
-        // Aislar desde "SET BASICO" hasta el siguiente "SET " (libro de ventas, etc.)
-        $start = stripos($txt, 'SET BASICO');
-        if ($start === false) return [];
-        $sub = substr($txt, $start);
-        if (preg_match('/\nSET\s+LIBRO/i', $sub, $m, PREG_OFFSET_CAPTURE)) {
-            $sub = substr($sub, 0, $m[0][1]);
+        $sub = $txt;
+        if (preg_match('/SET\s+B[AÁ]SICO/iu', $txt, $m, PREG_OFFSET_CAPTURE)) {
+            $sub = substr($txt, $m[0][1]);
         }
 
         // Casos "CASO 4879708-1"
@@ -215,7 +212,15 @@ class CertSetManager
             $tipoDTE = $this->detectarTipoDoc($cuerpo);
             $items   = $this->parseItems($cuerpo, /*conIvaIncluido*/ false);
 
-            $caso = ['caso' => $caseId, 'tipoDTE' => $tipoDTE, 'items' => $items];
+            $caso = ['caso' => $caseId, 'tipoDTE' => $tipoDTE, 'items' => $items, 'atencion' => $atencion, 'num' => (int)$num];
+
+            // Detalles específicos de guías de despacho (traslado / motivo)
+            if (preg_match('/MOTIVO:\s*(.+?)(?:\n|$)/iu', $cuerpo, $mm)) {
+                $caso['motivo'] = trim($mm[1]);
+            }
+            if (preg_match('/TRASLADO\s+POR:\s*(.+?)(?:\n|$)/iu', $cuerpo, $mm)) {
+                $caso['trasladoPor'] = trim($mm[1]);
+            }
 
             // Descuento global "DESCUENTO GLOBAL ITEMES AFECTOS  23%"
             if (preg_match('/DESCUENTO\s+GLOBAL[^\d]*(\d+)\s*%/iu', $cuerpo, $m)) {
@@ -324,10 +329,64 @@ class CertSetManager
         }
 
         // Unidad de medida (ej. Kg)
-        if (preg_match('/unidad\s+de\s+medida\s+en\s+([A-Za-zº°]+)/iu', $cuerpo, $m)) {
+        if (preg_match('/unidad\s+de\s+medida\s+en\s+([A-Za-zñÑ]+)/iu', $cuerpo, $m)) {
             $um = trim($m[1]);
             foreach ($items as &$it) { $it['unidadMedida'] = $um; }
             unset($it);
         }
+    }
+
+    public function parseLibroCompras(string $txt): array
+    {
+        if (!preg_match('/SET\s+LIBRO\s+DE\s+COMPRAS[^\n]*\n={5,}([\s\S]*?)={5,}/iu', $txt, $m)) {
+            return [];
+        }
+
+        $sub = trim($m[1]);
+        $sub = preg_replace('/TIPO DOCUMENTO[^\n]+\n[^\n]+\n[^\n]+\n/iu', '', $sub);
+
+        $lines = explode("\n", $sub);
+        $compras = [];
+
+        for ($i = 0; $i < count($lines); $i++) {
+            $l = trim($lines[$i]);
+            if ($l === '') continue;
+
+            if (preg_match('/^(.+?)\s+(\d+)$/u', $l, $mm)) {
+                $tipoDocStr = trim($mm[1]);
+                $folio = (int)$mm[2];
+                $obs = trim($lines[$i+1] ?? '');
+                
+                $montosLine = trim($lines[$i+2] ?? '');
+                $exento = 0;
+                $afecto = 0;
+                if (preg_match('/^(\d+)\s+(\d+)$/', $montosLine, $mmm)) {
+                    $exento = (int)$mmm[1];
+                    $afecto = (int)$mmm[2];
+                } elseif (preg_match('/^(\d+)$/', $montosLine, $mmm)) {
+                    $afecto = (int)$mmm[1];
+                }
+
+                $tipo = 33;
+                if (stripos($tipoDocStr, 'FACTURA DE COMPRA ELECTRONICA') !== false) $tipo = 46;
+                elseif (stripos($tipoDocStr, 'FACTURA DE COMPRA') !== false) $tipo = 46;
+                elseif (stripos($tipoDocStr, 'FACTURA ELECTRONICA') !== false) $tipo = 33;
+                elseif (stripos($tipoDocStr, 'FACTURA NO AFECTA') !== false) $tipo = 34;
+                elseif (stripos($tipoDocStr, 'FACTURA') !== false) $tipo = 33;
+                elseif (stripos($tipoDocStr, 'NOTA DE CREDITO ELECTRONICA') !== false) $tipo = 61;
+                elseif (stripos($tipoDocStr, 'NOTA DE CREDITO') !== false) $tipo = 61;
+                elseif (stripos($tipoDocStr, 'NOTA DE DEBITO') !== false) $tipo = 56;
+
+                $compras[] = [
+                    'tipo'   => $tipo,
+                    'folio'  => $folio,
+                    'obs'    => $obs,
+                    'exento' => $exento,
+                    'afecto' => $afecto,
+                ];
+                $i += 2;
+            }
+        }
+        return $compras;
     }
 }

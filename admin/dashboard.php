@@ -1,9 +1,9 @@
 <?php
 /**
- * Dashboard DTE — Layout Maestro
- * Sistema profesional de facturación electrónica
+ * Dashboard DTE â€” Layout Maestro
+ * Sistema profesional de facturaciÃ³n electrÃ³nica
  */
-session_start();
+if (session_status() === PHP_SESSION_NONE) session_start();
 date_default_timezone_set('America/Santiago');
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
@@ -12,7 +12,7 @@ if (file_exists(__DIR__ . '/openssl_legacy.cnf')) {
     putenv('OPENSSL_CONF=' . __DIR__ . '/openssl_legacy.cnf');
 }
 
-// ── Guard de autenticación ────────────────────────────────────────────────────
+// â”€â”€ Guard de autenticaciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Solo operadores autenticados en admin_usuario pueden acceder al dashboard.
 if (empty($_SESSION['admin_id'])) {
     $redirect = urlencode($_SERVER['REQUEST_URI'] ?? 'dashboard.php');
@@ -21,15 +21,15 @@ if (empty($_SESSION['admin_id'])) {
 }
 $adminNombre = $_SESSION['admin_nombre'] ?? 'Admin';
 $adminRol    = $_SESSION['admin_rol']    ?? 'operador';
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 require_once __DIR__ . '/autoload.php';
 use App\Core\Database;
 
 ob_start();
 
-// ── Lógica de Cambio de Empresa ──
-// (Ya no existe la opción "0/Legacy": solo se cambia entre empresas reales)
+// â”€â”€ LÃ³gica de Cambio de Empresa â”€â”€
+// (Ya no existe la opciÃ³n "0/Legacy": solo se cambia entre empresas reales)
 if (isset($_GET['switch_empresa'])) {
     $newId = (int)$_GET['switch_empresa'];
     if ($newId > 0) {
@@ -55,114 +55,61 @@ if (isset($_GET['switch_empresa'])) {
     exit;
 }
 
-// ── Módulo activo ──
+// â”€â”€ MÃ³dulo activo â”€â”€
 $module = $_GET['module'] ?? 'clientes_mypos';
 $allowed = ['clientes_mypos','emision','consultas','historial','libros','empresas','config','certificacion','cafs','pos_urgencia','dispositivos',];
 if (!in_array($module, $allowed)) $module = 'clientes_mypos';
 
-// ── Intentar conexión DB (opcional, no bloquea) ──
+// â”€â”€ Intentar conexiÃ³n DB (opcional, no bloquea) â”€â”€
 $dbOk = false;
 $empresas = [];
-$empresaProd = null;   // empresa de producción (selección por defecto)
 try {
     $db = Database::getInstance();
     $dbOk = true;
 
-    $useSiiTables = false;
-    try {
-        $stmt = $db->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sii_empresa'");
-        if ((int)$stmt->fetchColumn() > 0) {
-            $stmt = $db->query("SELECT COUNT(*) FROM sii_empresa WHERE activo = 1");
-            $useSiiTables = ((int)$stmt->fetchColumn()) > 0;
-        }
-    } catch (Exception $e) {}
+    $empresas = $db->query("SELECT id, rut, razon_social, ambiente_default, activo FROM sii_empresa WHERE activo = 1 ORDER BY razon_social")->fetchAll(PDO::FETCH_ASSOC);
 
-    if ($useSiiTables) {
-        $empresas = $db->query("SELECT id, rut, razon_social, ambiente_default, activo FROM sii_empresa WHERE activo = 1 ORDER BY razon_social")->fetchAll(PDO::FETCH_ASSOC);
-    } else {
-        $empresas = $db->query("
-            SELECT e.id, e.rut, e.razon_social,
-                   COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default,
-                   e.activo
-            FROM empresas e
-            LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id
-            WHERE e.activo = 1
-            ORDER BY e.razon_social
-        ")->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    // Empresa de producción: selección por defecto cuando no hay una activa.
-    // Elimina el antiguo modo "Legacy": siempre operamos sobre una empresa real.
-    foreach ($empresas as $e) {
-        if (strtolower((string)$e['ambiente_default']) === 'produccion') {
-            $empresaProd = $e;
-            break;
-        }
-    }
-    if ($empresaProd === null && !empty($empresas)) {
-        $empresaProd = $empresas[0]; // sin producción definida: primera activa
-    }
-    // Autoseleccionar/validar la empresa activa ANTES de cargar api.php para que
-    // Context se construya sobre una empresa REAL. Si la sesión apunta a un id
-    // que ya no existe entre las empresas activas (sesión vieja, empresa borrada,
-    // o id de otra tabla), se resetea automáticamente para evitar el fatal en
-    // Context (auto-sanación de sesión).
+    // Nunca se selecciona una empresa automaticamente.
     $idsValidos = array_map(fn($e) => (int)$e['id'], $empresas);
     $sesActual  = (int)($_SESSION['active_empresa_id'] ?? 0);
-    if ($sesActual <= 0 || !in_array($sesActual, $idsValidos, true)) {
-        if ($empresaProd !== null) {
-            $_SESSION['active_empresa_id'] = (int)$empresaProd['id'];
-        } else {
-            unset($_SESSION['active_empresa_id']);
-        }
+    if ($sesActual > 0 && !in_array($sesActual, $idsValidos, true)) {
+        unset($_SESSION['active_empresa_id']);
     }
 } catch (Exception $e) {
-    // DB no disponible — modo degradado de SOLO LECTURA sobre constantes.
-    // El selector NUNCA muestra "Legacy"; muestra la última empresa conocida.
+    // DB no disponible â€” modo degradado de SOLO LECTURA sobre constantes.
+    // El selector NUNCA muestra "Legacy"; muestra la Ãºltima empresa conocida.
 }
 
-// ── Datos del emisor (desde constantes legacy o DB) ──
+// â”€â”€ Datos del emisor (desde constantes legacy o DB) â”€â”€
 define('DTE_API_BOOTSTRAP_ONLY', true);
 require_once __DIR__ . '/api.php';
 
-$ambiente = $globalContext ? $globalContext->getAmbiente() : AMBIENTE;
+$ambiente = $globalContext ? $globalContext->getAmbiente() : '';
 $rutEmisor = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
 $razonSocial = $globalContext ? $globalContext->getEmpresa()['razon_social'] : RAZON_SOCIAL;
 
-// Contar archivos temporales y CAFs
-$tmpCount = count(glob(TMP_DIR . '*.xml') ?: []);
-$cafFiles = glob(CAF_DIR . 'caf_*.xml') ?: [];
+// Contar solo archivos de la empresa activa. Sin empresa no se exponen datos legacy.
+$tmpCount = $globalContext ? count(glob($actualTmpDir . '*.xml') ?: []) : 0;
+$cafFiles = $globalContext ? (glob($actualCafDir . 'caf_*.xml') ?: []) : [];
 $cafCount = count($cafFiles);
 
 // Urgencia POS: nivel global para badge en sidebar
 $posUrgencia = 'ok';
 $posPendiente = 0;
-if ($dbOk) {
-    try {
-        $alertaMgr  = new \App\Services\FoliosAlertaManager();
-        $queueMgr   = new \App\Services\DteLocalQueueManager();
-        $urgGlobal  = $alertaMgr->urgenciaGlobal();
-        $posUrgencia = $urgGlobal['urgencia_global'] ?? 'ok';
-        $colaResumen = $queueMgr->estadoCola();
-        $posPendiente = (int)($colaResumen['resumen']['pendiente'] ?? 0);
-    } catch (\Exception $e) {
-        // silencioso — no bloquear el dashboard
-    }
-}
 
-// ── Títulos por módulo ──
+// â”€â”€ TÃ­tulos por mÃ³dulo â”€â”€
 $titles = [
     'clientes_mypos' => ['Clientes MyPOS', 'Estado DTE, folios y certificacion por cliente'],
-    'empresas'      => ['Empresas', 'Gestión multi-cliente y Onboarding'],
-    'config'        => ['Configuración DTE', 'Certificados y firma electrónica'],
-    'cafs'          => ['Folios CAF', 'Gestión centralizada por sucursal'],
+    'empresas'      => ['Empresas', 'GestiÃ³n multi-cliente y Onboarding'],
+    'config'        => ['ConfiguraciÃ³n DTE', 'Certificados y firma electrÃ³nica'],
+    'cafs'          => ['Folios CAF', 'GestiÃ³n centralizada por sucursal'],
     'dispositivos'  => ['Dispositivos POS', 'Enrolamiento de hardware'],
     'pos_urgencia'  => ['Urgencias POS', 'Cola de DTEs y stock de folios POS'],
-    'emision'       => ['Emisión Manual', 'Generar documentos tributarios (Respaldo)'],
+    'emision'       => ['EmisiÃ³n Manual', 'Generar documentos tributarios (Respaldo)'],
     'consultas'     => ['Consultas SII', 'Verificar estados de documentos'],
     'historial'     => ['Historial DTE', 'Documentos emitidos'],
     'libros'        => ['Libros & RCOF', 'Reportes tributarios'],
-    'certificacion' => ['Certificación SII', 'Pool de pruebas (Solo No-Prod)'],
+    'certificacion' => ['CertificaciÃ³n SII', 'Pool de pruebas (Solo No-Prod)'],
 ];
 
 $pageTitle = $titles[$module][0] ?? 'Dashboard';
@@ -173,7 +120,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= $pageTitle ?> — DTE Pro</title>
+    <title><?= $pageTitle ?> â€” DTE Pro</title>
     <link rel="stylesheet" href="assets/css/dashboard.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -207,9 +154,9 @@ $pageSubtitle = $titles[$module][1] ?? '';
 
 <div class="dash-layout">
 
-    <!-- ══════════════════════════════════════ -->
+    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
     <!-- SIDEBAR -->
-    <!-- ══════════════════════════════════════ -->
+    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
     <aside class="dash-sidebar" id="sidebar">
         <!-- Brand -->
         <div class="dash-sidebar-brand">
@@ -218,7 +165,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
             </div>
             <div class="brand-text">
                 DTE Pro
-                <small>Facturación Electrónica</small>
+                <small>FacturaciÃ³n ElectrÃ³nica</small>
             </div>
         </div>
         
@@ -226,23 +173,24 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <div style="padding: 10px 20px;">
             <label style="font-size: 0.62rem; color: var(--c-sidebar-text); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; display: block; margin-bottom: 6px; opacity: 0.6;">Cambiar Empresa</label>
             <?php if ($dbOk && !empty($empresas)): ?>
-            <select class="empresa-selector" onchange="location.href='dashboard.php?module=<?= $module ?>&switch_empresa=' + this.value">
+            <select class="empresa-selector" onchange="if(this.value){location.href='dashboard.php?module=<?= $module ?>&switch_empresa=' + this.value}">
+                <option value="" <?= empty($_SESSION['active_empresa_id']) ? 'selected' : '' ?>>Seleccione una empresa</option>
                 <?php foreach ($empresas as $emp): ?>
                     <option value="<?= $emp['id'] ?>" <?= (isset($_SESSION['active_empresa_id']) && $_SESSION['active_empresa_id'] == $emp['id']) ? 'selected' : '' ?>>
-                        <?= strtolower((string)$emp['ambiente_default']) === 'produccion' ? '🏢' : '🧪' ?> <?= htmlspecialchars($emp['razon_social']) ?>
+                        <?= strtolower((string)$emp['ambiente_default']) === 'produccion' ? 'ðŸ¢' : 'ðŸ§ª' ?> <?= htmlspecialchars($emp['razon_social']) ?>
                     </option>
                 <?php endforeach; ?>
             </select>
             <?php else: ?>
-            <select class="empresa-selector" disabled title="Base de datos no disponible — modo solo lectura">
-                <option selected>🏢 <?= htmlspecialchars($razonSocial) ?> (solo lectura)</option>
+            <select class="empresa-selector" disabled>
+                <option selected>Sin empresas registradas</option>
             </select>
             <?php endif; ?>
         </div>
 
         <!-- Navigation -->
         <nav class="dash-nav">
-            <div class="dash-nav-section">1. Configuración del Cliente</div>
+            <div class="dash-nav-section">1. ConfiguraciÃ³n del Cliente</div>
             <a href="dashboard.php?module=clientes_mypos" class="dash-nav-item <?= $module === 'clientes_mypos' ? 'active' : '' ?>">
                 <i class="bi bi-clipboard2-pulse"></i> Clientes MyPOS
             </a>
@@ -253,9 +201,9 @@ $pageSubtitle = $titles[$module][1] ?? '';
                 <?php endif; ?>
             </a>
 
-            <div class="dash-nav-section">2. Operación y Hardware</div>
+            <div class="dash-nav-section">2. OperaciÃ³n y Hardware</div>
             <a href="dashboard.php?module=config" class="dash-nav-item <?= $module === 'config' ? 'active' : '' ?>">
-                <i class="bi bi-gear"></i> Configuración DTE
+                <i class="bi bi-gear"></i> ConfiguraciÃ³n DTE
             </a>
             <a href="dashboard.php?module=cafs" class="dash-nav-item <?= $module === 'cafs' ? 'active' : '' ?>">
                 <i class="bi bi-collection"></i> Folios CAF
@@ -289,7 +237,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
             <a href="dashboard.php?module=pos_urgencia" class="dash-nav-item <?= $module === 'pos_urgencia' ? 'active' : '' ?>">
                 <i class="bi bi-exclamation-triangle"></i> Urgencias POS
                 <?php if ($posUrgencia === 'critico'): ?>
-                    <span class="dash-nav-badge danger" title="Stock crítico en algún POS">!</span>
+                    <span class="dash-nav-badge danger" title="Stock crÃ­tico en algÃºn POS">!</span>
                 <?php elseif ($posUrgencia === 'bajo' || $posPendiente > 0): ?>
                     <span class="dash-nav-badge warning" title="<?= $posPendiente > 0 ? "$posPendiente DTEs pendientes" : 'Stock bajo' ?>">
                         <?= $posPendiente > 0 ? $posPendiente : '~' ?>
@@ -297,7 +245,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
                 <?php endif; ?>
             </a>
             <a href="dashboard.php?module=emision" class="dash-nav-item <?= $module === 'emision' ? 'active' : '' ?>">
-                <i class="bi bi-file-earmark-plus"></i> Emisión Manual
+                <i class="bi bi-file-earmark-plus"></i> EmisiÃ³n Manual
             </a>
             <a href="dashboard.php?module=consultas" class="dash-nav-item <?= $module === 'consultas' ? 'active' : '' ?>">
                 <i class="bi bi-search"></i> Consultas SII
@@ -312,9 +260,9 @@ $pageSubtitle = $titles[$module][1] ?? '';
                 <i class="bi bi-journal-text"></i> Libros & RCOF
             </a>
 
-            <div class="dash-nav-section">4. Zona de Certificación</div>
+            <div class="dash-nav-section">4. Zona de CertificaciÃ³n</div>
             <a href="dashboard.php?module=certificacion" class="dash-nav-item <?= $module === 'certificacion' ? 'active' : '' ?>">
-                <i class="bi bi-shield-check"></i> Certificación SII
+                <i class="bi bi-shield-check"></i> CertificaciÃ³n SII
             </a>
         </nav>
 
@@ -322,7 +270,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <div class="dash-sidebar-footer">
             <div class="env-badge <?= $ambiente === 'PRODUCCION' ? 'prod' : 'cert' ?>">
                 <i class="bi bi-circle-fill" style="font-size:.45rem"></i>
-                <?= $ambiente === 'PRODUCCION' ? 'Producción' : 'Certificación' ?>
+                <?= $globalContext ? ($ambiente === 'PRODUCCION' ? 'ProducciÃ³n' : 'CertificaciÃ³n') : 'Sin empresa' ?>
             </div>
             <div style="color:var(--c-sidebar-text); font-size:.65rem; margin-top:6px;">
                 <?= $razonSocial ?><br>RUT <?= $rutEmisor ?>
@@ -337,15 +285,15 @@ $pageSubtitle = $titles[$module][1] ?? '';
                    style="display:flex;align-items:center;gap:6px;font-size:.7rem;color:#f87171;text-decoration:none;padding:5px 8px;border-radius:6px;transition:background .15s;"
                    onmouseover="this.style.background='rgba(248,113,113,.12)'"
                    onmouseout="this.style.background='transparent'">
-                    <i class="bi bi-box-arrow-right"></i> Cerrar sesión
+                    <i class="bi bi-box-arrow-right"></i> Cerrar sesiÃ³n
                 </a>
             </div>
         </div>
     </aside>
 
-    <!-- ══════════════════════════════════════ -->
+    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
     <!-- MAIN -->
-    <!-- ══════════════════════════════════════ -->
+    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
     <main class="dash-main">
         <!-- Header -->
         <header class="dash-header">
@@ -370,10 +318,13 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <div class="dash-content">
             <?php
             $moduleFile = __DIR__ . "/modules/{$module}.php";
-            if (file_exists($moduleFile)) {
+            $globalModules = ['clientes_mypos', 'empresas'];
+            if (!$globalContext && !in_array($module, $globalModules, true)) {
+                echo '<div class="d-alert warning"><i class="bi bi-building-exclamation"></i> Seleccione una empresa para acceder a este modulo.</div>';
+            } elseif (file_exists($moduleFile)) {
                 include $moduleFile;
             } else {
-                echo '<div class="d-alert warning"><i class="bi bi-exclamation-triangle"></i> Módulo <strong>' . htmlspecialchars($module) . '</strong> aún no implementado.</div>';
+                echo '<div class="d-alert warning"><i class="bi bi-exclamation-triangle"></i> MÃ³dulo <strong>' . htmlspecialchars($module) . '</strong> aÃºn no implementado.</div>';
             }
             ?>
         </div>
@@ -384,7 +335,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
 <script src="https://cdn.jsdelivr.net/npm/bwip-js"></script>
 <script src="jscript.js?v=<?= filemtime(__DIR__ . '/jscript.js') ?>"></script>
 <script>
-// Cerrar sidebar en móvil al hacer clic fuera
+// Cerrar sidebar en mÃ³vil al hacer clic fuera
 document.addEventListener('click', e => {
     const sb = document.getElementById('sidebar');
     if (window.innerWidth <= 991 && sb.classList.contains('open') && !sb.contains(e.target) && !e.target.closest('.dash-toggle')) {
@@ -392,7 +343,7 @@ document.addEventListener('click', e => {
     }
 });
 </script>
-<!-- Zona de Impresión (Bypass de Dash containers) -->
+<!-- Zona de ImpresiÃ³n (Bypass de Dash containers) -->
 <div id="zona-impresion" style="display:none"></div>
 
 </body>

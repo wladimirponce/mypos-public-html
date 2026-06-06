@@ -26,12 +26,23 @@ class CertificationManager
     private string  $statePath;
 
     /** Casos del Set de Pruebas — orden de ejecución */
-    private const PRUEBAS_CASES = [
-        'B-CASO-1','B-CASO-2','B-CASO-3','B-CASO-4','B-CASO-5',
-        'F-4832043-1','F-4832043-2','F-4832043-3','F-4832043-4',
-        'F-4832043-5','F-4832043-6','F-4832043-7','F-4832043-8',
-        'G-4820753-1','G-4820753-2','G-4820753-3',
-    ];
+    /** Casos del Set de Pruebas – generados dinámicamente */
+    public function getPruebasCases(): array
+    {
+        $setMgr = new \App\Services\CertSetManager($this->context);
+        $cases = [];
+        foreach ($setMgr->getBoletas() as $b) {
+            $cases[] = 'B-' . $b['caso'];
+        }
+        foreach ($setMgr->getFacturas() as $f) {
+            $prefix = 'F-';
+            if ($f['tipoDTE'] == 52) $prefix = 'G-';
+            elseif ($f['tipoDTE'] == 43) $prefix = 'L-';
+            elseif ($f['tipoDTE'] == 46) $prefix = 'C-';
+            $cases[] = $prefix . $f['caso'];
+        }
+        return $cases;
+    }
 
     /** Tipos a simular y cantidad requerida */
     private const SIM_TIPOS    = [33, 39];
@@ -126,7 +137,7 @@ class CertificationManager
         if (empty($state)) $state = $this->loadState();
 
         $toRun = empty($caseIds)
-            ? array_filter(self::PRUEBAS_CASES, fn($id) => ($state['pruebas'][$id]['status'] ?? 'pending') !== 'ok')
+            ? array_filter($this->getPruebasCases(), fn($id) => ($state['pruebas'][$id]['status'] ?? 'pending') !== 'ok')
             : $caseIds;
 
         if ($this->isSetBasicoRun($toRun)) {
@@ -148,7 +159,7 @@ class CertificationManager
             return false;
         }
         foreach ($caseIds as $caseId) {
-            if (!preg_match('/^F-\d+-\d+$/', (string)$caseId)) {
+            if (!preg_match('/^([FGLC])-\d+-\d+$/', (string)$caseId)) {
                 return false;
             }
         }
@@ -408,7 +419,7 @@ class CertificationManager
 
     private function getUploadedCertCaseData(string $caseId, array $state): ?array
     {
-        if (!preg_match('/^F-\d+-(\d+)$/', $caseId, $m)) {
+        if (!preg_match('/^([FGLC])-\d+-(\d+)$/', $caseId, $m)) {
             return null;
         }
 
@@ -418,22 +429,27 @@ class CertificationManager
             return null;
         }
 
-        $num = (int)$m[1];
+        $num = (int)$m[2];
+        $prefix = $m[1];
+        
         $caso = null;
         foreach ($casos as $candidate) {
-            if (preg_match('/-(\d+)$/', (string)($candidate['caso'] ?? ''), $cm) && (int)$cm[1] === $num) {
+            $candidatePrefix = 'F';
+            if ($candidate['tipoDTE'] == 52) $candidatePrefix = 'G';
+            elseif ($candidate['tipoDTE'] == 43) $candidatePrefix = 'L';
+            elseif ($candidate['tipoDTE'] == 46) $candidatePrefix = 'C';
+
+            if ($candidatePrefix === $prefix && preg_match('/-(\d+)$/', (string)($candidate['caso'] ?? ''), $cm) && (int)$cm[1] === $num) {
                 $caso = $candidate;
                 break;
             }
         }
-        if (!$caso && isset($casos[$num - 1])) {
-            $caso = $casos[$num - 1];
-        }
+        
         if (!$caso) {
             return null;
         }
 
-        $tipoDte = $this->tipoDteForSetBasicoCase($num, (int)($caso['tipoDTE'] ?? 33));
+        $tipoDte = (int)($caso['tipoDTE'] ?? 33);
         $items   = $caso['items'] ?? [];
         $data = [
             'tipoDTE'  => $tipoDte,
@@ -896,12 +912,20 @@ XML;
         $state  = $this->loadState();
         $tmpDir = $this->context->getTmpPath();
 
-        // Definición de comportamiento especial de cada caso en el libro
-        $casesConfig = [
-            'G-4820753-1' => ['tpoOper' => 5, 'anulado' => 0],  // traslado interno
-            'G-4820753-2' => ['tpoOper' => 1, 'anulado' => 0],  // venta, facturada en período
-            'G-4820753-3' => ['tpoOper' => 1, 'anulado' => 2],  // venta, anulada
-        ];
+        $setMgr = new \App\Services\CertSetManager($this->context);
+        $casesConfig = [];
+        foreach ($setMgr->getFacturas() as $f) {
+            if ($f['tipoDTE'] == 52) {
+                $caseId = 'G-' . $f['caso'];
+                $motivo = strtolower($f['motivo'] ?? '');
+                $tpoOper = 1; // venta
+                if (strpos($motivo, 'interno') !== false || strpos($motivo, 'bodega') !== false) {
+                    $tpoOper = 5; // traslado interno
+                }
+                $anulado = ($f['num'] == 3) ? 2 : 0; // Por regla SII general, la 3 es la anulada
+                $casesConfig[$caseId] = ['tpoOper' => $tpoOper, 'anulado' => $anulado];
+            }
+        }
 
         $detalles  = [];
         $faltantes = [];
@@ -979,39 +1003,43 @@ XML;
         // RUT del SII como proveedor de los docs en papel y FE de prueba
         $rutSII  = '60803000-K';
         $nomSII  = 'SII DE PRUEBAS';
+        $setMgr = new \App\Services\CertSetManager($this->context);
+        $detalles = [];
+        foreach ($setMgr->getLibroCompras() as $c) {
+            $neto  = $c['afecto'];
+            $exe   = $c['exento'];
+            $iva   = (int)round($neto * 0.19);
+            $total = $neto + $iva + $exe;
 
-        $detalles = [
-            // Factura papel 234 — afecto crédito pleno
-            ['tipo'=>33,'folio'=>234,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>11563,'iva'=>2197,'exe'=>0,'total'=>13760],
+            $d = [
+                'tipo'  => $c['tipo'],
+                'folio' => $c['folio'],
+                'fecha' => $fecha,
+                'rut'   => $rutSII,
+                'razon' => $nomSII,
+                'neto'  => $neto,
+                'iva'   => $iva,
+                'exe'   => $exe,
+                'total' => $total,
+            ];
 
-            // FE 32 — afecto + exento, crédito pleno
-            ['tipo'=>33,'folio'=>32,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>5021,'iva'=>954,'exe'=>8299,'total'=>14274],
+            $obs = strtolower($c['obs']);
+            if (strpos($obs, 'uso comun') !== false || strpos($obs, 'uso común') !== false) {
+                $d['mntIvaUsoComun'] = $iva;
+                $d['fctProp'] = 0.60;
+                $d['iva'] = 0;
+            }
+            if (strpos($obs, 'gratuita') !== false || strpos($obs, 'no recuperable') !== false) {
+                $d['codIvaNoRec'] = 4;
+                $d['mntIvaNoRec'] = $iva;
+                $d['iva'] = 0;
+            }
+            if (strpos($obs, 'retencion') !== false || strpos($obs, 'retención') !== false) {
+                $d['ivaRetTotal'] = $iva;
+            }
 
-            // Factura papel 781 - IVA uso comun, factor prop = 0.60
-            ['tipo'=>33,'folio'=>781,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>29668,'iva'=>0,'exe'=>0,'total'=>35305,
-             'mntIvaUsoComun'=>5637,'fctProp'=>0.60],
-
-            // NC papel 451 - descuento sobre factura 234
-            ['tipo'=>61,'folio'=>451,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>2655,'iva'=>504,'exe'=>0,'total'=>3159],
-
-            // FE 67 — entrega gratuita, IVA no recuperable (cód. 4)
-            ['tipo'=>33,'folio'=>67,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>9383,'iva'=>0,'exe'=>0,'total'=>11166,
-             'codIvaNoRec'=>4,'mntIvaNoRec'=>1783],
-
-            // Factura de compra 9 - retención total (cód. 6 => ivaRetTotal)
-            ['tipo'=>46,'folio'=>9,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>9253,'iva'=>1758,'exe'=>0,'total'=>11011,
-             'ivaRetTotal'=>1758],
-
-            // NC papel 211 — descuento sobre FE 32
-            ['tipo'=>61,'folio'=>211,'fecha'=>$fecha,'rut'=>$rutSII,'razon'=>$nomSII,
-             'neto'=>3068,'iva'=>583,'exe'=>0,'total'=>3651],
-        ];
+            $detalles[] = $d;
+        }
 
         $result = sendLibro([
             'tipoLibro' => 'COMPRA',
@@ -1050,7 +1078,7 @@ XML;
         $dtes   = [];
 
         // Set de Pruebas
-        foreach (self::PRUEBAS_CASES as $caseId) {
+        foreach ($this->getPruebasCases() as $caseId) {
             $info = $state['pruebas'][$caseId] ?? null;
             if (!$info || $info['status'] !== 'ok' || !$info['folio']) continue;
             $tipo    = (int)($info['tipo'] ?? $this->detectTipo($caseId));
