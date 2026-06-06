@@ -1056,7 +1056,9 @@ XML;
             $tipo    = (int)($info['tipo'] ?? $this->detectTipo($caseId));
             $xmlFile = $tmpDir . "dte_T{$tipo}F{$info['folio']}.xml";
             if (file_exists($xmlFile)) {
-                $dtes[] = ['label' => $caseId, 'tipo' => $tipo, 'folio' => $info['folio'], 'xml' => file_get_contents($xmlFile)];
+                $xmlContent = file_get_contents($xmlFile);
+                $xmlUtf8 = mb_convert_encoding($xmlContent, 'UTF-8', 'ISO-8859-1');
+                $dtes[] = ['label' => $caseId, 'tipo' => $tipo, 'folio' => $info['folio'], 'xml' => $xmlUtf8];
             }
         }
 
@@ -1069,7 +1071,9 @@ XML;
                 if ($simCount >= 10) break;
                 $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
                 if (file_exists($xmlFile)) {
-                    $dtes[] = ['label' => "SIM-T{$tipo}", 'tipo' => $tipo, 'folio' => $folio, 'xml' => file_get_contents($xmlFile)];
+                    $xmlContent = file_get_contents($xmlFile);
+                    $xmlUtf8 = mb_convert_encoding($xmlContent, 'UTF-8', 'ISO-8859-1');
+                    $dtes[] = ['label' => "SIM-T{$tipo}", 'tipo' => $tipo, 'folio' => $folio, 'xml' => $xmlUtf8];
                     $simCount++;
                 }
             }
@@ -1080,11 +1084,13 @@ XML;
         if (is_dir($boletasDir)) {
             foreach (glob($boletasDir . 'dte_T*F*.xml') ?: [] as $bxml) {
                 if (preg_match('/dte_T(\d+)F(\d+)\.xml$/', $bxml, $mm)) {
+                    $xmlContent = file_get_contents($bxml);
+                    $xmlUtf8 = mb_convert_encoding($xmlContent, 'UTF-8', 'ISO-8859-1');
                     $dtes[] = [
                         'label' => 'BOLETA SET',
                         'tipo'  => (int)$mm[1],
                         'folio' => (int)$mm[2],
-                        'xml'   => file_get_contents($bxml),
+                        'xml'   => $xmlUtf8,
                     ];
                 }
             }
