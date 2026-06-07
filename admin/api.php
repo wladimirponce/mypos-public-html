@@ -2982,7 +2982,7 @@ function aplicarDescuentoGlobalMontos(array $montos, $descuentoGlobal): array {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // SOBRE DE ENVÃO (EnvioDTE)
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function siiFormatDate(string $date, string $fallback = '2026-06-05'): string {
+function siiFormatDate(string $date, string $fallback = ''): string {
     $date = trim($date);
     if ($date === '') return $fallback;
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return $date;
