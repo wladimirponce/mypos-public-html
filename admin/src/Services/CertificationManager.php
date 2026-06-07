@@ -1166,7 +1166,7 @@ XML;
                 $d['iva'] = 0;
             }
             if (strpos($obs, 'gratuita') !== false || strpos($obs, 'no recuperable') !== false) {
-                $d['codIvaNoRec'] = 5; // cód. 5 = IVA entregas gratuitas Art. 23 Nº2 (no 4)
+                $d['codIvaNoRec'] = 4; // cód. 4 = Entrega Gratuita (según LibroCV_v10.xsd)
                 $d['mntIvaNoRec'] = $iva;
                 $d['iva'] = 0;
             }

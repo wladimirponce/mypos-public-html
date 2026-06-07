@@ -2873,8 +2873,10 @@ function signDTE(string $xml, string $certPem, $privKey, string $idToSign): stri
     preg_match('/-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----/s', $certPem, $mc);
     $certB64 = preg_replace('/\s+/', '', $mc[1] ?? '');
 
-    $isLibroGuia = (strpos($xml, '<LibroGuia') !== false);
-    $nsSig = $isLibroGuia ? 'http://www.sii.cl/SiiDte' : 'http://www.w3.org/2000/09/xmldsig#';
+    // Siempre usar xmldsig# — el SII valida server-side con ese namespace para todos
+    // los tipos de documento (LibroCV, LibroGuia, EnvioDTE…). El LibroGuia_v10.xsd local
+    // tenía una definición propia SiiDte:SignatureType, pero el servidor SII rechaza eso.
+    $nsSig = 'http://www.w3.org/2000/09/xmldsig#';
 
     // SignedInfo
     $signedInfoXml = '<SignedInfo xmlns="' . $nsSig . '">'
@@ -4639,7 +4641,9 @@ function detectXSDForXML(string $xml): ?string {
         'DTE'            => 'DTE_v10.xsd',
         'ConsumoFolios'  => 'ConsumoFolio_v10.xsd',
         'LibroCompraVenta'=> 'LibroCV_v10.xsd',
-        'LibroGuia'      => 'LibroGuia_v10.xsd',
+        // LibroGuia_v10.xsd local define Signature en namespace SiiDte pero SII server
+        // espera xmldsig# → la validación local da falso negativo; SII valida server-side.
+        'LibroGuia'      => null,
         'LibroBoleta'    => 'LibroBOLETA_v10.xsd',
         'RespuestaEnvioDTE' => 'RespuestaEnvioDTE_v10.xsd',
         'AEC'            => 'AEC_v10.xsd',
