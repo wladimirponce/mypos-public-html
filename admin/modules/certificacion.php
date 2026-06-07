@@ -1,6 +1,6 @@
 <?php
 /**
- * Módulo Certificación SII — flujo secuencial Paso 1 → 7
+ * Módulo Certificación SII — flujo secuencial Paso 1 → 6
  */
 
 // Carga dinámica de casos desde el set vinculado (si está disponible)
@@ -125,7 +125,6 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   <div class="cert-summary-card ok">  <div class="num" id="sum-ok">—</div>  <div class="lbl">OK</div></div>
   <div class="cert-summary-card fail"><div class="num" id="sum-fail">—</div><div class="lbl">Fallidos</div></div>
   <div class="cert-summary-card pend"><div class="num" id="sum-pend">—</div><div class="lbl">Pendientes</div></div>
-  <div class="cert-summary-card pend"><div class="num" id="sim-total">—</div><div class="lbl">Simulación</div></div>
 </div>
 
 <div id="cert-run-status" class="mb-3"></div>
@@ -332,50 +331,17 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   </div>
 </div>
 
-<!-- ══ PASO 5 — Simulación ══════════════════════════════════════════════════ -->
+<!-- ══ PASO 5 — Intercambio DTE ══════════════════════════════════════════════ -->
 <div class="paso-card">
   <div class="paso-header" onclick="togglePaso(5)">
     <div class="paso-num" id="pnum-5">5</div>
-    <div class="paso-title">Simulación
-      <span class="paso-desc">50 facturas T33 + 50 boletas T39 en serie</span>
+    <div class="paso-title">Intercambio DTE
+      <span class="paso-desc">Etapa 3 SII — Responder XML enviado por maullin.sii.cl</span>
     </div>
     <span id="pbadge-5" class="d-badge">Pendiente</span>
     <i class="bi bi-chevron-down ms-2" id="pchev-5"></i>
   </div>
   <div class="paso-body hidden" id="pbody-5">
-    <div class="row g-3">
-      <?php foreach ([33 => ['Factura Electrónica (T33)', '#2980b9'], 39 => ['Boleta Electrónica (T39)', '#16a085']] as $t => [$tn, $tc]): ?>
-      <div class="col-md-6">
-        <div class="libro-card">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px">
-            <strong style="font-size:.82rem"><?= $tn ?></strong>
-            <span class="cert-badge cb-pending" id="sim-badge-<?= $t ?>">0/50</span>
-          </div>
-          <div class="cert-progress-bar">
-            <div class="cert-progress-fill" id="sim-bar-<?= $t ?>" style="width:0%"></div>
-          </div>
-          <button class="d-btn d-btn-sm w-100 mt-2" style="background:<?= $tc ?>;color:#fff;border:none;border-radius:6px;padding:5px;cursor:pointer"
-            onclick="certRunSim(<?= $t ?>)">
-            <i class="bi bi-play-fill"></i> Iniciar 50 docs T<?= $t ?>
-          </button>
-        </div>
-      </div>
-      <?php endforeach; ?>
-    </div>
-  </div>
-</div>
-
-<!-- ══ PASO 6 — Intercambio DTE ═════════════════════════════════════════════ -->
-<div class="paso-card">
-  <div class="paso-header" onclick="togglePaso(6)">
-    <div class="paso-num" id="pnum-6">6</div>
-    <div class="paso-title">Intercambio DTE
-      <span class="paso-desc">Responder XML enviado por el SII (maullin.sii.cl)</span>
-    </div>
-    <span id="pbadge-6" class="d-badge">Pendiente</span>
-    <i class="bi bi-chevron-down ms-2" id="pchev-6"></i>
-  </div>
-  <div class="paso-body hidden" id="pbody-6">
     <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:10px">
       Pegue o suba el XML de intercambio que el SII le envió en el ambiente de certificación.
       El sistema generará y enviará la respuesta automáticamente.
@@ -398,17 +364,17 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   </div>
 </div>
 
-<!-- ══ PASO 7 — Muestras Impresas ═══════════════════════════════════════════ -->
+<!-- ══ PASO 6 — Muestras Impresas ═══════════════════════════════════════════ -->
 <div class="paso-card">
-  <div class="paso-header" onclick="togglePaso(7)">
-    <div class="paso-num" id="pnum-7">7</div>
+  <div class="paso-header" onclick="togglePaso(6)">
+    <div class="paso-num" id="pnum-6">6</div>
     <div class="paso-title">Muestras Impresas
-      <span class="paso-desc">PDF con PDF417 para enviar al SII como evidencia</span>
+      <span class="paso-desc">Etapa 4 SII — PDF con PDF417 para enviar como evidencia</span>
     </div>
-    <span id="pbadge-7" class="d-badge">Disponible</span>
-    <i class="bi bi-chevron-down ms-2" id="pchev-7"></i>
+    <span id="pbadge-6" class="d-badge">Disponible</span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-6"></i>
   </div>
-  <div class="paso-body hidden" id="pbody-7">
+  <div class="paso-body hidden" id="pbody-6">
     <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:12px">
       Genera todos los DTEs del Set de Pruebas con timbre PDF417.
       Use <strong>Ctrl+P → Guardar como PDF</strong> en el navegador para obtener el archivo.
@@ -520,23 +486,6 @@ function applyState(estado) {
   const genOk  = genIds.filter(id=>pruebas[id]?.status==='ok').length;
   _setPasoBadge(3, genOk, genIds.length);
 
-  // Simulación
-  const sim = estado.simulacion || {};
-  let simTot = 0;
-  [33,39].forEach(t => {
-    const s   = sim['t'+t];
-    const cnt = s ? s.folios_ok.length : 0;
-    simTot += cnt;
-    const pct = Math.round(cnt/50*100);
-    const bar    = document.getElementById('sim-bar-'+t);
-    const sbadge = document.getElementById('sim-badge-'+t);
-    if (bar)    bar.style.width = pct+'%';
-    if (sbadge) { sbadge.textContent = cnt+'/50'; sbadge.className='cert-badge '+(s?.status==='ok'?'cb-ok':cnt>0?'cb-running':'cb-pending'); }
-  });
-  document.getElementById('sim-total').textContent = simTot;
-  const pb5 = document.getElementById('pbadge-5');
-  if (pb5) { pb5.textContent = simTot+'/100'; pb5.className='d-badge '+(simTot>=100?'success':simTot>0?'warning':''); }
-
   // Libros — ventas, compras, guias
   const libros = estado.libros || {};
   ['ventas','compras','guias'].forEach(t => {
@@ -553,13 +502,13 @@ function applyState(estado) {
   const pb4 = document.getElementById('pbadge-4');
   if (pb4) { pb4.textContent = librosOk+'/3 libros'; pb4.className='d-badge '+(librosOk===3?'success':librosOk>0?'warning':''); }
 
-  // Intercambio — paso 6
+  // Intercambio — paso 5
   const ic = estado.intercambio || {};
-  const pb6 = document.getElementById('pbadge-6');
-  if (pb6) {
-    pb6.textContent  = ic.status==='responded' ? '✓ Respondido' : ic.status==='failed' ? 'Error' : 'Pendiente';
-    pb6.className    = 'd-badge '+(ic.status==='responded'?'success':ic.status==='failed'?'danger':'');
-    setPasoNum(6, ic.status==='responded' ? 'done' : ic.status==='failed' ? 'fail' : '');
+  const pb5 = document.getElementById('pbadge-5');
+  if (pb5) {
+    pb5.textContent = ic.status==='responded' ? '✓ Respondido' : ic.status==='failed' ? 'Error' : 'Pendiente';
+    pb5.className   = 'd-badge '+(ic.status==='responded'?'success':ic.status==='failed'?'danger':'');
+    setPasoNum(5, ic.status==='responded' ? 'done' : ic.status==='failed' ? 'fail' : '');
   }
 }
 
@@ -738,18 +687,6 @@ async function certRunCase(cid) {
   await loadState();
 }
 
-// ── Simulación ────────────────────────────────────────────────────────────────
-async function certRunSim(tipo) {
-  log(`Iniciando simulación tipo ${tipo} (50 docs)…`, 'info');
-  const b = document.getElementById('sim-badge-'+tipo);
-  if (b) { b.className='cert-badge cb-running'; b.textContent='...'; }
-  try {
-    const res = await api('cert_run_sim', { tipo, cantidad:50 });
-    log(`Simulación T${tipo}: enviados=${res.enviados||0} fallidos=${res.fallidos||0}`, res.ok?'ok':'warn');
-  } catch(e) { log('Error simulación: '+e.message, 'error'); }
-  await loadState();
-}
-
 // ── Retry / Reset ─────────────────────────────────────────────────────────────
 async function certRetry() {
   log('Reintentando todos los casos fallidos…', 'warn');
@@ -845,8 +782,8 @@ async function certMuestras() {
       return;
     }
     DTE.renderMuestras(res.dtes, res.opts || {});
-    setBadge('pbadge-7', '✓ Generado', 'success');
-    setPasoNum(7, 'done');
+    setBadge('pbadge-6', '✓ Generado', 'success');
+    setPasoNum(6, 'done');
     log(`Muestras generadas: ${res.dtes.length} documento(s).`, 'ok');
   } catch(e) { alert('Error generando muestras: ' + e.message); }
 }
