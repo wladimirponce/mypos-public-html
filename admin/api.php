@@ -2982,7 +2982,7 @@ function aplicarDescuentoGlobalMontos(array $montos, $descuentoGlobal): array {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // SOBRE DE ENVÃO (EnvioDTE)
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function siiFormatDate(string $date, string $fallback = '2026-06-04'): string {
+function siiFormatDate(string $date, string $fallback = '2026-06-05'): string {
     $date = trim($date);
     if ($date === '') return $fallback;
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return $date;
@@ -3014,10 +3014,10 @@ function buildEnvioDTE(string $dteXml, int $tipo, int $folio, string $certPem): 
     $emp = $globalContext ? $globalContext->getEmpresa() : [];
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $nroResol = 0;
-        $fchResol = '2026-06-04';
+        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL);
     } else {
         $nroResol = $emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL;
-        $fchResol = $emp['fecha_resolucion']  ?? $emp['fch_resol'] ?? FCH_RESOL;
+        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? $emp['fch_resol'] ?? FCH_RESOL);
     }
     $tmst       = date('Y-m-d\TH:i:s');
 
@@ -3073,13 +3073,13 @@ function buildEnvioDTESet(array $dtes, string $certPem): string {
     $rutEmisor = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
     $rutEnvia  = getRutCertificadoSeguro($certPem);
 
+    $emp = $globalContext ? $globalContext->getEmpresa() : [];
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $nroResol = 0;
-        $fchResol = '2026-06-04';
+        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL);
     } else {
-        $emp = $globalContext ? $globalContext->getEmpresa() : [];
         $nroResol = $emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL;
-        $fchResol = $emp['fecha_resolucion']  ?? $emp['fch_resol'] ?? FCH_RESOL;
+        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? $emp['fch_resol'] ?? FCH_RESOL);
     }
     $tmst = date('Y-m-d\TH:i:s');
 
@@ -3127,17 +3127,17 @@ function buildEnvioBoletaSet(array $dtesXml, string $certPem): string {
     $rutEmisor = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
     $rutEnvia  = getRutCertificadoSeguro($certPem);
 
+    $emp = $globalContext ? $globalContext->getEmpresa() : [];
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $nroResol = 0;
-        $fchResol = '2026-06-04';
+        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL);
     } else {
-        $emp = $globalContext ? $globalContext->getEmpresa() : [];
         $nroResol = $emp['numero_resolucion'] ?? NRO_RESOL;
-        $fchResol = $emp['fecha_resolucion']  ?? FCH_RESOL;
+        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL);
     }
     $tmst = date('Y-m-d\TH:i:s');
 
-    // Limpiar declaraciÃ³n XML de cada documento y concatenar
+    // Limpiar declaracion XML de cada documento y concatenar
     $docs = '';
     foreach ($dtesXml as $d) {
         $docs .= preg_replace('/<\?xml.*?\?>\s*/i', '', $d) . "\n";
