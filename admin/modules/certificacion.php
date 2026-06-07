@@ -1,6 +1,6 @@
 <?php
 /**
- * Módulo Certificación SII — flujo secuencial Paso 1 → 6
+ * Módulo Certificación SII — flujo secuencial Paso 1 → 7
  */
 
 // Carga dinámica de casos desde el set vinculado (si está disponible)
@@ -74,7 +74,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   white-space:nowrap; flex-shrink:0; }
 .cb-ok      { background:#d4edda; color:#155724; }
 .cb-failed  { background:#f8d7da; color:#721c24; }
-.cb-pending { background:#e2e3e5; color:#495057; }
+.cb-pending { background:transparent; color:transparent; min-width:0; padding:0; pointer-events:none; }
 .cb-running { background:#fff3cd; color:#856404; }
 .cert-folio { font-size:.7rem; color:var(--c-text-muted); flex:1; }
 .cert-error-tip { font-size:.68rem; color:#c0392b; cursor:help;
@@ -84,16 +84,17 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
 /* ── Progress ── */
 .cert-progress-bar  { height:6px; background:#eee; border-radius:3px; overflow:hidden; margin-top:4px; }
 .cert-progress-fill { height:100%; background:#27ae60; border-radius:3px; transition:width .4s; }
-/* ── Summary ── */
-.cert-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
-  gap:8px; margin-bottom:16px; }
-.cert-summary-card { background:#fff; border:1px solid var(--c-border); border-radius:8px;
-  padding:8px 12px; text-align:center; }
-.cert-summary-card .num { font-size:20pt; font-weight:800; }
-.cert-summary-card .lbl { font-size:.7rem; color:var(--c-text-muted); }
-.cert-summary-card.ok   .num { color:#27ae60; }
-.cert-summary-card.fail .num { color:#e74c3c; }
-.cert-summary-card.pend .num { color:#95a5a6; }
+/* ── Banner de estado ── */
+.cert-status-ok   { display:flex; align-items:center; gap:10px; padding:12px 16px;
+  background:#d4edda; border:1px solid #c3e6cb; border-radius:8px; color:#155724;
+  font-weight:600; font-size:.85rem; }
+.cert-status-err  { display:flex; align-items:flex-start; gap:10px; padding:12px 16px;
+  background:#f8d7da; border:1px solid #f5c6cb; border-radius:8px; color:#721c24; }
+.cert-status-err  .err-list { font-size:.78rem; margin-top:4px; }
+.cert-status-err  .err-list li { margin-bottom:2px; }
+.cert-status-idle { display:flex; align-items:center; gap:10px; padding:10px 16px;
+  background:#e9ecef; border:1px solid var(--c-border); border-radius:8px;
+  color:var(--c-text-muted); font-size:.82rem; }
 /* ── Grupo tipo ── */
 .caso-group-header { font-size:.72rem; font-weight:700; color:var(--c-text-muted);
   padding:4px 10px; background:#f4f5f7; border-bottom:1px solid var(--c-border);
@@ -119,15 +120,15 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   </div>
 </div>
 
-<!-- Resumen -->
-<div class="cert-summary" id="cert-summary">
-  <div class="cert-summary-card pend"><div class="num" id="sum-total">—</div><div class="lbl">Casos totales</div></div>
-  <div class="cert-summary-card ok">  <div class="num" id="sum-ok">—</div>  <div class="lbl">OK</div></div>
-  <div class="cert-summary-card fail"><div class="num" id="sum-fail">—</div><div class="lbl">Fallidos</div></div>
-  <div class="cert-summary-card pend"><div class="num" id="sum-pend">—</div><div class="lbl">Pendientes</div></div>
-</div>
+<!-- Banner de estado global -->
+<div id="cert-status-banner" class="mb-3"></div>
 
 <div id="cert-run-status" class="mb-3"></div>
+<!-- IDs ocultos para compatibilidad interna -->
+<span id="sum-total" style="display:none"></span>
+<span id="sum-ok"    style="display:none"></span>
+<span id="sum-fail"  style="display:none"></span>
+<span id="sum-pend"  style="display:none"></span>
 
 <!-- ══ PASO 1 — Sets de Prueba ══════════════════════════════════════════════ -->
 <div class="paso-card">
@@ -173,7 +174,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
     <div class="paso-title">Boletas Electrónicas (T39)
       <span class="paso-desc">Sobre EnvioBOLETA + RCOF al SII</span>
     </div>
-    <span id="pbadge-2" class="d-badge">Pendiente</span>
+    <span id="pbadge-2" class="d-badge"></span>
     <i class="bi bi-chevron-down ms-2" id="pchev-2"></i>
   </div>
   <div class="paso-body" id="pbody-2">
@@ -213,7 +214,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
     <div class="paso-title">Facturas, NC, ND y Guías (Set Básico)
       <span class="paso-desc">T33 · T61 · T56 · T52 — cada documento en sobre individual</span>
     </div>
-    <span id="pbadge-3" class="d-badge">Pendiente</span>
+    <span id="pbadge-3" class="d-badge"></span>
     <i class="bi bi-chevron-down ms-2" id="pchev-3"></i>
   </div>
   <div class="paso-body" id="pbody-3">
@@ -261,7 +262,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
     <div class="paso-title">Libros Tributarios
       <span class="paso-desc">Ventas · Compras · Guías — enviar después del Paso 3</span>
     </div>
-    <span id="pbadge-4" class="d-badge">Pendiente</span>
+    <span id="pbadge-4" class="d-badge"></span>
     <i class="bi bi-chevron-down ms-2" id="pchev-4"></i>
   </div>
   <div class="paso-body" id="pbody-4">
@@ -331,17 +332,78 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   </div>
 </div>
 
-<!-- ══ PASO 5 — Intercambio DTE ══════════════════════════════════════════════ -->
+<!-- ══ PASO 5 — Simulación ════════════════════════════════════════════════════ -->
 <div class="paso-card">
   <div class="paso-header" onclick="togglePaso(5)">
     <div class="paso-num" id="pnum-5">5</div>
-    <div class="paso-title">Intercambio DTE
-      <span class="paso-desc">Etapa 3 SII — Responder XML enviado por maullin.sii.cl</span>
+    <div class="paso-title">Simulación
+      <span class="paso-desc">Etapa 2 SII — Enviar 50 T33 + 50 T39 al ambiente de certificación</span>
     </div>
-    <span id="pbadge-5" class="d-badge">Pendiente</span>
+    <span id="pbadge-5" class="d-badge"></span>
     <i class="bi bi-chevron-down ms-2" id="pchev-5"></i>
   </div>
   <div class="paso-body hidden" id="pbody-5">
+    <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:14px">
+      El SII exige enviar <strong>50 documentos de prueba por tipo</strong> antes de
+      aprobar la certificación. Se envían al servidor <code>maullin.sii.cl</code>
+      (ambiente de certificación). Si ya está completa, no se vuelve a ejecutar.
+    </p>
+    <div class="row g-3 mb-3">
+      <!-- T33 Facturas -->
+      <div class="col-md-6">
+        <div class="libro-card h-100" style="border-left:3px solid #3b6aec">
+          <div style="font-weight:700; font-size:.82rem; margin-bottom:2px">
+            <i class="bi bi-file-earmark-text" style="color:#3b6aec"></i> T33 — Facturas
+          </div>
+          <div style="font-size:.72rem; color:var(--c-text-muted); margin-bottom:8px">
+            50 facturas de prueba al ambiente de certificación SII.
+          </div>
+          <div style="display:flex; align-items:center; gap:8px">
+            <button class="d-btn d-btn-sm d-btn-outline flex-fill" onclick="certSimulacion(33)">
+              <i class="bi bi-play-fill"></i> Ejecutar T33
+            </button>
+            <span class="cert-badge cb-pending" id="sim-t33-badge">Pendiente</span>
+          </div>
+          <div id="sim-t33-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
+        </div>
+      </div>
+      <!-- T39 Boletas -->
+      <div class="col-md-6">
+        <div class="libro-card h-100" style="border-left:3px solid #e67e22">
+          <div style="font-weight:700; font-size:.82rem; margin-bottom:2px">
+            <i class="bi bi-receipt" style="color:#e67e22"></i> T39 — Boletas
+          </div>
+          <div style="font-size:.72rem; color:var(--c-text-muted); margin-bottom:8px">
+            50 boletas de prueba al ambiente de certificación SII.
+          </div>
+          <div style="display:flex; align-items:center; gap:8px">
+            <button class="d-btn d-btn-sm d-btn-outline flex-fill" onclick="certSimulacion(39)">
+              <i class="bi bi-play-fill"></i> Ejecutar T39
+            </button>
+            <span class="cert-badge cb-pending" id="sim-t39-badge">Pendiente</span>
+          </div>
+          <div id="sim-t39-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
+        </div>
+      </div>
+    </div>
+    <button class="d-btn d-btn-primary" onclick="certSimulacionAll()">
+      <i class="bi bi-rocket-takeoff-fill"></i> Ejecutar Simulación Completa (T33 + T39)
+    </button>
+    <div id="sim-status" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- ══ PASO 6 — Intercambio DTE ══════════════════════════════════════════════ -->
+<div class="paso-card">
+  <div class="paso-header" onclick="togglePaso(6)">
+    <div class="paso-num" id="pnum-6">6</div>
+    <div class="paso-title">Intercambio DTE
+      <span class="paso-desc">Etapa 3 SII — Responder XML enviado por maullin.sii.cl</span>
+    </div>
+    <span id="pbadge-6" class="d-badge"></span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-6"></i>
+  </div>
+  <div class="paso-body hidden" id="pbody-6">
     <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:10px">
       Pegue o suba el XML de intercambio que el SII le envió en el ambiente de certificación.
       El sistema generará y enviará la respuesta automáticamente.
@@ -364,24 +426,31 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   </div>
 </div>
 
-<!-- ══ PASO 6 — Muestras Impresas ═══════════════════════════════════════════ -->
+<!-- ══ PASO 7 — Muestras Impresas ═══════════════════════════════════════════ -->
 <div class="paso-card">
-  <div class="paso-header" onclick="togglePaso(6)">
-    <div class="paso-num" id="pnum-6">6</div>
+  <div class="paso-header" onclick="togglePaso(7)">
+    <div class="paso-num" id="pnum-7">7</div>
     <div class="paso-title">Muestras Impresas
-      <span class="paso-desc">Etapa 4 SII — PDF con PDF417 para enviar como evidencia</span>
+      <span class="paso-desc">Etapa 4 SII — PDF con PDF417; subir en pdfdteInternet</span>
     </div>
-    <span id="pbadge-6" class="d-badge">Disponible</span>
-    <i class="bi bi-chevron-down ms-2" id="pchev-6"></i>
+    <span id="pbadge-7" class="d-badge"></span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-7"></i>
   </div>
-  <div class="paso-body hidden" id="pbody-6">
+  <div class="paso-body hidden" id="pbody-7">
     <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:12px">
       Genera todos los DTEs del Set de Pruebas con timbre PDF417.
       Use <strong>Ctrl+P → Guardar como PDF</strong> en el navegador para obtener el archivo.
+      Luego súbalo en
+      <a href="https://www4.sii.cl/pdfdteInternet/" target="_blank">www4.sii.cl/pdfdteInternet</a>
+      como evidencia impresa.
     </p>
     <button class="d-btn d-btn-info" onclick="certMuestras()">
       <i class="bi bi-printer-fill"></i> Generar e Imprimir Muestras
     </button>
+    <a href="https://www4.sii.cl/pdfdteInternet/" target="_blank"
+       class="d-btn d-btn-outline d-btn-sm ms-2">
+      <i class="bi bi-box-arrow-up-right"></i> Portal SII — Subir PDF
+    </a>
   </div>
 </div>
 
@@ -425,11 +494,14 @@ function applyState(estado) {
   const pruebas = estado.pruebas || {};
   let ok=0, fail=0, pend=0;
 
-  // Merge ALL_CASES + any extra IDs from the actual state (e.g. G- cases)
-  const allIds = [...new Set([...ALL_CASES, ...Object.keys(pruebas)])];
+  // Solo IDs no-boleta en el loop de pruebas (boletas tienen su propio estado)
+  const nonBIds = [...new Set([
+    ...ALL_CASES.filter(id => !id.startsWith('B-')),
+    ...Object.keys(pruebas).filter(id => !id.startsWith('B-'))
+  ])];
 
-  allIds.forEach(id => {
-    // If no DOM row yet, create one dynamically
+  nonBIds.forEach(id => {
+    // Crear fila dinámica si no existe aún en el DOM
     if (!document.getElementById('row-'+id)) {
       const container = document.getElementById('casos-extra-rows');
       if (container) {
@@ -469,56 +541,199 @@ function applyState(estado) {
     }
   });
 
-  // Contadores
-  document.getElementById('sum-total').textContent = allIds.length;
-  document.getElementById('sum-ok').textContent    = ok;
-  document.getElementById('sum-fail').textContent  = fail;
-  document.getElementById('sum-pend').textContent  = pend;
+  // ── Boletas (B-CASO-*): estado en estado.boletas, no en pruebas ───────────
+  const bs     = estado.boletas || {};
+  const bSent  = !!bs.ts;                         // se ejecutó alguna vez
+  const bOk    = bSent && bs.sobre_ok === true;
+  const bFail  = bSent && !bOk;
+  const bTrack = bs.sobre_trackId || '';
+  const bCasos = bs.casos || [];
+  const bIds   = ALL_CASES.filter(id => id.startsWith('B-'));
+
+  bIds.forEach(id => {
+    const badge   = document.getElementById('badge-'+id);
+    const folioEl = document.getElementById('folio-'+id);
+    const casoId  = id.replace(/^B-/, '');
+    const cd      = bCasos.find(c => c.caso === casoId);
+    if (!badge) return;
+    if (bOk) {
+      badge.className = 'cert-badge cb-ok'; badge.textContent = '✓ OK'; ok++;
+      if (folioEl) folioEl.textContent = (cd ? 'Folio '+cd.folio : '') + (bTrack ? ' · TRK '+String(bTrack).slice(0,8) : '');
+    } else if (bFail) {
+      badge.className = 'cert-badge cb-failed'; badge.textContent = '✗ Error'; fail++;
+      if (folioEl && cd) folioEl.textContent = 'Folio '+cd.folio;
+    } else {
+      badge.className = 'cert-badge cb-pending'; badge.textContent = 'Pendiente'; pend++;
+    }
+  });
+
+  // Contadores (para btn-retry y banner)
   document.getElementById('btn-retry').style.display = fail > 0 ? '' : 'none';
 
+  // ── Banner de estado global ───────────────────────────────────────────────
+  _updateBanner(ok, fail, nonBIds.length + bIds.length);
+
   // Paso 2 (boletas) — badge
-  const boletasOk = ALL_CASES.filter(id=>id.startsWith('B-') && pruebas[id]?.status==='ok').length;
-  const boletasTot = ALL_CASES.filter(id=>id.startsWith('B-')).length;
-  _setPasoBadge(2, boletasOk, boletasTot);
+  const pb2 = document.getElementById('pbadge-2');
+  if (pb2) {
+    if (bOk) {
+      pb2.textContent='✓ OK'; pb2.className='d-badge success'; setPasoNum(2,'done');
+    } else if (bFail) {
+      pb2.textContent='✗ Error'; pb2.className='d-badge danger'; setPasoNum(2,'fail');
+    } else {
+      pb2.textContent=''; pb2.className='d-badge'; setPasoNum(2,'');
+    }
+  }
 
   // Paso 3 (generales) — badge
-  const genIds = allIds.filter(id=>!id.startsWith('B-'));
-  const genOk  = genIds.filter(id=>pruebas[id]?.status==='ok').length;
-  _setPasoBadge(3, genOk, genIds.length);
+  const genOk = nonBIds.filter(id => pruebas[id]?.status === 'ok').length;
+  _setPasoBadge(3, genOk, nonBIds.length);
 
-  // Libros — ventas, compras, guias
+  // Paso 4 — Libros
   const libros = estado.libros || {};
   ['ventas','compras','guias'].forEach(t => {
     const lb    = libros[t];
     const badge = document.getElementById(`libro-${t}-badge`);
     const info  = document.getElementById(`libro-${t}-info`);
     if (!badge) return;
-    if (!lb)                     { badge.className='cert-badge cb-pending'; badge.textContent='Pendiente'; }
-    else if (lb.status==='ok')   { badge.className='cert-badge cb-ok';     badge.textContent='✓ OK'; if(info) info.textContent='TrackID: '+(lb.trackId||'—'); }
-    else if (lb.status==='failed'){ badge.className='cert-badge cb-failed'; badge.textContent='✗ Error';  if(info) info.textContent=lb.error||''; }
+    if (!lb)                      { badge.className='cert-badge cb-pending'; badge.textContent='Pendiente'; }
+    else if (lb.status==='ok')    { badge.className='cert-badge cb-ok';      badge.textContent='✓ OK';     if(info) info.textContent='TrackID: '+(lb.trackId||'—'); }
+    else if (lb.status==='failed'){ badge.className='cert-badge cb-failed';  badge.textContent='✗ Error';  if(info) info.textContent=lb.error||''; }
   });
-  // Paso 4 badge
   const librosOk = ['ventas','compras','guias'].filter(t=>libros[t]?.status==='ok').length;
+  const librosFail = ['ventas','compras','guias'].filter(t=>libros[t]?.status==='failed').length;
   const pb4 = document.getElementById('pbadge-4');
-  if (pb4) { pb4.textContent = librosOk+'/3 libros'; pb4.className='d-badge '+(librosOk===3?'success':librosOk>0?'warning':''); }
+  if (pb4) {
+    if (librosOk === 3) {
+      pb4.textContent='✓ OK'; pb4.className='d-badge success'; setPasoNum(4,'done');
+    } else if (librosFail > 0) {
+      pb4.textContent=librosFail+' error(es)'; pb4.className='d-badge danger'; setPasoNum(4,'fail');
+    } else if (librosOk > 0) {
+      pb4.textContent=librosOk+'/3 OK'; pb4.className='d-badge warning'; setPasoNum(4,'');
+    } else {
+      pb4.textContent=''; pb4.className='d-badge'; setPasoNum(4,'');
+    }
+  }
 
-  // Intercambio — paso 5
-  const ic = estado.intercambio || {};
-  const pb5 = document.getElementById('pbadge-5');
-  if (pb5) {
-    pb5.textContent = ic.status==='responded' ? '✓ Respondido' : ic.status==='failed' ? 'Error' : 'Pendiente';
-    pb5.className   = 'd-badge '+(ic.status==='responded'?'success':ic.status==='failed'?'danger':'');
-    setPasoNum(5, ic.status==='responded' ? 'done' : ic.status==='failed' ? 'fail' : '');
+  // Paso 5 — Simulación
+  const sim   = estado.simulacion || {};
+  const s33   = sim.t33 || {};
+  const s39   = sim.t39 || {};
+  const simOk = s33.status==='ok' && s39.status==='ok';
+  const simPb = document.getElementById('pbadge-5');
+  if (simPb) {
+    if (simOk) {
+      simPb.textContent='✓ Completada'; simPb.className='d-badge success'; setPasoNum(5,'done');
+    } else if (s33.status || s39.status) {
+      const n33=(s33.folios_ok||[]).length, n39=(s39.folios_ok||[]).length;
+      simPb.textContent=`T33: ${n33}/50 · T39: ${n39}/50`; simPb.className='d-badge warning'; setPasoNum(5,'');
+    } else {
+      simPb.textContent='Pendiente'; simPb.className='d-badge'; setPasoNum(5,'');
+    }
+  }
+  _updSimCard('t33', s33);
+  _updSimCard('t39', s39);
+
+  // Paso 6 — Intercambio
+  const ic  = estado.intercambio || {};
+  const pb6 = document.getElementById('pbadge-6');
+  if (pb6) {
+    if (ic.status === 'responded') {
+      pb6.textContent='✓ OK'; pb6.className='d-badge success'; setPasoNum(6,'done');
+    } else if (ic.status === 'failed') {
+      pb6.textContent='✗ Error'; pb6.className='d-badge danger'; setPasoNum(6,'fail');
+    } else {
+      pb6.textContent=''; pb6.className='d-badge'; setPasoNum(6,'');
+    }
+  }
+}
+
+function _updateBanner(ok, fail, total) {
+  const banner = document.getElementById('cert-status-banner');
+  if (!banner) return;
+
+  if (total === 0) {
+    // Sin estado cargado aún
+    banner.innerHTML = `<div class="cert-status-idle">
+      <i class="bi bi-hourglass-split"></i>
+      <span>Cargando estado de certificación…</span></div>`;
+    return;
+  }
+
+  if (fail === 0 && ok === 0) {
+    // Nada ejecutado aún
+    banner.innerHTML = '';
+    return;
+  }
+
+  if (fail === 0) {
+    // Todo ejecutado OK — celebrar
+    banner.innerHTML = `<div class="cert-status-ok">
+      <i class="bi bi-patch-check-fill" style="font-size:1.4rem"></i>
+      <div>
+        <div>Certificación en orden — sin errores</div>
+        <div style="font-weight:400; font-size:.75rem; margin-top:2px">${ok} documento(s) enviados correctamente al SII.</div>
+      </div></div>`;
+    return;
+  }
+
+  // Hay errores — listarlos
+  const errRows = [];
+  document.querySelectorAll('.cert-case-row').forEach(row => {
+    const badge = row.querySelector('.cert-badge');
+    const folio = row.querySelector('.cert-folio');
+    if (!badge || !badge.classList.contains('cb-failed')) return;
+    const label = row.querySelector('span:nth-child(2)')?.textContent?.trim() || row.id.replace('row-','');
+    const err   = folio?.querySelector('.cert-error-tip')?.getAttribute('title') || folio?.textContent || '';
+    errRows.push(`<li><strong>${label}</strong>${err ? ' — '+err.slice(0,120) : ''}</li>`);
+  });
+
+  banner.innerHTML = `<div class="cert-status-err">
+    <i class="bi bi-exclamation-triangle-fill" style="font-size:1.4rem; flex-shrink:0; margin-top:2px"></i>
+    <div style="flex:1">
+      <div style="font-weight:700; font-size:.88rem">${fail} error(es) — corrija antes de continuar</div>
+      ${errRows.length ? '<ul class="err-list mb-0 ps-3">'+errRows.join('')+'</ul>' : ''}
+    </div></div>`;
+}
+
+function _updSimCard(key, s) {
+  const badge = document.getElementById('sim-'+key+'-badge');
+  const info  = document.getElementById('sim-'+key+'-info');
+  if (!badge) return;
+  if (s.status === 'ok') {
+    badge.className='cert-badge cb-ok'; badge.textContent='✓ OK ('+((s.folios_ok||[]).length)+')';
+    if (info) info.textContent='Completada · '+((s.ts||'').slice(0,16).replace('T',' '));
+  } else if (s.status === 'running' || s.status === 'partial') {
+    const n=(s.folios_ok||[]).length, f=(s.folios_failed||[]).length;
+    badge.className='cert-badge cb-running'; badge.textContent=`⟳ ${n}/50`;
+    if (info) info.textContent=`${n} ok · ${f} fallidos`;
+  } else if (s.status) {
+    badge.className='cert-badge cb-failed'; badge.textContent='✗ Error';
+    if (info) info.textContent=s.error||'';
+  } else {
+    badge.className='cert-badge cb-pending'; badge.textContent='Pendiente';
+    if (info) info.textContent='';
   }
 }
 
 function _setPasoBadge(n, ok, tot) {
   const badge = document.getElementById('pbadge-'+n);
   if (!badge) return;
-  if (tot === 0) { badge.textContent='Sin casos'; badge.className='d-badge'; return; }
-  badge.textContent = ok+'/'+tot;
-  badge.className = 'd-badge '+(ok===tot?'success':ok>0?'warning':'');
-  setPasoNum(n, ok===tot ? 'done' : ok>0 ? '' : '');
+  if (tot === 0) { badge.textContent=''; badge.className='d-badge'; return; }
+  if (ok === 0) {
+    // Nada ejecutado — no mostrar nada (no "Pendiente")
+    badge.textContent = ''; badge.className = 'd-badge';
+    setPasoNum(n, '');
+    return;
+  }
+  if (ok === tot) {
+    badge.textContent = '✓ OK'; badge.className = 'd-badge success';
+    setPasoNum(n, 'done');
+  } else {
+    // Algunos OK, algunos no — mostrar progreso solo si hay algo ejecutado
+    badge.textContent = ok+'/'+tot+' OK'; badge.className = 'd-badge warning';
+    setPasoNum(n, '');
+  }
 }
 
 function setPasoNum(n, cls) {
@@ -768,6 +983,57 @@ async function certLibro(tipo) {
   }
 }
 
+// ── Simulación ────────────────────────────────────────────────────────────────
+async function certSimulacion(tipo) {
+  const statusEl = document.getElementById('sim-status');
+  const badge    = document.getElementById('sim-t'+tipo+'-badge');
+  const info     = document.getElementById('sim-t'+tipo+'-info');
+  if (badge) { badge.className='cert-badge cb-running'; badge.textContent='⟳ Enviando…'; }
+  if (info)  info.textContent = '';
+  if (statusEl) statusEl.innerHTML = `<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Enviando simulación T${tipo} (50 docs)… puede tardar varios minutos.</div>`;
+  log(`Iniciando simulación T${tipo} (50 docs)…`, 'info');
+  try {
+    const res = await api('cert_run_sim', { tipo });
+    if (res.ok) {
+      if (badge) { badge.className='cert-badge cb-ok'; badge.textContent=`✓ OK (${res.enviados||0})`; }
+      if (info)  info.textContent = `${res.enviados||0} enviados · ${res.fallidos||0} fallidos`;
+      if (statusEl) statusEl.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> Simulación T${tipo} completada: ${res.enviados||0} docs OK.</div>`;
+      log(`Simulación T${tipo}: ${res.enviados||0} OK, ${res.fallidos||0} fallidos.`, 'ok');
+    } else {
+      if (badge) { badge.className='cert-badge cb-failed'; badge.textContent='✗ Error'; }
+      if (statusEl) statusEl.innerHTML = `<div class="d-alert danger">${res.error||'Error desconocido'}</div>`;
+      log(`Simulación T${tipo} error: ${res.error||'?'}`, 'error');
+    }
+    await loadState();
+  } catch(e) {
+    if (badge) { badge.className='cert-badge cb-failed'; badge.textContent='✗ Error'; }
+    if (statusEl) statusEl.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
+    log(`Error simulación T${tipo}: ${e.message}`, 'error');
+  }
+}
+
+async function certSimulacionAll() {
+  const statusEl = document.getElementById('sim-status');
+  if (statusEl) statusEl.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Ejecutando simulación completa T33 + T39 (100 docs total)…</div>';
+  log('Iniciando simulación completa T33 + T39…', 'info');
+  try {
+    const res = await api('cert_sim_all');
+    const r33 = res.resultados?.sim_33 || {}, r39 = res.resultados?.sim_39 || {};
+    const ok33 = r33.ok || r33.skipped, ok39 = r39.ok || r39.skipped;
+    if (ok33 && ok39) {
+      if (statusEl) statusEl.innerHTML = '<div class="d-alert success"><i class="bi bi-check-circle"></i> Simulación completa: T33 OK · T39 OK.</div>';
+      log('Simulación completa exitosa.', 'ok');
+    } else {
+      if (statusEl) statusEl.innerHTML = `<div class="d-alert warning">T33: ${ok33?'OK':'Error'} · T39: ${ok39?'OK':'Error'}</div>`;
+      log(`Simulación: T33 ${ok33?'ok':'fail'}, T39 ${ok39?'ok':'fail'}`, ok33&&ok39?'ok':'warn');
+    }
+    applyState(res.estado);
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
+    log('Error simulación: '+e.message, 'error');
+  }
+}
+
 // ── Muestras ──────────────────────────────────────────────────────────────────
 async function certMuestras() {
   if (typeof DTE === 'undefined' || !DTE.renderMuestras) {
@@ -782,8 +1048,8 @@ async function certMuestras() {
       return;
     }
     DTE.renderMuestras(res.dtes, res.opts || {});
-    setBadge('pbadge-6', '✓ Generado', 'success');
-    setPasoNum(6, 'done');
+    setBadge('pbadge-7', '✓ Generado', 'success');
+    setPasoNum(7, 'done');
     log(`Muestras generadas: ${res.dtes.length} documento(s).`, 'ok');
   } catch(e) { alert('Error generando muestras: ' + e.message); }
 }

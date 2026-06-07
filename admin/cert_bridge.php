@@ -82,11 +82,12 @@ try {
         case 'cert_run_all':
             set_time_limit(600);
             ob_clean();
-            $state = [];
-            $caseIds = [
-                'F-4832043-1','F-4832043-2','F-4832043-3','F-4832043-4',
-                'F-4832043-5','F-4832043-6','F-4832043-7','F-4832043-8',
-            ];
+            $state   = [];
+            // Todos los casos no-boleta del set actual (dinámico)
+            $caseIds = array_values(array_filter(
+                $mgr->getPruebasCases(),
+                fn($id) => !str_starts_with($id, 'B-')
+            ));
             $log = [
                 'pruebas' => $mgr->runPruebas($state, $caseIds),
                 'sim_33'  => $mgr->runSimulacion(33, 50, $state),
@@ -105,14 +106,14 @@ try {
             // Con force=1 se reinicia el estado antes de ejecutar
             $forceRun = isset($_GET['force']) && $_GET['force'] == '1';
             if ($forceRun) $mgr->resetState();
-            $state = [];
-            $caseIds = [];
-            if (isset($_GET['skip_boletas']) && $_GET['skip_boletas'] == '1') {
-                $caseIds = [
-                    'F-4832043-1','F-4832043-2','F-4832043-3','F-4832043-4',
-                    'F-4832043-5','F-4832043-6','F-4832043-7','F-4832043-8',
-                ];
-            }
+            $state   = [];
+            // skip_boletas=1 → solo facturas/NC/ND/guías del set (dinámico, sin hardcodear)
+            $caseIds = isset($_GET['skip_boletas']) && $_GET['skip_boletas'] == '1'
+                ? array_values(array_filter(
+                    $mgr->getPruebasCases(),
+                    fn($id) => !str_starts_with($id, 'B-')
+                  ))
+                : [];   // vacío = todos (incluyendo boletas, aunque se maneja aparte)
             echo json_encode(['ok' => true, 'resultados' => $mgr->runPruebas($state, $caseIds), 'estado' => $mgr->loadState()]);
             break;
 
@@ -123,6 +124,17 @@ try {
             $state = [];
             ob_clean();
             echo json_encode($mgr->runSimulacion($tipo, $cant, $state));
+            break;
+
+        case 'cert_sim_all':
+            set_time_limit(600);
+            ob_clean();
+            $state = [];
+            $results = [
+                'sim_33' => $mgr->runSimulacion(33, 50, $state),
+                'sim_39' => $mgr->runSimulacion(39, 50, $state),
+            ];
+            echo json_encode(['ok' => true, 'resultados' => $results, 'estado' => $mgr->loadState()]);
             break;
 
         case 'cert_retry':
