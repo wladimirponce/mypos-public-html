@@ -53,8 +53,20 @@ header('Content-Type: application/json; charset=UTF-8');
 
 try {
     $empresaId = resolveCertEmpresaId();
-    // Asegurar que api.php no sobreescriba $globalContext con null
+    // Poner active_empresa_id en sesión ANTES de requerir api.php.
     $_SESSION['active_empresa_id'] = $empresaId;
+
+    // api.php inicializa $globalContext y define las constantes (ACTECO, RUT_EMISOR…)
+    // SOLO cuando hay sesión admin activa (isAdminRequest=true). Sin ella entra al
+    // bloque else y fija ACTECO=0, RUT_EMISOR='', etc. — valores inutilizables.
+    // Solución: si no hay admin_id, ponemos uno centinela temporal para que api.php
+    // entre al if-isAdminRequest y defina todo con los datos reales de la empresa.
+    // Lo quitamos inmediatamente después para no contaminar la sesión real.
+    $_certBridgeNeedsFakeAdmin = empty($_SESSION['admin_id']);
+    if ($_certBridgeNeedsFakeAdmin) {
+        $_SESSION['admin_id'] = '__cert_bridge_init__';
+    }
+
     $globalContext = new Context($empresaId);
     if ($globalContext->getAmbiente() !== 'CERTIFICACION') {
         throw new \Exception('La empresa seleccionada no esta en ambiente CERTIFICACION.');
@@ -64,10 +76,13 @@ try {
     // api.php re-habilita display_errors; lo suprimimos de nuevo para evitar HTML en la respuesta
     ini_set('display_errors', '0');
 
-    // api.php resetea $globalContext = null cuando no hay sesión admin activa
-    // (condición isAdminRequest=false → ninguna rama lo inicializa).
-    // Re-crearlo con el empresaId ya resuelto y validado arriba, y actualizar
-    // los globals que api.php deja apuntando a var/no-company/ en ese caso.
+    // Limpiar el admin_id centinela si lo pusimos nosotros
+    if (!empty($_certBridgeNeedsFakeAdmin)) {
+        unset($_SESSION['admin_id']);
+    }
+
+    // Seguridad: si api.php igualmente dejó $globalContext null (no debería pasar
+    // ahora), lo re-creamos junto con los globals de rutas.
     if (!($globalContext instanceof Context)) {
         $globalContext   = new Context($empresaId);
         global $actualTmpDir, $actualCafDir, $actualCertPfx;
