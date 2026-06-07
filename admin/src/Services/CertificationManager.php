@@ -404,25 +404,37 @@ class CertificationManager
      */
     private function certFolioOffsetMap(): array
     {
-        // Orden completo: num_suffix => ['tipo' => int, 'caseId' => string]
-        // Usa el set subido si existe; si no, fallback al set 4832043.
-        $orden  = [];
+        // BUG FIX: El array $orden NO debe usar el sufijo numérico ($n) como clave.
+        // Cuando hay dos sets con casos del mismo número (ej: 4884260-1 y 4884263-1,
+        // ambos con sufijo n=1), el segundo sobrescribía al primero → casos perdidos
+        // del mapa → todos caían a offset=0 → folios duplicados → cvc-id.2.
+        // Solución: construir el mapa directamente con caseId como clave, ordenando
+        // los casos por sufijo numérico ANTES de asignar offsets.
         $setMgr = new CertSetManager($this->context);
         $casos  = $setMgr->getFacturas();
+
+        $map          = [];
+        $offsetByTipo = [];
+
         if (!empty($casos)) {
+            // Ordenar por sufijo numérico para folios consecutivos dentro de cada tipo
+            usort($casos, static function ($a, $b) {
+                preg_match('/-(\d+)$/', (string)($a['caso'] ?? ''), $ma);
+                preg_match('/-(\d+)$/', (string)($b['caso'] ?? ''), $mb);
+                return (int)($ma[1] ?? 0) <=> (int)($mb[1] ?? 0);
+            });
+
             foreach ($casos as $c) {
-                if (preg_match('/-(\d+)$/', (string)($c['caso'] ?? ''), $m)) {
-                    $n    = (int)$m[1];
-                    $tipo = (int)($c['tipoDTE'] ?? 33);
-                    // Mismo criterio de prefijo que getPruebasCases()
-                    $pfx  = match(true) {
-                        $tipo === 52 => 'G',
-                        $tipo === 43 => 'L',
-                        $tipo === 46 => 'C',
-                        default      => 'F',
-                    };
-                    $orden[$n] = ['tipo' => $tipo, 'caseId' => $pfx . '-' . $c['caso']];
-                }
+                $tipo = (int)($c['tipoDTE'] ?? 33);
+                $pfx  = match(true) {
+                    $tipo === 52 => 'G',
+                    $tipo === 43 => 'L',
+                    $tipo === 46 => 'C',
+                    default      => 'F',
+                };
+                $caseId = $pfx . '-' . $c['caso'];
+                $offsetByTipo[$tipo] ??= 0;
+                $map[$caseId] = ['tipo' => $tipo, 'offset' => $offsetByTipo[$tipo]++];
             }
         } else {
             // Fallback al set 4832043 cuando no hay set subido
@@ -430,20 +442,13 @@ class CertificationManager
                 try {
                     $cid  = 'F-4832043-' . $n;
                     $data = getCertCaseData($cid);
-                    $orden[$n] = ['tipo' => (int)($data['tipoDTE'] ?? 33), 'caseId' => $cid];
+                    $tipo = (int)($data['tipoDTE'] ?? 33);
+                    $offsetByTipo[$tipo] ??= 0;
+                    $map[$cid] = ['tipo' => $tipo, 'offset' => $offsetByTipo[$tipo]++];
                 } catch (\Throwable $e) { /* caso inexistente: omitir */ }
             }
         }
-        ksort($orden);
 
-        $map = [];
-        $offsetByTipo = [];
-        foreach ($orden as $entry) {
-            $tipo   = $entry['tipo'];
-            $caseId = $entry['caseId'];
-            $offsetByTipo[$tipo] ??= 0;
-            $map[$caseId] = ['tipo' => $tipo, 'offset' => $offsetByTipo[$tipo]++];
-        }
         return $map;
     }
 
@@ -1082,16 +1087,22 @@ XML;
         $set = $setMgr->load() ?? [];
         $folioNotif = (int)($set['atencion_libro_guias'] ?? $set['atencion_guias'] ?? 0);
 
-        $libroParams = [
-            'tipoLibro' => 'GUIA',
-            'tipoEnvio' => 'TOTAL',
-            'periodo'   => date('Y-m'),
-            'folioDsde' => 1,
-            'detalles'  => $detalles,
-        ];
-        if ($folioNotif > 0) {
-            $libroParams['folioNotificacion'] = $folioNotif;
+        if ($folioNotif <= 0) {
+            return [
+                'ok'    => false,
+                'error' => 'No se encontró el Nº de Atención del Libro de Guías en el set cargado '
+                         . '(campo atencion_libro_guias). Asegúrese de haber subido el TXT del set '
+                         . 'que incluye la sección "SET LIBRO DE GUIAS".',
+            ];
         }
+
+        $libroParams = [
+            'tipoLibro'          => 'GUIA',
+            'tipoEnvio'          => 'TOTAL',
+            'periodo'            => date('Y-m'),
+            'folioNotificacion'  => $folioNotif,
+            'detalles'           => $detalles,
+        ];
 
         $result = sendLibro($libroParams);
 
@@ -1155,7 +1166,7 @@ XML;
                 $d['iva'] = 0;
             }
             if (strpos($obs, 'gratuita') !== false || strpos($obs, 'no recuperable') !== false) {
-                $d['codIvaNoRec'] = 4;
+                $d['codIvaNoRec'] = 5; // cód. 5 = IVA entregas gratuitas Art. 23 Nº2 (no 4)
                 $d['mntIvaNoRec'] = $iva;
                 $d['iva'] = 0;
             }
