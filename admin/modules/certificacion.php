@@ -1,375 +1,450 @@
 <?php
 /**
- * Módulo Certificación SII — Pool de Pruebas completo con seguimiento de estado.
+ * Módulo Certificación SII — flujo secuencial Paso 1 → 7
  */
 
-$certCases = [
-    'B' => [
-        'nombre' => 'Boleta Electrónica',
-        'casos'  => [
-            'B-CASO-1' => 'Caso 1 — Cambio aceite + Alineación',
-            'B-CASO-2' => 'Caso 2 — Papel regalo (17 un.)',
-            'B-CASO-3' => 'Caso 3 — Sandwic + Bebida',
-            'B-CASO-4' => 'Caso 4 — Afecto + Exento mixto',
-            'B-CASO-5' => 'Caso 5 — Arroz (Unidad: Kg)',
-        ],
-    ],
-    'F' => [
-        'nombre' => 'Facturación',
-        'casos'  => [
-            'F-4832043-1' => 'Caso 1 — Factura (Cajón + Relleno)',
-            'F-4832043-2' => 'Caso 2 — Factura (Descuentos por ítem)',
-            'F-4832043-3' => 'Caso 3 — Factura (Afecto + Exento)',
-            'F-4832043-4' => 'Caso 4 — Factura (Descuento Global 23%)',
-            'F-4832043-5' => 'Caso 5 — NC Corrige Giro',
-            'F-4832043-6' => 'Caso 6 — NC Devolución mercadería',
-            'F-4832043-7' => 'Caso 7 — NC Anula factura',
-            'F-4832043-8' => 'Caso 8 — ND Anula NC',
-        ],
-    ],
-];
+// Carga dinámica de casos desde el set vinculado (si está disponible)
+$setCases = ['boletas' => [], 'generales' => []];
+if (isset($globalContext)) {
+    try {
+        $setMgrPhp = new \App\Services\CertSetManager($globalContext);
+        $setData   = $setMgrPhp->load();
+        if ($setData) {
+            foreach ($setData['boletas'] ?? [] as $b) {
+                $cid = 'B-' . $b['caso'];
+                $items = implode(', ', array_column($b['items'] ?? [], 'nombre'));
+                $setCases['boletas'][$cid] = $b['caso'] . ($items ? ' — ' . mb_substr($items, 0, 50) : '');
+            }
+            foreach ($setData['facturas'] ?? [] as $f) {
+                $t   = (int)($f['tipoDTE'] ?? 33);
+                $pfx = match($t) { 52=>'G-', 61=>'NC-', 56=>'ND-', 46=>'C-', default=>'F-' };
+                $lbl = match($t) { 33=>'Factura T33', 61=>'NC T61', 56=>'ND T56', 52=>'Guía T52', 46=>'FCA T46', default=>'DTE T'.$t };
+                $cid = $pfx . $f['caso'];
+                $setCases['generales'][$cid] = $f['caso'] . ' — ' . $lbl;
+            }
+        }
+    } catch (\Throwable $e) { /* sin set cargado aún */ }
+}
+
+// Fallback estático si no hay set cargado
+if (empty($setCases['boletas'])) {
+    $setCases['boletas'] = [
+        'B-CASO-1' => 'CASO-1 — Cambio aceite + Alineación',
+        'B-CASO-2' => 'CASO-2 — Papel regalo',
+        'B-CASO-3' => 'CASO-3 — Sandwic + Bebida',
+        'B-CASO-4' => 'CASO-4 — Afecto + Exento mixto',
+        'B-CASO-5' => 'CASO-5 — Arroz (Kg)',
+    ];
+}
+if (empty($setCases['generales'])) {
+    $setCases['generales'] = [
+        'F-4832043-1' => '…-1 — Factura T33', 'F-4832043-2' => '…-2 — Factura T33 (descuentos)',
+        'F-4832043-3' => '…-3 — Factura T33 (exento)', 'F-4832043-4' => '…-4 — Factura T33 (dto. global)',
+        'F-4832043-5' => '…-5 — NC T61', 'F-4832043-6' => '…-6 — NC T61 (dev.)',
+        'F-4832043-7' => '…-7 — NC T61 (anula)', 'F-4832043-8' => '…-8 — ND T56',
+    ];
+}
+
+$allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCases['generales'])));
 ?>
 
 <style>
-.cert-progress-bar { height:6px; background:#eee; border-radius:3px; overflow:hidden; margin-top:4px; }
-.cert-progress-fill { height:100%; background:var(--c-success); border-radius:3px; transition:width .4s; }
-.cert-case-row { display:flex; align-items:flex-start; gap:8px; padding:5px 12px;
-  border-bottom:1px solid var(--c-border); font-size:.78rem; flex-wrap:wrap; }
+/* ── Paso card ── */
+.paso-card { border:1px solid var(--c-border); border-radius:10px; margin-bottom:18px; overflow:hidden; }
+.paso-header { display:flex; align-items:center; gap:12px; padding:12px 16px;
+  background:var(--c-bg-subtle,#f8f9fa); border-bottom:1px solid var(--c-border); cursor:pointer;
+  user-select:none; }
+.paso-header:hover { background:#edf0f5; }
+.paso-num { width:30px; height:30px; border-radius:50%; display:flex; align-items:center;
+  justify-content:center; font-weight:800; font-size:.85rem; flex-shrink:0;
+  color:#fff; background:var(--c-primary,#3b6aec); }
+.paso-num.done  { background:#27ae60; }
+.paso-num.fail  { background:#e74c3c; }
+.paso-num.skip  { background:#95a5a6; }
+.paso-title { font-weight:700; font-size:.88rem; flex:1; }
+.paso-desc  { font-size:.72rem; color:var(--c-text-muted); font-weight:400; margin-left:4px; }
+.paso-body  { padding:16px; }
+.paso-body.hidden { display:none; }
+/* ── Casos ── */
+.cert-case-row { display:flex; align-items:center; gap:8px; padding:5px 10px;
+  border-bottom:1px solid var(--c-border); font-size:.78rem; }
 .cert-case-row:last-child { border-bottom:none; }
 .cert-badge { display:inline-flex; align-items:center; justify-content:center;
-  width:72px; font-size:.68rem; padding:2px 6px; border-radius:10px; font-weight:600;
-  white-space:nowrap; }
+  min-width:72px; font-size:.68rem; padding:2px 7px; border-radius:10px; font-weight:600;
+  white-space:nowrap; flex-shrink:0; }
 .cb-ok      { background:#d4edda; color:#155724; }
 .cb-failed  { background:#f8d7da; color:#721c24; }
 .cb-pending { background:#e2e3e5; color:#495057; }
 .cb-running { background:#fff3cd; color:#856404; }
-.cert-folio { font-size:.7rem; color:var(--c-text-muted); flex:1; min-width:0; }
+.cert-folio { font-size:.7rem; color:var(--c-text-muted); flex:1; }
 .cert-error-tip { font-size:.68rem; color:#c0392b; cursor:help;
-  border-bottom:1px dashed #c0392b; word-break:break-word; }
-.cert-stage-header { font-weight:700; font-size:.82rem; padding:10px 14px;
-  background:var(--c-bg-subtle,#f8f9fa); border-bottom:1px solid var(--c-border);
-  display:flex; align-items:center; gap:8px; }
-.cert-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-  gap:10px; margin-bottom:18px; }
+  border-bottom:1px dashed #c0392b; word-break:break-all; }
+/* ── Libros ── */
+.libro-card { border:1px solid var(--c-border); border-radius:8px; padding:12px; }
+/* ── Progress ── */
+.cert-progress-bar  { height:6px; background:#eee; border-radius:3px; overflow:hidden; margin-top:4px; }
+.cert-progress-fill { height:100%; background:#27ae60; border-radius:3px; transition:width .4s; }
+/* ── Summary ── */
+.cert-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+  gap:8px; margin-bottom:16px; }
 .cert-summary-card { background:#fff; border:1px solid var(--c-border); border-radius:8px;
-  padding:10px 14px; text-align:center; }
-.cert-summary-card .num { font-size:22pt; font-weight:800; }
-.cert-summary-card .lbl { font-size:.72rem; color:var(--c-text-muted); }
-.cert-summary-card.ok    .num { color:#27ae60; }
-.cert-summary-card.fail  .num { color:#e74c3c; }
-.cert-summary-card.pend  .num { color:#95a5a6; }
-.cert-summary-card.run   .num { color:#f39c12; }
+  padding:8px 12px; text-align:center; }
+.cert-summary-card .num { font-size:20pt; font-weight:800; }
+.cert-summary-card .lbl { font-size:.7rem; color:var(--c-text-muted); }
+.cert-summary-card.ok   .num { color:#27ae60; }
+.cert-summary-card.fail .num { color:#e74c3c; }
+.cert-summary-card.pend .num { color:#95a5a6; }
+/* ── Grupo tipo ── */
+.caso-group-header { font-size:.72rem; font-weight:700; color:var(--c-text-muted);
+  padding:4px 10px; background:#f4f5f7; border-bottom:1px solid var(--c-border);
+  text-transform:uppercase; letter-spacing:.04em; }
 </style>
 
-<!-- Barra superior con acciones globales -->
-<div class="d-card mb-4">
-  <div class="d-card-body" style="display:flex; flex-wrap:wrap; gap:10px; align-items:center">
-    <div style="flex:1; min-width:200px">
-      <strong>Pool de Certificación SII</strong>
-      <div style="font-size:.75rem; color:var(--c-text-muted)">
-        Solo disponible en ambiente CERTIFICACIÓN. El estado se guarda automáticamente.
-      </div>
-    </div>
-    <button class="d-btn d-btn-success" onclick="certRunAll()">
-      <i class="bi bi-play-fill"></i> Paso 2: Facturas, notas y guias
+<!-- ══ Toolbar ══════════════════════════════════════════════════════════════ -->
+<div class="d-card mb-3">
+  <div class="d-card-body" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 14px">
+    <strong style="flex:1; min-width:160px; font-size:.88rem">
+      <i class="bi bi-patch-check-fill" style="color:var(--c-primary)"></i>
+      Certificación SII — Flujo completo
+    </strong>
+    <button class="d-btn d-btn-sm d-btn-outline" onclick="loadState()">
+      <i class="bi bi-arrow-repeat"></i> Actualizar estado
     </button>
-    <button class="d-btn d-btn-warning" onclick="certRetry()" id="btn-retry" style="display:none">
-      <i class="bi bi-arrow-clockwise"></i> Reintentar Fallidos
+    <button class="d-btn d-btn-sm d-btn-warning" onclick="certRetry()" id="btn-retry" style="display:none">
+      <i class="bi bi-arrow-clockwise"></i> Reintentar fallidos
     </button>
-    <button class="d-btn d-btn-info" onclick="certMuestras()">
-      <i class="bi bi-printer"></i> Muestras Impresas (PDF)
-    </button>
-    <button class="d-btn d-btn-outline" onclick="certReset()" title="Reiniciar todo el estado">
-      <i class="bi bi-trash3"></i> Reiniciar
-    </button>
-    <button class="d-btn d-btn-outline" onclick="loadState()">
-      <i class="bi bi-arrow-repeat"></i> Actualizar
+    <button class="d-btn d-btn-sm d-btn-outline" onclick="certReset()" style="color:#e74c3c">
+      <i class="bi bi-trash3"></i> Reiniciar estado
     </button>
   </div>
 </div>
 
-<!-- ══ Certificación de BOLETAS (set en un sobre + RCOF) ══ -->
-<div class="d-card mb-4" style="border:2px solid var(--c-primary)">
-  <div class="cert-stage-header" style="background:linear-gradient(135deg,#eef2ff,#f8fafc)">
-    <i class="bi bi-receipt"></i> Certificación de Boletas Electrónicas
-    <span style="font-size:.7rem; font-weight:400; color:var(--c-text-muted); margin-left:8px">
-      Genera el set completo con los folios del CAF y lo envía en un solo sobre. El RCOF queda como respaldo local opcional.
-    </span>
-  </div>
-  <div class="d-card-body">
-    <div class="row g-3 align-items-start">
-      <!-- Vincular set de prueba -->
-      <div class="col-md-5">
-        <label class="d-label"><i class="bi bi-paperclip"></i> Archivos oficiales del SII (.txt)</label>
-        <div style="font-size:.7rem; color:var(--c-text-muted); margin-bottom:4px">
-          Paso 1 boletas: ejemplo <code>Set Prueba BE.txt</code>
-        </div>
-        <div style="display:flex; gap:6px">
-          <input type="file" id="set-file-boletas" accept=".txt" class="d-input" style="font-size:.78rem">
-          <button class="d-btn d-btn-outline d-btn-sm" onclick="certUploadSet('boletas')" title="Subir set de boletas">
-            <i class="bi bi-upload"></i>
-          </button>
-        </div>
-        <div style="font-size:.7rem; color:var(--c-text-muted); margin:8px 0 4px">
-          Paso 2 facturas/notas/guias: ejemplo <code>SIISetDePruebas{RUT}.txt</code>
-        </div>
-        <div style="display:flex; gap:6px">
-          <input type="file" id="set-file-basico" accept=".txt" class="d-input" style="font-size:.78rem">
-          <button class="d-btn d-btn-outline d-btn-sm" onclick="certUploadSet('basico')" title="Subir set basico">
-            <i class="bi bi-upload"></i>
-          </button>
-        </div>
-        <div id="set-info" style="font-size:.72rem; color:var(--c-text-muted); margin-top:6px">Cargando set vinculado...</div>
-      </div>
-      <!-- Acción principal -->
-      <div class="col-md-7">
-        <label class="d-label">Proceso completo</label>
-        <div style="display:flex; gap:8px; flex-wrap:wrap">
-          <button class="d-btn d-btn-primary" id="btn-cert-boletas" onclick="certBoletas()">
-            <i class="bi bi-rocket-takeoff-fill"></i> Paso 1: Boletas (sobre SII)
-          </button>
-          <button type="button" class="d-btn d-btn-outline" onclick="certMuestras()">
-            <i class="bi bi-printer"></i> Muestras PDF
-          </button>
-        </div>
-        <div style="font-size:.7rem; color:var(--c-text-muted); margin-top:6px">
-          Reutiliza siempre los mismos folios del CAF (no consume de más). Reintentable hasta aprobar.
-        </div>
-      </div>
-    </div>
-    <div id="cert-boletas-result" style="margin-top:12px"></div>
-  </div>
-</div>
-
-<!-- Resumen global -->
+<!-- Resumen -->
 <div class="cert-summary" id="cert-summary">
-  <div class="cert-summary-card pend"><div class="num" id="sum-total">—</div><div class="lbl">Total casos</div></div>
-  <div class="cert-summary-card ok">  <div class="num" id="sum-ok">—</div>  <div class="lbl">Exitosos</div></div>
+  <div class="cert-summary-card pend"><div class="num" id="sum-total">—</div><div class="lbl">Casos totales</div></div>
+  <div class="cert-summary-card ok">  <div class="num" id="sum-ok">—</div>  <div class="lbl">OK</div></div>
   <div class="cert-summary-card fail"><div class="num" id="sum-fail">—</div><div class="lbl">Fallidos</div></div>
   <div class="cert-summary-card pend"><div class="num" id="sum-pend">—</div><div class="lbl">Pendientes</div></div>
-  <div class="cert-summary-card run"> <div class="num" id="sim-total">—</div><div class="lbl">Docs simulación</div></div>
+  <div class="cert-summary-card pend"><div class="num" id="sim-total">—</div><div class="lbl">Simulación</div></div>
 </div>
 
-<!-- Estado general de ejecución -->
 <div id="cert-run-status" class="mb-3"></div>
 
-<div class="row g-4">
-
-  <!-- ── ETAPA 1: Set de Pruebas ─────────────────────────────── -->
-  <div class="col-lg-8">
-    <div class="d-card">
-      <div class="cert-stage-header">
-        <i class="bi bi-file-earmark-check"></i>
-        Etapa 1 — Set de Pruebas Asignado
-        <span id="stage1-badge" class="d-badge ms-auto">Cargando...</span>
+<!-- ══ PASO 1 — Sets de Prueba ══════════════════════════════════════════════ -->
+<div class="paso-card">
+  <div class="paso-header" onclick="togglePaso(1)">
+    <div class="paso-num" id="pnum-1">1</div>
+    <div class="paso-title">Sets de Prueba
+      <span class="paso-desc">Vincular archivos .txt oficiales del SII</span>
+    </div>
+    <span id="pbadge-1" class="d-badge">Cargando…</span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-1"></i>
+  </div>
+  <div class="paso-body" id="pbody-1">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="d-label"><i class="bi bi-receipt"></i> Set Boletas — <code>Set Prueba BE.txt</code></label>
+        <div style="display:flex; gap:6px">
+          <input type="file" id="set-file-boletas" accept=".txt" class="d-input" style="font-size:.78rem">
+          <button class="d-btn d-btn-outline d-btn-sm" onclick="certUploadSet('boletas')">
+            <i class="bi bi-upload"></i> Subir
+          </button>
+        </div>
       </div>
-      <div class="d-card-body" style="padding:0">
-        <?php foreach ($certCases as $setKey => $set): ?>
-        <div class="cert-stage-header" style="background:transparent; font-size:.75rem; font-weight:600; padding:6px 14px; border-top:1px solid var(--c-border)">
-          <?= htmlspecialchars($set['nombre']) ?>
-          <?php if ($setKey === 'B'): ?>
-          <span class="ms-auto" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400">
-            Usar solo "Paso 1: Boletas (sobre SII)"
-          </span>
-          <?php else: ?>
-          <button class="d-btn d-btn-sm d-btn-outline ms-auto"
-            onclick="certRunSet('<?= $setKey ?>')">
-            <i class="bi bi-send"></i> Enviar set
+      <div class="col-md-6">
+        <label class="d-label"><i class="bi bi-file-earmark-text"></i> Set Básico — <code>SIISetDePruebas{RUT}.txt</code></label>
+        <div style="display:flex; gap:6px">
+          <input type="file" id="set-file-basico" accept=".txt" class="d-input" style="font-size:.78rem">
+          <button class="d-btn d-btn-outline d-btn-sm" onclick="certUploadSet('basico')">
+            <i class="bi bi-upload"></i> Subir
           </button>
-          <?php endif; ?>
         </div>
-        <?php foreach ($set['casos'] as $caseId => $caseName): ?>
-        <div class="cert-case-row" id="row-<?= $caseId ?>">
-          <span class="cert-badge cb-pending" id="badge-<?= $caseId ?>">Pendiente</span>
-          <span><?= htmlspecialchars($caseName) ?></span>
-          <span class="cert-folio" id="folio-<?= $caseId ?>"></span>
-          <?php if ($setKey === 'B'): ?>
-          <span class="cert-folio" style="text-align:right; font-size:.68rem; color:var(--c-text-muted)">
-            Sobre SII
-          </span>
-          <?php else: ?>
-          <button class="d-btn d-btn-sm d-btn-outline" onclick="certRunCase('<?= $caseId ?>')" title="Ejecutar solo este caso">
-            <i class="bi bi-play"></i>
-          </button>
-          <?php endif; ?>
-        </div>
-        <?php endforeach; ?>
-        <?php endforeach; ?>
       </div>
     </div>
+    <div id="set-info" style="font-size:.75rem; color:var(--c-text-muted); margin-top:10px">
+      <span class="spinner-border spinner-border-sm"></span> Cargando set vinculado…
+    </div>
   </div>
+</div>
 
-  <!-- ── Panel derecho ─────────────────────────────────────────── -->
-  <div class="col-lg-4">
-
-    <!-- Etapa 2: Simulación -->
-    <div class="d-card mb-4">
-      <div class="cert-stage-header">
-        <i class="bi bi-rocket-takeoff"></i> Etapa 2 — Simulación
-        <span id="stage2-badge" class="d-badge ms-auto">Pendiente</span>
+<!-- ══ PASO 2 — Boletas Electrónicas ════════════════════════════════════════ -->
+<div class="paso-card">
+  <div class="paso-header" onclick="togglePaso(2)">
+    <div class="paso-num" id="pnum-2">2</div>
+    <div class="paso-title">Boletas Electrónicas (T39)
+      <span class="paso-desc">Sobre EnvioBOLETA + RCOF al SII</span>
+    </div>
+    <span id="pbadge-2" class="d-badge">Pendiente</span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-2"></i>
+  </div>
+  <div class="paso-body" id="pbody-2">
+    <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:12px">
+      Genera las <?= count($setCases['boletas']) ?> boletas del set con los folios del CAF y las envía
+      en un único sobre firmado. El RCOF se adjunta automáticamente.
+      Reutiliza los mismos folios (reintentable hasta aprobación del SII).
+    </p>
+    <div style="display:flex; gap:10px; flex-wrap:wrap">
+      <button class="d-btn d-btn-primary" id="btn-cert-boletas" onclick="certBoletas()">
+        <i class="bi bi-rocket-takeoff-fill"></i> Enviar Boletas al SII
+      </button>
+      <button class="d-btn d-btn-outline" onclick="certMuestras()">
+        <i class="bi bi-printer"></i> Muestras PDF
+      </button>
+    </div>
+    <div id="cert-boletas-result" style="margin-top:12px"></div>
+    <!-- Casos boletas (solo estado, se envían en bloque) -->
+    <div class="mt-3" style="border:1px solid var(--c-border); border-radius:6px; overflow:hidden">
+      <div class="caso-group-header">Casos de Boleta</div>
+      <?php foreach ($setCases['boletas'] as $cid => $name): ?>
+      <div class="cert-case-row" id="row-<?= $cid ?>">
+        <span class="cert-badge cb-pending" id="badge-<?= $cid ?>">Pendiente</span>
+        <span style="flex:1"><?= htmlspecialchars($name) ?></span>
+        <span class="cert-folio" id="folio-<?= $cid ?>"></span>
+        <span style="font-size:.68rem; color:var(--c-text-muted)">Sobre SII</span>
       </div>
-      <div class="d-card-body" style="padding:12px">
-        <div id="sim-detail">
-          <?php foreach ([33 => 'Factura (33)', 39 => 'Boleta (39)'] as $t => $n): ?>
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
-            <span style="font-size:.78rem"><?= $n ?></span>
+      <?php endforeach; ?>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PASO 3 — Facturas, NC, ND y Guías ════════════════════════════════════ -->
+<div class="paso-card">
+  <div class="paso-header" onclick="togglePaso(3)">
+    <div class="paso-num" id="pnum-3">3</div>
+    <div class="paso-title">Facturas, NC, ND y Guías (Set Básico)
+      <span class="paso-desc">T33 · T61 · T56 · T52 — cada documento en sobre individual</span>
+    </div>
+    <span id="pbadge-3" class="d-badge">Pendiente</span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-3"></i>
+  </div>
+  <div class="paso-body" id="pbody-3">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px">
+      <button class="d-btn d-btn-success" onclick="certRunAll()">
+        <i class="bi bi-play-fill"></i> Ejecutar todos los casos
+      </button>
+      <button class="d-btn d-btn-outline" onclick="certMuestras()">
+        <i class="bi bi-printer"></i> Muestras PDF
+      </button>
+    </div>
+    <!-- Casos generales (dinámicos) -->
+    <div id="casos-generales-container" style="border:1px solid var(--c-border); border-radius:6px; overflow:hidden">
+      <?php
+      // Agrupar por tipo
+      $grupos = ['F-' => ['T33/46/56/61 — Facturas, NC, ND', []], 'G-' => ['T52 — Guías de Despacho', []]];
+      foreach ($setCases['generales'] as $cid => $name) {
+          $pfx = str_starts_with($cid, 'G-') ? 'G-' : 'F-';
+          $grupos[$pfx][1][$cid] = $name;
+      }
+      foreach ($grupos as [$grpLabel, $grpCases]):
+          if (empty($grpCases)) continue;
+      ?>
+      <div class="caso-group-header"><?= $grpLabel ?></div>
+      <?php foreach ($grpCases as $cid => $name): ?>
+      <div class="cert-case-row" id="row-<?= $cid ?>">
+        <span class="cert-badge cb-pending" id="badge-<?= $cid ?>">Pendiente</span>
+        <span style="flex:1"><?= htmlspecialchars($name) ?></span>
+        <span class="cert-folio" id="folio-<?= $cid ?>"></span>
+        <button class="d-btn d-btn-sm d-btn-outline" onclick="certRunCase('<?= $cid ?>')" title="Ejecutar solo este caso">
+          <i class="bi bi-play"></i>
+        </button>
+      </div>
+      <?php endforeach; ?>
+      <?php endforeach; ?>
+      <div id="casos-extra-rows"></div><!-- filas dinámicas para IDs no en PHP -->
+    </div>
+  </div>
+</div>
+
+<!-- ══ PASO 4 — Libros Tributarios ══════════════════════════════════════════ -->
+<div class="paso-card">
+  <div class="paso-header" onclick="togglePaso(4)">
+    <div class="paso-num" id="pnum-4">4</div>
+    <div class="paso-title">Libros Tributarios
+      <span class="paso-desc">Ventas · Compras · Guías — enviar después del Paso 3</span>
+    </div>
+    <span id="pbadge-4" class="d-badge">Pendiente</span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-4"></i>
+  </div>
+  <div class="paso-body" id="pbody-4">
+    <div class="row g-3">
+
+      <!-- Libro Ventas -->
+      <div class="col-md-4">
+        <div class="libro-card h-100" style="border-left:3px solid #27ae60">
+          <div style="font-weight:700; font-size:.82rem; margin-bottom:2px">
+            <i class="bi bi-graph-up" style="color:#27ae60"></i> Libro de Ventas
+            <span id="libro-ventas-at" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400; display:block"></span>
+          </div>
+          <div style="font-size:.72rem; color:var(--c-text-muted); margin-bottom:10px">
+            Construido con los 8 casos del Set Básico (facturas, NC, ND).
+          </div>
+          <div style="display:flex; align-items:center; gap:8px">
+            <button class="d-btn d-btn-sm d-btn-success flex-fill" onclick="certLibro('ventas')">
+              <i class="bi bi-send"></i> Enviar
+            </button>
+            <span class="cert-badge cb-pending" id="libro-ventas-badge">Pendiente</span>
+          </div>
+          <div id="libro-ventas-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
+        </div>
+      </div>
+
+      <!-- Libro Compras -->
+      <div class="col-md-4">
+        <div class="libro-card h-100" style="border-left:3px solid #e67e22">
+          <div style="font-weight:700; font-size:.82rem; margin-bottom:2px">
+            <i class="bi bi-cart" style="color:#e67e22"></i> Libro de Compras
+            <span id="libro-compras-at" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400; display:block"></span>
+          </div>
+          <div style="font-size:.72rem; color:var(--c-text-muted); margin-bottom:10px">
+            Documentos papel y electrónicos del set oficial. Incluye IVA uso común y no recuperable.
+          </div>
+          <div style="display:flex; align-items:center; gap:8px">
+            <button class="d-btn d-btn-sm flex-fill" style="background:#e67e22;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:.78rem;cursor:pointer" onclick="certLibro('compras')">
+              <i class="bi bi-send"></i> Enviar
+            </button>
+            <span class="cert-badge cb-pending" id="libro-compras-badge">Pendiente</span>
+          </div>
+          <div id="libro-compras-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
+        </div>
+      </div>
+
+      <!-- Libro Guías -->
+      <div class="col-md-4">
+        <div class="libro-card h-100" style="border-left:3px solid #8e44ad">
+          <div style="font-weight:700; font-size:.82rem; margin-bottom:2px">
+            <i class="bi bi-truck" style="color:#8e44ad"></i> Libro de Guías
+            <span id="libro-guias-at" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400; display:block"></span>
+          </div>
+          <div style="font-size:.72rem; color:var(--c-text-muted); margin-bottom:10px">
+            Requiere guías T52 generadas en el Paso 3. Solo en sets con guías de despacho.
+          </div>
+          <div style="display:flex; align-items:center; gap:8px">
+            <button class="d-btn d-btn-sm flex-fill" style="background:#8e44ad;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:.78rem;cursor:pointer" onclick="certLibro('guias')">
+              <i class="bi bi-send"></i> Enviar
+            </button>
+            <span class="cert-badge cb-pending" id="libro-guias-badge">Pendiente</span>
+          </div>
+          <div id="libro-guias-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══ PASO 5 — Simulación ══════════════════════════════════════════════════ -->
+<div class="paso-card">
+  <div class="paso-header" onclick="togglePaso(5)">
+    <div class="paso-num" id="pnum-5">5</div>
+    <div class="paso-title">Simulación
+      <span class="paso-desc">50 facturas T33 + 50 boletas T39 en serie</span>
+    </div>
+    <span id="pbadge-5" class="d-badge">Pendiente</span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-5"></i>
+  </div>
+  <div class="paso-body hidden" id="pbody-5">
+    <div class="row g-3">
+      <?php foreach ([33 => ['Factura Electrónica (T33)', '#2980b9'], 39 => ['Boleta Electrónica (T39)', '#16a085']] as $t => [$tn, $tc]): ?>
+      <div class="col-md-6">
+        <div class="libro-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px">
+            <strong style="font-size:.82rem"><?= $tn ?></strong>
             <span class="cert-badge cb-pending" id="sim-badge-<?= $t ?>">0/50</span>
           </div>
           <div class="cert-progress-bar">
             <div class="cert-progress-fill" id="sim-bar-<?= $t ?>" style="width:0%"></div>
           </div>
-          <?php endforeach; ?>
-        </div>
-        <div class="mt-3 d-flex gap-2">
-          <button class="d-btn d-btn-sm d-btn-primary flex-fill" onclick="certRunSim(33)">T.33</button>
-          <button class="d-btn d-btn-sm d-btn-primary flex-fill" onclick="certRunSim(39)">T.39</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Etapa 3: Intercambio -->
-    <div class="d-card mb-4">
-      <div class="cert-stage-header">
-        <i class="bi bi-arrow-left-right"></i> Etapa 3 — Intercambio
-        <span id="stage3-badge" class="d-badge ms-auto">Pendiente</span>
-      </div>
-      <div class="d-card-body" style="padding:12px">
-        <p style="font-size:.75rem; color:var(--c-text-muted); margin-bottom:10px">
-          Pegue o suba el XML que el SII le envió en el ambiente de certificación
-          (<em>maullin.sii.cl</em>). El sistema generará y enviará la respuesta automáticamente.
-        </p>
-        <textarea id="intercambio-xml" class="d-input"
-          style="width:100%; height:80px; font-size:.7rem; font-family:monospace"
-          placeholder="&lt;EnvioDTE...&gt;"></textarea>
-        <div style="display:flex; gap:8px; margin-top:8px">
-          <input type="file" id="intercambio-file" accept=".xml" style="display:none"
-            onchange="loadIntercambioFile(this)">
-          <button class="d-btn d-btn-sm d-btn-outline flex-fill"
-            onclick="document.getElementById('intercambio-file').click()">
-            <i class="bi bi-upload"></i> Subir XML
-          </button>
-          <button class="d-btn d-btn-sm d-btn-primary flex-fill" onclick="certIntercambio()">
-            <i class="bi bi-send-check"></i> Responder
+          <button class="d-btn d-btn-sm w-100 mt-2" style="background:<?= $tc ?>;color:#fff;border:none;border-radius:6px;padding:5px;cursor:pointer"
+            onclick="certRunSim(<?= $t ?>)">
+            <i class="bi bi-play-fill"></i> Iniciar 50 docs T<?= $t ?>
           </button>
         </div>
-        <div id="intercambio-status" class="mt-2"></div>
       </div>
-    </div>
-
-    <!-- Etapa 4: Muestras Impresas -->
-    <div class="d-card">
-      <div class="cert-stage-header">
-        <i class="bi bi-file-pdf"></i> Etapa 4 — Muestras Impresas
-        <span id="stage4-badge" class="d-badge ms-auto">Disponible</span>
-      </div>
-      <div class="d-card-body" style="padding:12px; font-size:.78rem">
-        <p style="color:var(--c-text-muted); margin-bottom:10px">
-          Genera un documento HTML con todos los DTEs del Set de Pruebas + 10 de
-          Simulación, con timbre PDF417. Use <strong>Ctrl+P → Guardar como PDF</strong>
-          en el navegador para obtener el archivo a enviar al SII.
-        </p>
-        <button class="d-btn d-btn-info w-100" onclick="certMuestras()">
-          <i class="bi bi-printer-fill"></i> Generar e Imprimir
-        </button>
-      </div>
-    </div>
-
-  </div><!-- /col-lg-4 -->
-</div><!-- /row -->
-
-<!-- ── LIBROS DE CERTIFICACIÓN ─────────────────────────────────────── -->
-<div class="d-card mt-4">
-  <div class="cert-stage-header">
-    <i class="bi bi-journal-text"></i> Libros de Certificación
-    <span style="font-size:.72rem; color:var(--c-text-muted); margin-left:8px">
-      Generar y enviar después de completar el Set de Pruebas
-    </span>
-  </div>
-  <div class="d-card-body">
-    <div class="row g-3">
-
-      <!-- Libro de Ventas 4832044 -->
-      <div class="col-md-6">
-        <div class="d-card h-100" style="border-left:3px solid #27ae60">
-          <div class="d-card-body" style="padding:12px">
-            <div style="font-weight:700; font-size:.82rem; margin-bottom:4px">
-              Libro de Ventas
-              <span id="libro-ventas-at" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400"></span>
-            </div>
-            <div style="font-size:.74rem; color:var(--c-text-muted); margin-bottom:10px">
-              Construido con los 8 casos del Set Básico (facturas, NC, ND).
-              Requiere tener generados todos los casos del Set Básico vinculado.
-            </div>
-            <div style="display:flex; align-items:center; gap:8px">
-              <button class="d-btn d-btn-sm d-btn-success flex-fill" onclick="certLibro('ventas')">
-                <i class="bi bi-send"></i> Enviar
-              </button>
-              <span class="cert-badge cb-pending" id="libro-ventas-badge">Pendiente</span>
-            </div>
-            <div id="libro-ventas-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Libro de Compras 4832045 -->
-      <div class="col-md-6">
-        <div class="d-card h-100" style="border-left:3px solid #e67e22">
-          <div class="d-card-body" style="padding:12px">
-            <div style="font-weight:700; font-size:.82rem; margin-bottom:4px">
-              Libro de Compras
-              <span id="libro-compras-at" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400"></span>
-            </div>
-            <div style="font-size:.74rem; color:var(--c-text-muted); margin-bottom:6px">
-              Documentos en papel y electrónicos según el set oficial.<br>
-              Incluye IVA uso común (fct. prop. 0.60) e IVA no recuperable.
-            </div>
-            <details style="font-size:.68rem; margin-bottom:8px">
-              <summary style="cursor:pointer; color:var(--c-text-muted)">Ver documentos incluidos</summary>
-              <table style="width:100%; margin-top:6px; border-collapse:collapse; font-size:.67rem">
-                <tr style="background:#f8f8f8"><th style="text-align:left; padding:2px 4px">Doc</th><th>Folio</th><th>Neto</th><th>Obs.</th></tr>
-                <tr><td>Factura</td><td>234</td><td>$11.563</td><td>Crédito pleno</td></tr>
-                <tr><td>FE</td><td>32</td><td>$5.021</td><td>+Exento $8.299</td></tr>
-                <tr><td>Factura</td><td>781</td><td>$29.668</td><td>Uso común 60%</td></tr>
-                <tr><td>NC</td><td>451</td><td>-$2.655</td><td>Dto. f.234</td></tr>
-                <tr><td>FE</td><td>67</td><td>$9.383</td><td>Entrega gratuita</td></tr>
-                <tr><td>FCA-e</td><td>9</td><td>$9.253</td><td>Retención total</td></tr>
-                <tr><td>NC</td><td>211</td><td>-$3.068</td><td>Dto. FE 32</td></tr>
-              </table>
-            </details>
-            <div style="display:flex; align-items:center; gap:8px">
-              <button class="d-btn d-btn-sm flex-fill" style="background:#e67e22;color:#fff;border:none" onclick="certLibro('compras')">
-                <i class="bi bi-send"></i> Enviar
-              </button>
-              <span class="cert-badge cb-pending" id="libro-compras-badge">Pendiente</span>
-            </div>
-            <div id="libro-compras-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
-          </div>
-        </div>
-      </div>
-
+      <?php endforeach; ?>
     </div>
   </div>
 </div>
 
-<!-- Log de ejecución -->
-<div class="d-card mt-4">
-  <div class="d-card-header" style="display:flex; justify-content:space-between">
-    <span><i class="bi bi-terminal"></i> Log de ejecución</span>
+<!-- ══ PASO 6 — Intercambio DTE ═════════════════════════════════════════════ -->
+<div class="paso-card">
+  <div class="paso-header" onclick="togglePaso(6)">
+    <div class="paso-num" id="pnum-6">6</div>
+    <div class="paso-title">Intercambio DTE
+      <span class="paso-desc">Responder XML enviado por el SII (maullin.sii.cl)</span>
+    </div>
+    <span id="pbadge-6" class="d-badge">Pendiente</span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-6"></i>
+  </div>
+  <div class="paso-body hidden" id="pbody-6">
+    <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:10px">
+      Pegue o suba el XML de intercambio que el SII le envió en el ambiente de certificación.
+      El sistema generará y enviará la respuesta automáticamente.
+    </p>
+    <textarea id="intercambio-xml" class="d-input"
+      style="width:100%; height:90px; font-size:.7rem; font-family:monospace; resize:vertical"
+      placeholder="&lt;EnvioDTE xmlns=&quot;http://www.sii.cl/SiiDte&quot;...&gt;"></textarea>
+    <div style="display:flex; gap:8px; margin-top:8px">
+      <input type="file" id="intercambio-file" accept=".xml" style="display:none"
+        onchange="loadIntercambioFile(this)">
+      <button class="d-btn d-btn-sm d-btn-outline flex-fill"
+        onclick="document.getElementById('intercambio-file').click()">
+        <i class="bi bi-upload"></i> Subir XML
+      </button>
+      <button class="d-btn d-btn-sm d-btn-primary flex-fill" onclick="certIntercambio()">
+        <i class="bi bi-send-check"></i> Responder al SII
+      </button>
+    </div>
+    <div id="intercambio-status" class="mt-2"></div>
+  </div>
+</div>
+
+<!-- ══ PASO 7 — Muestras Impresas ═══════════════════════════════════════════ -->
+<div class="paso-card">
+  <div class="paso-header" onclick="togglePaso(7)">
+    <div class="paso-num" id="pnum-7">7</div>
+    <div class="paso-title">Muestras Impresas
+      <span class="paso-desc">PDF con PDF417 para enviar al SII como evidencia</span>
+    </div>
+    <span id="pbadge-7" class="d-badge">Disponible</span>
+    <i class="bi bi-chevron-down ms-2" id="pchev-7"></i>
+  </div>
+  <div class="paso-body hidden" id="pbody-7">
+    <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:12px">
+      Genera todos los DTEs del Set de Pruebas con timbre PDF417.
+      Use <strong>Ctrl+P → Guardar como PDF</strong> en el navegador para obtener el archivo.
+    </p>
+    <button class="d-btn d-btn-info" onclick="certMuestras()">
+      <i class="bi bi-printer-fill"></i> Generar e Imprimir Muestras
+    </button>
+  </div>
+</div>
+
+<!-- ══ Log de ejecución ══════════════════════════════════════════════════════ -->
+<div class="d-card mt-2">
+  <div class="d-card-header" style="display:flex; justify-content:space-between; padding:8px 14px">
+    <span style="font-size:.82rem; font-weight:600"><i class="bi bi-terminal"></i> Log de ejecución</span>
     <button class="d-btn d-btn-sm d-btn-outline" onclick="document.getElementById('cert-log').innerHTML=''">Limpiar</button>
   </div>
   <div id="cert-log" style="padding:10px 14px; font-size:.72rem; font-family:monospace;
-    max-height:280px; overflow-y:auto; background:var(--c-bg-subtle,#f8f9fa)">
+    max-height:260px; overflow-y:auto; background:var(--c-bg-subtle,#f8f9fa)">
     <span style="color:#888">— Log de certificación —</span>
   </div>
 </div>
 
 <script>
-// ── Estado en UI ──────────────────────────────────────────────────────────────
-const ALL_CASES = <?= json_encode(array_keys(array_merge(
-    $certCases['B']['casos'],
-    $certCases['F']['casos']
-))) ?>;
+// ── Constantes ────────────────────────────────────────────────────────────────
+const ALL_CASES = <?= $allCasesJson ?>;
 
+// ── Collapsible pasos ─────────────────────────────────────────────────────────
+function togglePaso(n) {
+  const body = document.getElementById('pbody-'+n);
+  const chev = document.getElementById('pchev-'+n);
+  if (!body) return;
+  const hidden = body.classList.toggle('hidden');
+  if (chev) chev.className = 'bi ms-2 ' + (hidden ? 'bi-chevron-right' : 'bi-chevron-down');
+}
+
+// ── Log ───────────────────────────────────────────────────────────────────────
 function log(msg, type='info') {
   const el = document.getElementById('cert-log');
   const ts = new Date().toLocaleTimeString();
@@ -378,14 +453,33 @@ function log(msg, type='info') {
   el.scrollTop = el.scrollHeight;
 }
 
+// ── applyState ────────────────────────────────────────────────────────────────
 function applyState(estado) {
   if (!estado) return;
   const pruebas = estado.pruebas || {};
   let ok=0, fail=0, pend=0;
 
-  ALL_CASES.forEach(id => {
+  // Merge ALL_CASES + any extra IDs from the actual state (e.g. G- cases)
+  const allIds = [...new Set([...ALL_CASES, ...Object.keys(pruebas)])];
+
+  allIds.forEach(id => {
+    // If no DOM row yet, create one dynamically
+    if (!document.getElementById('row-'+id)) {
+      const container = document.getElementById('casos-extra-rows');
+      if (container) {
+        const row = document.createElement('div');
+        row.className = 'cert-case-row';
+        row.id = 'row-'+id;
+        row.innerHTML = `<span class="cert-badge cb-pending" id="badge-${id}">Pendiente</span>`
+          + `<span style="flex:1">${id}</span>`
+          + `<span class="cert-folio" id="folio-${id}"></span>`
+          + `<button class="d-btn d-btn-sm d-btn-outline" onclick="certRunCase('${id}')" title="Ejecutar"><i class="bi bi-play"></i></button>`;
+        container.appendChild(row);
+      }
+    }
+
     const c = pruebas[id];
-    const badge = document.getElementById('badge-'+id);
+    const badge   = document.getElementById('badge-'+id);
     const folioEl = document.getElementById('folio-'+id);
     if (!badge) return;
 
@@ -393,139 +487,170 @@ function applyState(estado) {
       badge.className = 'cert-badge cb-pending'; badge.textContent = 'Pendiente'; pend++;
     } else if (c.status === 'ok') {
       badge.className = 'cert-badge cb-ok'; badge.textContent = '✓ OK'; ok++;
-      if (folioEl) folioEl.textContent = 'Folio ' + c.folio + (c.trackId ? ' · TRK '+String(c.trackId).substring(0,8) : '');
+      if (folioEl) folioEl.textContent = 'Folio ' + c.folio + (c.trackId ? ' · TRK '+String(c.trackId).slice(0,8) : '');
     } else if (c.status === 'failed') {
       const errMsg = c.error || 'Error desconocido';
-      // Errores transitorios del SII (maullin caído/saturado), NO del documento:
-      // se muestran como reintentables, no como rechazo de fondo.
       const transitorio = /\b503\b|unexpected eof|SSL_read|HTML en lugar|p[áa]gina HTML|no disponible|Error de red|timeout|Service Unavailable/i.test(errMsg);
       fail++;
       badge.className = 'cert-badge ' + (transitorio ? 'cb-running' : 'cb-failed');
       badge.textContent = transitorio ? '⏳ SII' : '✗ Error';
       if (folioEl) {
-        const errTxt = errMsg.substring(0, 120);
-        const tip = (transitorio ? 'SII no disponible (transitorio), reintente. ' : '') + errMsg;
-        folioEl.innerHTML = `<span class="cert-error-tip" title="${tip.replace(/"/g,'&quot;')}">${transitorio ? '⏳ ' : ''}${errTxt}</span>`;
+        const tip = (transitorio ? 'Transitorio — reintente. ' : '') + errMsg;
+        folioEl.innerHTML = `<span class="cert-error-tip" title="${tip.replace(/"/g,'&quot;')}">${errMsg.slice(0,100)}</span>`;
       }
     } else if (c.status === 'running') {
       badge.className = 'cert-badge cb-running'; badge.textContent = '⟳ Env...';
     }
   });
 
-  document.getElementById('sum-total').textContent = ALL_CASES.length;
-  document.getElementById('sum-ok').textContent   = ok;
+  // Contadores
+  document.getElementById('sum-total').textContent = allIds.length;
+  document.getElementById('sum-ok').textContent    = ok;
   document.getElementById('sum-fail').textContent  = fail;
   document.getElementById('sum-pend').textContent  = pend;
-
-  // Botón retry
   document.getElementById('btn-retry').style.display = fail > 0 ? '' : 'none';
+
+  // Paso 2 (boletas) — badge
+  const boletasOk = ALL_CASES.filter(id=>id.startsWith('B-') && pruebas[id]?.status==='ok').length;
+  const boletasTot = ALL_CASES.filter(id=>id.startsWith('B-')).length;
+  _setPasoBadge(2, boletasOk, boletasTot);
+
+  // Paso 3 (generales) — badge
+  const genIds = allIds.filter(id=>!id.startsWith('B-'));
+  const genOk  = genIds.filter(id=>pruebas[id]?.status==='ok').length;
+  _setPasoBadge(3, genOk, genIds.length);
 
   // Simulación
   const sim = estado.simulacion || {};
   let simTot = 0;
   [33,39].forEach(t => {
-    const s = sim['t'+t];
+    const s   = sim['t'+t];
     const cnt = s ? s.folios_ok.length : 0;
     simTot += cnt;
     const pct = Math.round(cnt/50*100);
-    const bar  = document.getElementById('sim-bar-'+t);
+    const bar    = document.getElementById('sim-bar-'+t);
     const sbadge = document.getElementById('sim-badge-'+t);
-    if (bar) bar.style.width = pct+'%';
-    if (sbadge) {
-      sbadge.textContent = cnt+'/50';
-      sbadge.className = 'cert-badge ' + (s?.status==='ok'?'cb-ok': s?.status==='partial'?'cb-running':'cb-pending');
-    }
+    if (bar)    bar.style.width = pct+'%';
+    if (sbadge) { sbadge.textContent = cnt+'/50'; sbadge.className='cert-badge '+(s?.status==='ok'?'cb-ok':cnt>0?'cb-running':'cb-pending'); }
   });
   document.getElementById('sim-total').textContent = simTot;
+  const pb5 = document.getElementById('pbadge-5');
+  if (pb5) { pb5.textContent = simTot+'/100'; pb5.className='d-badge '+(simTot>=100?'success':simTot>0?'warning':''); }
 
-  // Stage badges
-  const s1 = ok===ALL_CASES.length ? 'success' : fail>0 ? 'danger' : ok>0 ? 'warning' : 'secondary';
-  const b1 = ok===ALL_CASES.length ? '✓ Completo' : fail>0 ? `${fail} fallidos` : ok>0 ? `${ok}/${ALL_CASES.length}` : 'Pendiente';
-  setBadge('stage1-badge', b1, s1);
-
-  const s2 = simTot>=100 ? 'success' : simTot>0 ? 'warning' : 'secondary';
-  setBadge('stage2-badge', simTot>=100 ? '✓ Completo' : simTot+'/100', s2);
-
-  // Libros
+  // Libros — ventas, compras, guias
   const libros = estado.libros || {};
-  ['ventas','compras'].forEach(t => {
-    const lb = libros[t];
+  ['ventas','compras','guias'].forEach(t => {
+    const lb    = libros[t];
     const badge = document.getElementById(`libro-${t}-badge`);
     const info  = document.getElementById(`libro-${t}-info`);
     if (!badge) return;
-    if (!lb)                    { badge.className='cert-badge cb-pending'; badge.textContent='Pendiente'; return; }
-    if (lb.status === 'ok')     { badge.className='cert-badge cb-ok'; badge.textContent='✓ OK'; if(info) info.textContent='TrackID: '+(lb.trackId||'—'); }
-    else if (lb.status==='failed'){ badge.className='cert-badge cb-failed'; badge.textContent='✗ Error'; if(info) info.textContent=lb.error||''; }
+    if (!lb)                     { badge.className='cert-badge cb-pending'; badge.textContent='Pendiente'; }
+    else if (lb.status==='ok')   { badge.className='cert-badge cb-ok';     badge.textContent='✓ OK'; if(info) info.textContent='TrackID: '+(lb.trackId||'—'); }
+    else if (lb.status==='failed'){ badge.className='cert-badge cb-failed'; badge.textContent='✗ Error';  if(info) info.textContent=lb.error||''; }
   });
+  // Paso 4 badge
+  const librosOk = ['ventas','compras','guias'].filter(t=>libros[t]?.status==='ok').length;
+  const pb4 = document.getElementById('pbadge-4');
+  if (pb4) { pb4.textContent = librosOk+'/3 libros'; pb4.className='d-badge '+(librosOk===3?'success':librosOk>0?'warning':''); }
 
+  // Intercambio — paso 6
   const ic = estado.intercambio || {};
-  setBadge('stage3-badge',
-    ic.status==='responded' ? '✓ Respondido' : ic.status==='failed' ? 'Error' : 'Pendiente',
-    ic.status==='responded' ? 'success' : ic.status==='failed' ? 'danger' : 'secondary'
-  );
+  const pb6 = document.getElementById('pbadge-6');
+  if (pb6) {
+    pb6.textContent  = ic.status==='responded' ? '✓ Respondido' : ic.status==='failed' ? 'Error' : 'Pendiente';
+    pb6.className    = 'd-badge '+(ic.status==='responded'?'success':ic.status==='failed'?'danger':'');
+    setPasoNum(6, ic.status==='responded' ? 'done' : ic.status==='failed' ? 'fail' : '');
+  }
+}
+
+function _setPasoBadge(n, ok, tot) {
+  const badge = document.getElementById('pbadge-'+n);
+  if (!badge) return;
+  if (tot === 0) { badge.textContent='Sin casos'; badge.className='d-badge'; return; }
+  badge.textContent = ok+'/'+tot;
+  badge.className = 'd-badge '+(ok===tot?'success':ok>0?'warning':'');
+  setPasoNum(n, ok===tot ? 'done' : ok>0 ? '' : '');
+}
+
+function setPasoNum(n, cls) {
+  const el = document.getElementById('pnum-'+n);
+  if (el) el.className = 'paso-num ' + (cls||'');
 }
 
 function setBadge(id, text, type) {
   const el = document.getElementById(id);
   if (!el) return;
-  const map = { success:'success', danger:'danger', warning:'warning', secondary:'' };
-  el.className = 'd-badge ' + (map[type]||'');
+  el.className = 'd-badge '+(type==='success'?'success':type==='danger'?'danger':type==='warning'?'warning':'');
   el.textContent = text;
 }
 
-// ── API calls ─────────────────────────────────────────────────────────────────
+// ── API ───────────────────────────────────────────────────────────────────────
 async function api(action, extra={}) {
   const params = new URLSearchParams({ action, ...extra });
   const r = await fetch(`cert_bridge.php?${params}`);
   return r.json();
 }
 
-// ── Set de Certificación (subir .txt y vincular) ──────────────────────────────
+// ── Set de Prueba (upload + info) ─────────────────────────────────────────────
 async function certLoadSetInfo() {
   const el = document.getElementById('set-info');
   try {
     const res = await api('cert_set_get');
     if (res.ok && res.set) {
       const s = res.set;
-      const origenBoletas = s.origen_boletas ? ` &middot; Boletas: <em>${s.origen_boletas}</em>` : '';
-      const origenBasico = s.origen_basico ? ` &middot; General: <em>${s.origen_basico}</em>` : '';
-      el.innerHTML = `<span style="color:#27ae60"><i class="bi bi-check-circle"></i> Set vinculado:</span> `
-        + `${(s.boletas||[]).length} boleta(s)` + (s.facturas?.length ? `, ${s.facturas.length} caso(s) set basico` : '')
-        + (s.atencion_basico ? ` &middot; Atencion ${s.atencion_basico}` : '')
-        + origenBoletas + origenBasico;
-      // Atenciones reales de los libros desde el set vinculado (no hardcodear)
-      const vAt = document.getElementById('libro-ventas-at');
-      const cAt = document.getElementById('libro-compras-at');
-      if (vAt) vAt.textContent = s.atencion_ventas ? ('At. ' + s.atencion_ventas) : '';
-      if (cAt) cAt.textContent = s.atencion_compras ? ('At. ' + s.atencion_compras) : '';
+      const nB = (s.boletas||[]).length;
+      const nF = (s.facturas||[]).length;
+      const nG = (s.facturas||[]).filter(f=>f.tipoDTE==52).length;
+      el.innerHTML = `<i class="bi bi-check-circle" style="color:#27ae60"></i> `
+        + `<strong>Set vinculado:</strong> ${nB} boleta(s) · ${nF-nG} factura(s)/NC/ND · ${nG} guía(s)`
+        + (s.atencion_basico  ? ` · At. básico <strong>${s.atencion_basico}</strong>` : '')
+        + (s.origen_boletas   ? ` · <em style="color:#888">${s.origen_boletas}</em>` : '')
+        + (s.origen_basico    ? ` / <em style="color:#888">${s.origen_basico}</em>` : '');
+      // Paso 1 badge
+      const pb1 = document.getElementById('pbadge-1');
+      if (pb1) { pb1.textContent = 'Vinculado'; pb1.className = 'd-badge success'; }
+      setPasoNum(1, 'done');
+      // Atenciones libros
+      _setAt('libro-ventas-at',  s.atencion_ventas,      'Lib. Ventas');
+      _setAt('libro-compras-at', s.atencion_compras,     'Lib. Compras');
+      _setAt('libro-guias-at',   s.atencion_libro_guias || s.atencion_guias, 'Lib. Guías');
     } else {
-      el.innerHTML = '<span style="color:#e67e22"><i class="bi bi-exclamation-triangle"></i> Sin set vinculado. Suba el .txt del SII.</span>';
+      el.innerHTML = '<i class="bi bi-exclamation-triangle" style="color:#e67e22"></i> Sin set vinculado. Suba el .txt del SII.';
+      const pb1 = document.getElementById('pbadge-1');
+      if (pb1) { pb1.textContent = 'Sin set'; pb1.className = 'd-badge danger'; }
     }
-  } catch(e) { el.textContent = 'No se pudo cargar el set.'; }
+  } catch(e) { el.textContent = 'No se pudo cargar el set: ' + e.message; }
+}
+
+function _setAt(elId, val, label) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = val ? ('At. ' + val) : '';
 }
 
 async function certUploadSet(tipo='boletas') {
   const inputId = tipo === 'basico' ? 'set-file-basico' : 'set-file-boletas';
-  const ejemplo = tipo === 'basico' ? 'SIISetDePruebas{RUT}.txt' : 'Set Prueba BE.txt';
-  const input = document.getElementById(inputId);
-  const el = document.getElementById('set-info');
-  if (!input.files.length) { alert('Seleccione el archivo ' + ejemplo); return; }
+  const input   = document.getElementById(inputId);
+  const el      = document.getElementById('set-info');
+  if (!input.files.length) { alert('Seleccione el archivo .txt del SII'); return; }
   const fd = new FormData();
   fd.append('action', 'cert_set_upload');
   fd.append('set_file', input.files[0]);
-  el.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando ' + ejemplo + '...';
+  el.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando…';
   try {
     const r = await fetch('cert_bridge.php', { method:'POST', body: fd });
     const res = await r.json();
     if (res.ok) {
-      log(`Set vinculado: ${res.boletas} boleta(s), ${res.facturas} caso(s) set basico.`, 'ok');
+      log(`Set vinculado: ${res.boletas||0} boleta(s), ${res.facturas||0} caso(s).`, 'ok');
       certLoadSetInfo();
+      await loadState();
     } else {
       el.innerHTML = `<span style="color:#e74c3c"><i class="bi bi-x-circle"></i> ${res.error||'Error al procesar el set'}</span>`;
     }
   } catch(e) { el.innerHTML = `<span style="color:#e74c3c">Error: ${e.message}</span>`; }
 }
 
+// ── Boletas ───────────────────────────────────────────────────────────────────
 async function certBoletas() {
   const btn = document.getElementById('btn-cert-boletas');
   const out = document.getElementById('cert-boletas-result');
@@ -536,115 +661,86 @@ async function certBoletas() {
     const res = await api('cert_boletas');
     if (res.error && !res.sobre) {
       out.innerHTML = `<div class="d-alert danger"><i class="bi bi-x-circle"></i> ${res.error}</div>`;
-      log('Certificación boletas: '+res.error, 'error');
+      log('Error boletas: '+res.error, 'error');
     } else {
       const s = res.sobre||{}, rc = res.rcof||{};
-      const badge = (ok)=> ok ? '<span class="cert-badge cb-ok">✓ OK</span>' : '<span class="cert-badge cb-failed">✗</span>';
+      const badge = ok => ok ? '<span class="cert-badge cb-ok">✓ OK</span>' : '<span class="cert-badge cb-failed">✗</span>';
       out.innerHTML = `<div class="d-alert ${res.ok?'success':'warning'}">
         <div><strong>Folios usados:</strong> ${(res.folios||[]).join(', ')}</div>
-        <div style="margin-top:6px">${badge(s.ok)} <strong>Sobre boletas</strong> — Track ID: <code>${s.trackId||'—'}</code> ${s.estado?('· '+s.estado):''} ${s.mensaje?('<br><small>'+s.mensaje+'</small>'):''}</div>
-        <div style="margin-top:6px">${badge(rc.ok)} <strong>RCOF</strong> — Track ID: <code>${rc.trackId||'—'}</code> ${rc.via?('· vía '+rc.via):''} ${rc.mensaje?('<br><small>'+rc.mensaje+'</small>'):''}</div>
-        <div style="margin-top:6px; font-size:.75rem; color:var(--c-text-muted)">Informe el Track ID del sobre en el portal SII (Boletas electrónicas de ventas y servicios).</div>
-      </div>`;
-      log(`Boletas: sobre TRK ${s.trackId||'-'} (${s.ok?'OK':'FALLA'}), RCOF ${rc.skipped?'omitido':('TRK '+(rc.trackId||'-')+' ('+(rc.ok?'OK':'FALLA')+')')}`, res.ok?'ok':'warn');
+        <div style="margin-top:6px">${badge(s.ok)} <strong>Sobre boletas</strong> — TRK: <code>${s.trackId||'—'}</code> ${s.estado?'· '+s.estado:''}</div>
+        <div style="margin-top:4px">${badge(rc.ok)} <strong>RCOF</strong> — TRK: <code>${rc.trackId||'—'}</code> ${rc.skipped?'(omitido)':''}</div>
+        <div style="margin-top:6px; font-size:.72rem; color:var(--c-text-muted)">
+          Informe el Track ID en <strong>www.sii.cl → Menú Postulantes → Boletas electrónicas</strong>.
+        </div></div>`;
+      log(`Boletas: sobre TRK ${s.trackId||'-'} (${s.ok?'OK':'FALLA'}), RCOF ${rc.skipped?'omitido':('TRK '+(rc.trackId||'-'))}`, res.ok?'ok':'warn');
+      setPasoNum(2, res.ok ? 'done' : 'fail');
+      setBadge('pbadge-2', res.ok ? '✓ Enviado' : 'Error', res.ok ? 'success' : 'danger');
     }
+    await loadState();
   } catch(e) {
-    out.innerHTML = `<div class="d-alert danger"><i class="bi bi-x-circle"></i> Error de comunicación: ${e.message}</div>`;
-  } finally {
-    btn.disabled = false;
-  }
+    out.innerHTML = `<div class="d-alert danger"><i class="bi bi-x-circle"></i> Error: ${e.message}</div>`;
+  } finally { btn.disabled = false; }
 }
 
+// ── Estado global ─────────────────────────────────────────────────────────────
 async function loadState() {
   try {
     const res = await api('cert_state');
-    if (res.ok) {
-      applyState(res.estado);
-    } else {
-      document.getElementById('cert-run-status').innerHTML =
-        `<div class="d-alert danger"><i class="bi bi-x-circle"></i> Error al cargar estado: ${res.error||'respuesta inválida del servidor'}</div>`;
-    }
+    if (res.ok) applyState(res.estado);
+    else document.getElementById('cert-run-status').innerHTML =
+      `<div class="d-alert danger"><i class="bi bi-x-circle"></i> Error al cargar estado: ${res.error||'?'}</div>`;
   } catch(e) {
     document.getElementById('cert-run-status').innerHTML =
-      `<div class="d-alert danger"><i class="bi bi-x-circle"></i> Error de comunicación con cert_bridge.php: ${e.message}</div>`;
+      `<div class="d-alert danger"><i class="bi bi-x-circle"></i> Error: ${e.message}</div>`;
   }
 }
 
+// ── Run All (Paso 3) ──────────────────────────────────────────────────────────
 async function certRunAll() {
   const status = document.getElementById('cert-run-status');
-  status.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Ejecutando Paso 2: facturas, notas y guias... puede tardar varios minutos.</div>';
-  log('Iniciando Paso 2: facturas, notas y guias...', 'info');
+  status.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Ejecutando Paso 3: facturas, NC, ND y guías… puede tardar varios minutos.</div>';
+  log('Iniciando Paso 3: set básico completo…', 'info');
   try {
     const res = await api('cert_run_pruebas', { skip_boletas: 1 });
     applyState(res.estado);
     const r = res.resultados || {};
-    const logCaseResult = (cid, cr) => {
-      if (!cr || typeof cr !== 'object') return;
-      if (!('status' in cr) && !('folio' in cr) && !('error' in cr)) return;
-      const st = cr.status || '?';
-      log(`${cid}: ${st} - folio ${cr.folio||'-'} ${cr.error?'| '+cr.error:''}`,
-        st === 'ok' ? 'ok' : 'error');
-    };
     Object.entries(r).forEach(([k,v]) => {
       if (!v || typeof v !== 'object') return;
-      if ('status' in v || 'folio' in v || 'error' in v) {
-        logCaseResult(k, v);
+      if ('status' in v || 'folio' in v) {
+        log(`${k}: ${v.status||'?'} - folio ${v.folio||'-'} ${v.error?'| '+v.error:''}`, v.status==='ok'?'ok':'error');
       } else {
-        Object.entries(v).forEach(([cid, cr]) => logCaseResult(cid, cr));
+        Object.entries(v).forEach(([cid,cr]) => {
+          if (!cr || typeof cr !== 'object') return;
+          log(`${cid}: ${cr.status||'?'} - folio ${cr.folio||'-'} ${cr.error?'| '+cr.error:''}`, cr.status==='ok'?'ok':'error');
+        });
       }
     });
-    status.innerHTML = '<div class="d-alert success"><i class="bi bi-check-circle"></i> Paso 2 ejecutado. Revise los resultados arriba.</div>';
+    status.innerHTML = '<div class="d-alert success"><i class="bi bi-check-circle"></i> Paso 3 ejecutado. Revise los resultados.</div>';
   } catch(e) {
     status.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
-    log('Error: '+e.message, 'error');
-  }
-}
-
-async function certRunSet(setKey) {
-  if (setKey === 'B') {
-    log('Boletas no se envian por casos. Use Paso 1: Boletas (sobre SII).', 'warn');
-    return;
-  }
-  log('Ejecutando set de facturacion en un solo sobre SII...', 'info');
-  const status = document.getElementById('cert-run-status');
-  if (status) status.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Enviando set de facturacion en un solo sobre...</div>';
-  try {
-    const res = await api('cert_run_pruebas', { skip_boletas: 1 });
-    applyState(res.estado);
-    const r = res.resultados || {};
-    Object.entries(r).forEach(([cid, cr]) => {
-      if (!cr || typeof cr !== 'object') return;
-      const st = cr.status || '?';
-      log(`${cid}: ${st} - folio ${cr.folio||'-'} ${cr.trackId?'| TRK '+cr.trackId:''} ${cr.error?'| '+cr.error:''}`, st === 'ok' ? 'ok' : 'error');
-    });
-    if (status) status.innerHTML = '<div class="d-alert success"><i class="bi bi-check-circle"></i> Set enviado. Revise TrackID y estado final SII.</div>';
-  } catch(e) {
-    log('Error set facturacion: '+e.message, 'error');
-    if (status) status.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
+    log('Error Paso 3: '+e.message, 'error');
   }
 }
 
 async function certRunCase(cid) {
-  if (cid.startsWith('B-CASO-')) {
-    log('Boletas no se envian individualmente. Use Paso 1: Boletas (sobre SII).', 'warn');
+  if (cid.startsWith('B-')) {
+    log('Boletas no se envían individualmente. Use el botón del Paso 2.', 'warn');
     return;
   }
   const badge = document.getElementById('badge-'+cid);
   if (badge) { badge.className='cert-badge cb-running'; badge.textContent='⟳...'; }
-  log(`Ejecutando ${cid}...`, 'info');
+  log(`Ejecutando ${cid}…`, 'info');
   try {
     const res = await api('cert_case', { cid });
     const envio = res.envio || {};
-    const st = envio.ok ? 'ok' : 'failed';
-    log(`${cid}: ${st} — folio ${res.folio||'-'} trackId: ${envio.trackId||'-'} ${envio.error||''}`, st==='ok'?'ok':'error');
-  } catch(e) {
-    log(`${cid}: error — ${e.message}`, 'error');
-  }
+    log(`${cid}: ${envio.ok?'ok':'failed'} — folio ${res.folio||'-'} TRK: ${envio.trackId||'-'} ${envio.error||''}`, envio.ok?'ok':'error');
+  } catch(e) { log(`${cid}: error — ${e.message}`, 'error'); }
   await loadState();
 }
 
+// ── Simulación ────────────────────────────────────────────────────────────────
 async function certRunSim(tipo) {
-  log(`Iniciando simulación tipo ${tipo} (50 docs)...`, 'info');
+  log(`Iniciando simulación tipo ${tipo} (50 docs)…`, 'info');
   const b = document.getElementById('sim-badge-'+tipo);
   if (b) { b.className='cert-badge cb-running'; b.textContent='...'; }
   try {
@@ -654,63 +750,40 @@ async function certRunSim(tipo) {
   await loadState();
 }
 
+// ── Retry / Reset ─────────────────────────────────────────────────────────────
 async function certRetry() {
-  log('Reintentando todos los casos fallidos...', 'warn');
+  log('Reintentando todos los casos fallidos…', 'warn');
   document.getElementById('cert-run-status').innerHTML =
-    '<div class="d-alert warning"><span class="spinner-border spinner-border-sm me-2"></span> Reintentando fallidos...</div>';
+    '<div class="d-alert warning"><span class="spinner-border spinner-border-sm me-2"></span> Reintentando fallidos…</div>';
   try {
     const res = await api('cert_retry');
     applyState(res.estado);
-    document.getElementById('cert-run-status').innerHTML =
-      '<div class="d-alert success">Reintento completado.</div>';
+    document.getElementById('cert-run-status').innerHTML = '<div class="d-alert success">Reintento completado.</div>';
     log('Reintento finalizado.', 'ok');
   } catch(e) { log('Error retry: '+e.message, 'error'); }
 }
 
 async function certReset() {
-  if (!confirm('¿Reiniciar TODO el estado de certificación? Esto borra el progreso guardado.')) return;
+  if (!confirm('¿Reiniciar TODO el estado de certificación? Se borra el progreso guardado.')) return;
   await api('cert_reset');
   log('Estado reiniciado.', 'warn');
   await loadState();
 }
 
-async function certMuestras() {
-  // Muestras impresas con el MISMO renderer que la impresión real (jscript.js).
-  if (typeof DTE === 'undefined' || !DTE.renderMuestras) {
-    alert('No se encontró el motor de impresión (jscript.js).');
-    return;
-  }
-  log('Generando muestras impresas…', 'info');
-  try {
-    const res = await api('cert_muestras_xml');
-    if (!res.ok || !Array.isArray(res.dtes) || !res.dtes.length) {
-      alert('No hay documentos para muestras. Ejecute primero el Set de Pruebas o la Certificación de Boletas.');
-      return;
-    }
-    DTE.renderMuestras(res.dtes, res.opts || {});
-    const badge = document.getElementById('stage4-badge');
-    if (badge) badge.textContent = '✓ Generado';
-    log(`Muestras generadas: ${res.dtes.length} documento(s).`, 'ok');
-  } catch (e) {
-    alert('Error generando muestras: ' + e.message);
-  }
-}
-
 // ── Intercambio ───────────────────────────────────────────────────────────────
 function loadIntercambioFile(input) {
-  const file = input.files[0];
-  if (!file) return;
+  const file = input.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = e => { document.getElementById('intercambio-xml').value = e.target.result; };
   reader.readAsText(file, 'ISO-8859-1');
 }
 
 async function certIntercambio() {
-  const xml = document.getElementById('intercambio-xml').value.trim();
+  const xml    = document.getElementById('intercambio-xml').value.trim();
   const status = document.getElementById('intercambio-status');
   if (!xml) { status.innerHTML = '<div class="d-alert danger">Ingrese el XML de intercambio.</div>'; return; }
-  status.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Procesando...</div>';
-  log('Respondiendo intercambio...', 'info');
+  status.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Procesando…</div>';
+  log('Respondiendo intercambio…', 'info');
   try {
     const fd = new FormData();
     fd.append('action', 'cert_intercambio');
@@ -731,32 +804,51 @@ async function certIntercambio() {
   }
 }
 
-// ── Libros ───────────────────────────────────────────────────────────────────
+// ── Libros ────────────────────────────────────────────────────────────────────
 async function certLibro(tipo) {
-  const actionMap = { ventas:'cert_libro_ventas', guias:'cert_libro_guias', compras:'cert_libro_compras' };
+  const actionMap = { ventas:'cert_libro_ventas', compras:'cert_libro_compras', guias:'cert_libro_guias' };
   const action = actionMap[tipo];
   const badge  = document.getElementById(`libro-${tipo}-badge`);
   const info   = document.getElementById(`libro-${tipo}-info`);
-
-  badge.className = 'cert-badge cb-running'; badge.textContent = '⟳...';
-  log(`Enviando Libro de ${tipo.charAt(0).toUpperCase()+tipo.slice(1)}...`, 'info');
-
+  if (badge) { badge.className='cert-badge cb-running'; badge.textContent='⟳...'; }
+  const label = tipo.charAt(0).toUpperCase() + tipo.slice(1);
+  log(`Enviando Libro de ${label}…`, 'info');
   try {
     const res = await api(action);
     if (res.ok) {
-      badge.className = 'cert-badge cb-ok'; badge.textContent = '✓ OK';
-      info.textContent = 'TrackID: ' + (res.trackId || '—');
+      if (badge) { badge.className='cert-badge cb-ok'; badge.textContent='✓ OK'; }
+      if (info)  info.textContent = 'TrackID: ' + (res.trackId||'—');
       log(`Libro ${tipo} enviado OK. TrackID: ${res.trackId||'-'}`, 'ok');
     } else {
-      badge.className = 'cert-badge cb-failed'; badge.textContent = '✗ Error';
-      info.textContent = res.error || 'Error desconocido';
+      if (badge) { badge.className='cert-badge cb-failed'; badge.textContent='✗ Error'; }
+      if (info)  info.textContent = res.error||'Error desconocido';
       log(`Libro ${tipo} falló: ${res.error||'?'}`, 'error');
     }
     await loadState();
   } catch(e) {
-    badge.className = 'cert-badge cb-failed'; badge.textContent = '✗ Error';
+    if (badge) { badge.className='cert-badge cb-failed'; badge.textContent='✗ Error'; }
     log(`Error libro ${tipo}: ${e.message}`, 'error');
   }
+}
+
+// ── Muestras ──────────────────────────────────────────────────────────────────
+async function certMuestras() {
+  if (typeof DTE === 'undefined' || !DTE.renderMuestras) {
+    alert('No se encontró el motor de impresión (jscript.js).');
+    return;
+  }
+  log('Generando muestras impresas…', 'info');
+  try {
+    const res = await api('cert_muestras_xml');
+    if (!res.ok || !Array.isArray(res.dtes) || !res.dtes.length) {
+      alert('No hay documentos para muestras. Ejecute primero el Set de Pruebas.');
+      return;
+    }
+    DTE.renderMuestras(res.dtes, res.opts || {});
+    setBadge('pbadge-7', '✓ Generado', 'success');
+    setPasoNum(7, 'done');
+    log(`Muestras generadas: ${res.dtes.length} documento(s).`, 'ok');
+  } catch(e) { alert('Error generando muestras: ' + e.message); }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

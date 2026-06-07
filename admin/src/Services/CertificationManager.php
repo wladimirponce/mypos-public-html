@@ -961,14 +961,21 @@ XML;
             return ['ok' => false, 'error' => 'Faltan casos por generar: ' . implode(', ', $faltantes)];
         }
 
-        $result = sendLibro([
-            'tipoLibro'         => 'GUIA',
-            'tipoEnvio'         => 'TOTAL',
-            'periodo'           => date('Y-m'),
-            'folioDsde'         => 1,
-            'folioNotificacion' => 4820754,
-            'detalles'          => $detalles,
-        ]);
+        $set = $setMgr->load() ?? [];
+        $folioNotif = (int)($set['atencion_libro_guias'] ?? $set['atencion_guias'] ?? 0);
+
+        $libroParams = [
+            'tipoLibro' => 'GUIA',
+            'tipoEnvio' => 'TOTAL',
+            'periodo'   => date('Y-m'),
+            'folioDsde' => 1,
+            'detalles'  => $detalles,
+        ];
+        if ($folioNotif > 0) {
+            $libroParams['folioNotificacion'] = $folioNotif;
+        }
+
+        $result = sendLibro($libroParams);
 
         $state['libros']['guias'] = [
             'status'  => $result['ok'] ? 'ok' : 'failed',
