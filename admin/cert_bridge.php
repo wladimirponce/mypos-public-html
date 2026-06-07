@@ -369,6 +369,50 @@ try {
             echo json_encode($mgr->responderIntercambio($xml));
             break;
 
+        // ── Diagnóstico cvc-id.2 ─────────────────────────────────
+        case 'cert_diag_files':
+            ob_clean();
+            $errorFile = __DIR__ . '/dte_error_upload.xml';
+            // Buscar sobre_T33F12.xml recursivamente en tmp/
+            $sobreFile = '';
+            $tmpBase = __DIR__ . '/tmp/';
+            if (is_dir($tmpBase)) {
+                $it = new \RecursiveIteratorIterator(
+                    new \RecursiveDirectoryIterator($tmpBase, \FilesystemIterator::SKIP_DOTS)
+                );
+                foreach ($it as $f) {
+                    if ($f->getFilename() === 'sobre_T33F12.xml') {
+                        $sobreFile = $f->getPathname();
+                        break;
+                    }
+                }
+            }
+            $out = ['ok' => true];
+            if (file_exists($errorFile)) {
+                $raw = file_get_contents($errorFile);
+                preg_match('/<DETAIL>([\s\S]*?)<\/DETAIL>/i', $raw, $mD);
+                $out['sii_detail_completo'] = $mD[1] ?? '(no encontrado)';
+                $out['sii_response_inicio'] = substr($raw, 0, 2000);
+            } else {
+                $out['sii_detail_completo'] = '(dte_error_upload.xml no existe)';
+            }
+            if ($sobreFile && file_exists($sobreFile)) {
+                $sobre = file_get_contents($sobreFile);
+                preg_match_all('/ ID="([^"]+)"/', $sobre, $mIds);
+                $out['sobre_ids_encontrados'] = $mIds[1] ?? [];
+                $lines = explode("\n", $sobre);
+                $out['sobre_total_lineas']  = count($lines);
+                $out['sobre_linea_73']      = $lines[72] ?? '(no existe)';
+                $out['sobre_lineas_68_78']  = implode("\n", array_slice($lines, 67, 11));
+                $out['sobre_inicio']        = implode("\n", array_slice($lines, 0, 80));
+            } else {
+                $out['sobre_ids_encontrados'] = [];
+                $out['sobre_inicio'] = "(sobre_T33F12.xml no encontrado en tmp/)";
+                $out['sobre_ruta_tmp'] = $tmpBase;
+            }
+            echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+            break;
+
         default:
             ob_clean();
             echo json_encode(['ok' => false, 'error' => "Acción '$action' no soportada en cert_bridge."]);
