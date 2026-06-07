@@ -738,10 +738,58 @@ class CertificationManager
 
         $rutRec = in_array($tipo, [39, 41]) ? '66666666-6' : '55555555-5';
 
+        // ── Calcular folio de inicio ─────────────────────────────────────────────
+        // En ambiente CERTIFICACION generateDTE no registra en sii_dte, por lo que
+        // loadCAF siempre ve lastUsed=0 y elegiría folio desde=1 → DTE-3-101.
+        // Calculamos el punto de inicio con la misma lógica de certFolioBaseLibre:
+        // max(sii_dte, state['pruebas'], folios_ok anteriores) + 1.
+        $repo       = new EmpresaRepository();
+        $cafRow     = $repo->getCAFNextAvailable(
+            $this->context->getEmpresaId(), $tipo, $this->context->getAmbiente()
+        );
+        if (!$cafRow) {
+            return [
+                'ok'    => false,
+                'error' => "No hay CAF disponible para tipo $tipo en ambiente "
+                         . $this->context->getAmbiente()
+                         . '. Cargue el CAF en Configuración.',
+            ];
+        }
+        $cafDesde = (int)$cafRow['folio_desde'];
+        $cafHasta = (int)$cafRow['folio_hasta'];
+
+        $hw = $repo->getUltimoFolioUsadoEnRango(
+            $this->context->getEmpresaId(), $tipo, $this->context->getAmbiente(),
+            $cafDesde, $cafHasta
+        );
+        // Folios del set básico (no están en sii_dte en cert env)
+        foreach (($state['pruebas'] ?? []) as $prueba) {
+            if ((int)($prueba['tipo'] ?? 0) === $tipo) {
+                $f = (int)($prueba['folio'] ?? 0);
+                if ($f >= $cafDesde && $f <= $cafHasta) $hw = max($hw, $f);
+            }
+        }
+        // Folios ya enviados con éxito en lotes anteriores de esta simulación
+        foreach ($foliosOk as $fOk) {
+            $fOk = (int)$fOk;
+            if ($fOk >= $cafDesde && $fOk <= $cafHasta) $hw = max($hw, $fOk);
+        }
+        $nextFolio = max($cafDesde, $hw + 1);
+        // ────────────────────────────────────────────────────────────────────────
+
         for ($i = 0; $i < $remaining; $i++) {
+            $folioToUse = $nextFolio + $i;
+            if ($folioToUse > $cafHasta) {
+                $foliosFailed[] = [
+                    'folio' => $folioToUse,
+                    'error' => "Folio $folioToUse supera el rango del CAF ($cafDesde–$cafHasta). Cargue un nuevo CAF tipo $tipo.",
+                ];
+                break;
+            }
             try {
                 $dte = generateDTE([
                     'tipoDTE' => $tipo,
+                    'folio'   => $folioToUse,
                     'receptor' => [
                         'rut'    => $rutRec,
                         'nombre' => 'Receptor Simulacion',
@@ -764,7 +812,7 @@ class CertificationManager
                     $foliosFailed[] = ['folio' => $dte['folio'], 'error' => $send['error'] ?? '?'];
                 }
             } catch (\Throwable $e) {
-                $foliosFailed[] = ['folio' => null, 'error' => $e->getMessage()];
+                $foliosFailed[] = ['folio' => $folioToUse, 'error' => $e->getMessage()];
             }
 
             // Persistir progreso cada 10 documentos

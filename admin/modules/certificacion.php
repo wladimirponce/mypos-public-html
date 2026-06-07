@@ -332,6 +332,27 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   </div>
 </div>
 
+<!-- ══ RESUMEN PORTAL SII ══════════════════════════════════════════════════════ -->
+<div class="paso-card" style="border-left:4px solid #27ae60">
+  <div class="paso-header" onclick="togglePaso('sii')">
+    <div class="paso-num" id="pnum-sii" style="background:#27ae60; font-size:.75rem; display:flex; align-items:center; justify-content:center">
+      <i class="bi bi-clipboard-check-fill"></i>
+    </div>
+    <div class="paso-title">Resumen para Portal SII
+      <span class="paso-desc">Números de envío para informar en sii.cl → Empresas → DTE → Certificación → Set de Pruebas</span>
+    </div>
+    <i class="bi bi-chevron-down ms-2" id="pchev-sii"></i>
+  </div>
+  <div class="paso-body" id="pbody-sii">
+    <div id="resumen-sii-container">
+      <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:10px">
+        Complete los pasos anteriores para que aparezcan los datos aquí. Los TrackIDs y fechas
+        se guardan automáticamente del estado de certificación.
+      </p>
+    </div>
+  </div>
+</div>
+
 <!-- ══ PASO 5 — Simulación ════════════════════════════════════════════════════ -->
 <div class="paso-card">
   <div class="paso-header" onclick="togglePaso(5)">
@@ -650,6 +671,109 @@ function applyState(estado) {
       pb6.textContent=''; pb6.className='d-badge'; setPasoNum(6,'');
     }
   }
+
+  // Resumen Portal SII
+  buildResumenSII(estado);
+}
+
+// ── Resumen para Portal SII ───────────────────────────────────────────────────
+function buildResumenSII(estado) {
+  const container = document.getElementById('resumen-sii-container');
+  if (!container) return;
+
+  const pruebas = estado.pruebas || {};
+  const libros  = estado.libros  || {};
+
+  // Extraer TrackID y fecha del set básico (primera F-* con status ok)
+  // Todos los casos van en un único sobre → mismo TrackID
+  const basicoEntry = Object.values(pruebas).find(v => v?.status === 'ok' && v?.trackId);
+  const guiaEntry   = Object.values(
+    Object.fromEntries(Object.entries(pruebas).filter(([id]) => id.startsWith('G-')))
+  ).find(v => v?.status === 'ok' && v?.trackId) || basicoEntry;
+
+  const fmtDate = (ts) => {
+    if (!ts) return '—';
+    try {
+      const d = new Date(ts);
+      return String(d.getDate()).padStart(2,'0') + '-'
+           + String(d.getMonth()+1).padStart(2,'0') + '-'
+           + d.getFullYear();
+    } catch { return '—'; }
+  };
+
+  const rows = [
+    { campo: 'SET BASICO',            trk: basicoEntry?.trackId,     ts: basicoEntry?.ts     },
+    { campo: 'SET GUIA DE DESPACHO',  trk: guiaEntry?.trackId,       ts: guiaEntry?.ts       },
+    { campo: 'LIBRO DE VENTAS',       trk: libros.ventas?.trackId,   ts: libros.ventas?.ts   },
+    { campo: 'LIBRO DE COMPRAS',      trk: libros.compras?.trackId,  ts: libros.compras?.ts  },
+    { campo: 'LIBRO DE GUIAS',        trk: libros.guias?.trackId,    ts: libros.guias?.ts    },
+  ];
+
+  const allReady = rows.every(r => r.trk);
+
+  let html = `
+    <table style="width:100%; border-collapse:collapse; font-size:.80rem; margin-bottom:12px">
+      <thead>
+        <tr style="background:var(--c-bg-alt,#f4f4f4); border-bottom:2px solid #27ae60">
+          <th style="padding:7px 10px; text-align:left; font-weight:700; color:var(--c-text)">Campo</th>
+          <th style="padding:7px 10px; text-align:left; font-weight:700; color:var(--c-text)">N° Envío (TrackID)</th>
+          <th style="padding:7px 10px; text-align:left; font-weight:700; color:var(--c-text)">Fecha Envío</th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+  rows.forEach((r, i) => {
+    const bg = i % 2 === 0 ? '' : 'background:var(--c-bg-alt,#fafafa)';
+    const trkHtml = r.trk
+      ? `<span style="font-family:monospace; font-weight:600; color:#2c3e50">${r.trk}</span>`
+      : `<span style="color:#aaa; font-style:italic">Pendiente</span>`;
+    const dtHtml = r.ts
+      ? `<span style="color:#555">${fmtDate(r.ts)}</span>`
+      : `<span style="color:#aaa; font-style:italic">—</span>`;
+    html += `<tr style="${bg}; border-bottom:1px solid #e8e8e8">
+      <td style="padding:7px 10px; font-weight:600">${r.campo}</td>
+      <td style="padding:7px 10px">${trkHtml}</td>
+      <td style="padding:7px 10px">${dtHtml}</td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>`;
+
+  if (allReady) {
+    html += `<div style="display:flex; gap:8px; flex-wrap:wrap">
+      <button class="d-btn d-btn-sm" style="background:#27ae60;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:.78rem;cursor:pointer" onclick="copiarResumenSII()">
+        <i class="bi bi-clipboard"></i> Copiar tabla
+      </button>
+      <span style="font-size:.72rem; color:#27ae60; align-self:center">
+        <i class="bi bi-check-circle-fill"></i> Todos los envíos completados
+      </span>
+    </div>`;
+  } else {
+    html += `<p style="font-size:.74rem; color:var(--c-text-muted); margin:0">
+      Complete los pasos anteriores. Los datos se actualizan automáticamente.
+    </p>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function copiarResumenSII() {
+  const rows = Array.from(document.querySelectorAll('#resumen-sii-container table tbody tr'));
+  const lines = rows.map(tr => {
+    const cells = tr.querySelectorAll('td');
+    return Array.from(cells).map(td => (td.textContent || '').trim()).join('\t');
+  });
+  const header = 'Campo\tN° Envío (TrackID)\tFecha Envío';
+  const text   = [header, ...lines].join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('[onclick="copiarResumenSII()"]');
+    if (btn) { const orig = btn.innerHTML; btn.innerHTML = '<i class="bi bi-check"></i> ¡Copiado!'; setTimeout(()=>btn.innerHTML=orig, 2000); }
+  }).catch(() => {
+    // fallback para HTTP
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+  });
 }
 
 function _updateBanner(ok, fail, total) {
