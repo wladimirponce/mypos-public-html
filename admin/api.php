@@ -1598,6 +1598,7 @@ function sendDTE(array $data): array {
     global $actualTmpDir;
     if (!empty($actualTmpDir)) {
         @file_put_contents($actualTmpDir . 'sobre_T' . $tipo . 'F' . $folio . '.xml', $envioFirmado);
+        @file_put_contents($actualTmpDir . 'envio_raw_T' . $tipo . 'F' . $folio . '.xml', $envio);
     }
 
     // â”€â”€ ValidaciÃ³n XSD local del sobre â”€â”€
