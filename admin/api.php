@@ -1594,16 +1594,16 @@ function sendDTE(array $data): array {
     $envio        = buildEnvioDTE($xml, $tipo, $folio, $cert);
     $envioFirmado = signDTE($envio, $cert, $privKey, 'SetDoc');
 
-    // â”€â”€ Guardar sobre para diagnÃ³stico (sobreescribe en cada envÃ­o) â”€â”€
+    // Guardar sobre para diagnostico cvc-id.2 (sobreescribe en cada envio)
     global $actualTmpDir;
     if (!empty($actualTmpDir)) {
-        @file_put_contents($actualTmpDir . “sobre_T{$tipo}F{$folio}.xml”, $envioFirmado);
+        @file_put_contents($actualTmpDir . 'sobre_T' . $tipo . 'F' . $folio . '.xml', $envioFirmado);
     }
 
     // â”€â”€ ValidaciÃ³n XSD local del sobre â”€â”€
     $val = validateXmlAgainstXSD($envioFirmado);
     if (!$val['valid'] && !$val['skipped']) {
-        saveSiiLog('sendDTE', “T{$tipo}F{$folio} rechazado por XSD local: “ . implode('; ', array_slice($val['errors'], 0, 3)), 'ERROR');
+        saveSiiLog('sendDTE', "T{$tipo}F{$folio} rechazado por XSD local: " . implode('; ', array_slice($val['errors'], 0, 3)), 'ERROR');
         return [
             'ok'         => false,
             'error'      => 'XSD invÃ¡lido: ' . implode('; ', array_slice($val['errors'], 0, 5)),
@@ -6234,7 +6234,6 @@ function uploadDTE(string $envioDTE, string $token, ?string $certPem = null): ar
 
     preg_match('/<TRACKID>(\d+)<\/TRACKID>/', $resp ?? '', $mT);
     preg_match('/<ESTADO>([^<]+)<\/ESTADO>/',  $resp ?? '', $mE);
-    // Captura DETAIL completo (puede contener espacios, saltos de línea y entidades XML)
     preg_match('/<DETAIL>([\s\S]*?)<\/DETAIL>/i', $resp ?? '', $mD);
 
     $trackId = $mT[1] ?? null;
