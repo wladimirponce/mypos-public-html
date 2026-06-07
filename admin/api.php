@@ -5385,15 +5385,17 @@ function sendLibro(array $data): array {
     $nivel = $resp['ok'] ? 'SUCCESS' : 'ERROR';
     saveSiiLog('sendLibro', "Libro $tipoLibro $periodo enviado. TrackID: " . ($resp['trackId'] ?? 'N/A'), $nivel);
 
+    $errDetail = $resp['ok'] ? null : ($resp['error'] ?? $resp['estado'] ?? 'sin detalle');
     return [
         'ok'      => $resp['ok'],
         'trackId' => $resp['trackId'] ?? null,
         'estado'  => $resp['estado']  ?? null,
+        'error'   => $errDetail,
         'totales' => $gen['totales'],
         'xml'     => $gen['xml'],
         'mensaje' => $resp['ok']
             ? "Libro $tipoLibro $periodo enviado al SII. TrackID {$resp['trackId']}."
-            : 'Error enviando libro: ' . ($resp['error'] ?? $resp['estado'] ?? 'sin detalle'),
+            : "Error enviando libro: $errDetail",
     ];
 }
 
