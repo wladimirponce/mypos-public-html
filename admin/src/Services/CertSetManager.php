@@ -70,6 +70,13 @@ class CertSetManager
         return $s['facturas'] ?? [];
     }
 
+    /** Devuelve las entradas del libro de compras del set vinculado (o []). */
+    public function getLibroCompras(): array
+    {
+        $s = $this->load();
+        return $s['libroCompras'] ?? [];
+    }
+
     // =========================================================
     //  IMPORTACIÓN
     // =========================================================
