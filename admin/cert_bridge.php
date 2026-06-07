@@ -64,6 +64,13 @@ try {
     // api.php re-habilita display_errors; lo suprimimos de nuevo para evitar HTML en la respuesta
     ini_set('display_errors', '0');
 
+    // api.php resetea $globalContext = null cuando no hay sesión admin activa
+    // (condición isAdminRequest=false → ninguna rama lo inicializa).
+    // Re-crearlo con el empresaId ya resuelto y validado arriba.
+    if (!($globalContext instanceof Context)) {
+        $globalContext = new Context($empresaId);
+    }
+
     $mgr = new CertificationManager($globalContext);
 
     switch ($action) {
