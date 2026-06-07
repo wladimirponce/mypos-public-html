@@ -66,9 +66,15 @@ try {
 
     // api.php resetea $globalContext = null cuando no hay sesión admin activa
     // (condición isAdminRequest=false → ninguna rama lo inicializa).
-    // Re-crearlo con el empresaId ya resuelto y validado arriba.
+    // Re-crearlo con el empresaId ya resuelto y validado arriba, y actualizar
+    // los globals que api.php deja apuntando a var/no-company/ en ese caso.
     if (!($globalContext instanceof Context)) {
-        $globalContext = new Context($empresaId);
+        $globalContext   = new Context($empresaId);
+        global $actualTmpDir, $actualCafDir, $actualCertPfx;
+        $actualTmpDir    = $globalContext->getTmpPath();
+        $actualCafDir    = dirname($globalContext->getCafPath(0)) . '/';
+        $actualCertPfx   = $globalContext->getCertPath();
+        if (!is_dir($actualTmpDir)) @mkdir($actualTmpDir, 0755, true);
     }
 
     $mgr = new CertificationManager($globalContext);
@@ -388,6 +394,28 @@ try {
             }
             ob_clean();
             echo json_encode($mgr->responderIntercambio($xml));
+            break;
+
+        // ── Diagnóstico: genera XML del caso 1 sin enviar al SII ────
+        case 'cert_diag_xml':
+            ob_clean();
+            $folio = (int)($_GET['folio'] ?? 12);
+            // Encontrar el primer caso del set (sufijo -1)
+            $setMgr2 = new \App\Services\CertSetManager($globalContext);
+            $casos2  = $setMgr2->getFacturas();
+            $caso1   = null;
+            foreach ($casos2 as $c) {
+                if (preg_match('/-1$/', (string)($c['caso'] ?? ''))) { $caso1 = $c; break; }
+            }
+            if (!$caso1) {
+                echo json_encode(['ok' => false, 'error' => 'No se encontró caso -1 en el set. Asegúrese de haber subido el set de pruebas.']);
+                break;
+            }
+            $caseId2 = 'F-' . $caso1['caso'];
+            echo json_encode(
+                $mgr->buildCaseDTEForDiag($caseId2, $folio),
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT
+            );
             break;
 
         // ── Diagnóstico cvc-id.2 ─────────────────────────────────

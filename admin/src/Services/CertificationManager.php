@@ -102,6 +102,50 @@ class CertificationManager
         return ['ok' => true, 'mensaje' => 'Estado de certificación reiniciado.'];
     }
 
+    /**
+     * Genera el XML del caso caseId con el folio dado SIN enviarlo al SII.
+     * Útil para diagnóstico del error cvc-id.2: ver exactamente qué XML se firma.
+     *
+     * @return array{ok:bool, folio_usado:int, dte_ids:array, envio_raw_ids:array,
+     *               envio_firmado_ids:array, dte_xml:string, envio_raw_xml:string,
+     *               envio_firmado_primeras_80:string, envio_firmado_linea_73:string,
+     *               envio_firmado_contexto_60_80:string}
+     */
+    public function buildCaseDTEForDiag(string $caseId, int $folio = 12): array
+    {
+        $state    = $this->loadState();
+        $caseData = $this->getUploadedCertCaseData($caseId, $state) ?? getCertCaseData($caseId);
+        $caseData['certNoConsume'] = true;
+        $caseData['folio']         = $folio;
+
+        $dte = generateDTE($caseData);
+        if (empty($dte['ok'])) {
+            return ['ok' => false, 'error' => $dte['error'] ?? 'Error generando DTE'];
+        }
+
+        [$cert, $privKey] = loadCertificate((int)$dte['tipo']);
+        $envioRaw     = buildEnvioDTE($dte['xml'], (int)$dte['tipo'], (int)$dte['folio'], $cert);
+        $envioFirmado = signDTE($envioRaw, $cert, $privKey, 'SetDoc');
+
+        preg_match_all('/ ID="([^"]+)"/', $dte['xml'],   $mDte);
+        preg_match_all('/ ID="([^"]+)"/', $envioRaw,     $mRaw);
+        preg_match_all('/ ID="([^"]+)"/', $envioFirmado, $mFirm);
+        $lines = explode("\n", $envioFirmado);
+
+        return [
+            'ok'                            => true,
+            'folio_usado'                   => $dte['folio'],
+            'dte_ids'                       => $mDte[1],
+            'envio_raw_ids'                 => $mRaw[1],
+            'envio_firmado_ids'             => $mFirm[1],
+            'dte_xml_primeras_80'           => implode("\n", array_slice(explode("\n", $dte['xml']), 0, 80)),
+            'envio_raw_primeras_80'         => implode("\n", array_slice(explode("\n", $envioRaw), 0, 80)),
+            'envio_firmado_primeras_80'     => implode("\n", array_slice($lines, 0, 80)),
+            'envio_firmado_linea_73'        => $lines[72] ?? '(no existe línea 73)',
+            'envio_firmado_contexto_60_80'  => implode("\n", array_slice($lines, 59, 21)),
+        ];
+    }
+
     // =========================================================
     // RUN ALL
     // =========================================================
