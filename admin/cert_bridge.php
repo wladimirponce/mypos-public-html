@@ -14,6 +14,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 require_once __DIR__ . '/autoload.php';
 use App\Core\Context;
 use App\Services\CertificationManager;
+use App\Repositories\EmpresaRepository;
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
@@ -34,12 +35,10 @@ function resolveCertEmpresaId(): int
     }
     // Ruta 3: fallback — primera empresa con ambiente CERTIFICACION en la BD
     try {
-        $db  = \App\Core\Database::getInstance();
-        $row = $db->query(
-            "SELECT id FROM empresas WHERE ambiente = 'CERTIFICACION' ORDER BY id LIMIT 1"
-        )->fetch(\PDO::FETCH_ASSOC);
-        if ($row && (int)$row['id'] > 0) {
-            return (int)$row['id'];
+        $repo = new EmpresaRepository();
+        $emp  = $repo->getByAmbiente('CERTIFICACION');
+        if ($emp && (int)($emp['id'] ?? 0) > 0) {
+            return (int)$emp['id'];
         }
     } catch (\Throwable $ignored) {}
     throw new \Exception('Seleccione explicitamente una empresa antes de iniciar la certificacion.');
