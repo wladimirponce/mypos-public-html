@@ -293,35 +293,52 @@ class CertificationManager
         $repo = new EmpresaRepository();
         $cafs = $repo->getCAFsActivos($this->context->getEmpresaId(), $tipoDte, $this->context->getAmbiente());
         if (empty($cafs)) {
-            throw new Exception("No hay CAF activo para tipo $tipoDte en ambiente " . $this->context->getAmbiente() . '. Cargue el CAF correspondiente en Configuracion.');
-        }
-        $desde = (int)$cafs[0]['folio_desde'];
-        $hasta = (int)$cafs[0]['folio_hasta'];
-
-        // Folio más alto ya emitido (durable) dentro del rango del CAF.
-        $hw = $repo->getUltimoFolioUsadoEnRango(
-            $this->context->getEmpresaId(), $tipoDte, $this->context->getAmbiente(), $desde, $hasta
-        );
-
-        // Folio más alto que este flujo ya asignó en corridas previas (incluye los
-        // reutilizados antes de activar el consumo real, que aún no están en sii_dte).
-        foreach (($state['pruebas'] ?? []) as $prueba) {
-            if ((int)($prueba['tipo'] ?? 0) === $tipoDte) {
-                $f = (int)($prueba['folio'] ?? 0);
-                if ($f >= $desde && $f <= $hasta) {
-                    $hw = max($hw, $f);
-                }
-            }
-        }
-
-        $base = max($desde, $hw + 1);
-        if ($base > $hasta) {
             throw new Exception(
-                "CAF de certificación tipo $tipoDte agotado (rango $desde-$hasta, último usado $hw). "
-                . 'Cargue un nuevo CAF de certificación para continuar.'
+                "No hay CAF activo para tipo $tipoDte en ambiente "
+                . $this->context->getAmbiente() . '. Cargue el CAF correspondiente en Configuracion.'
             );
         }
-        return $base;
+
+        // Iterar todos los CAFs (ordenados por folio_desde ASC) hasta encontrar uno
+        // con folios disponibles — considera tanto la DB como los ya asignados en state.
+        foreach ($cafs as $caf) {
+            $desde = (int)$caf['folio_desde'];
+            $hasta = (int)$caf['folio_hasta'];
+
+            // Folio más alto ya emitido (durable) dentro del rango del CAF.
+            $hw = $repo->getUltimoFolioUsadoEnRango(
+                $this->context->getEmpresaId(), $tipoDte, $this->context->getAmbiente(), $desde, $hasta
+            );
+
+            // Folio más alto que este flujo ya asignó en corridas previas (incluye los
+            // reutilizados antes de activar el consumo real, que aún no están en sii_dte).
+            foreach (($state['pruebas'] ?? []) as $prueba) {
+                if ((int)($prueba['tipo'] ?? 0) === $tipoDte) {
+                    $f = (int)($prueba['folio'] ?? 0);
+                    if ($f >= $desde && $f <= $hasta) {
+                        $hw = max($hw, $f);
+                    }
+                }
+            }
+
+            $base = max($desde, $hw + 1);
+            if ($base <= $hasta) {
+                return $base;   // Este CAF tiene folios disponibles — usarlo
+            }
+            // CAF agotado: probar el siguiente en la lista
+        }
+
+        // Todos los CAFs agotados — reportar el último
+        $last  = end($cafs);
+        $desde = (int)$last['folio_desde'];
+        $hasta = (int)$last['folio_hasta'];
+        $hw    = $repo->getUltimoFolioUsadoEnRango(
+            $this->context->getEmpresaId(), $tipoDte, $this->context->getAmbiente(), $desde, $hasta
+        );
+        throw new Exception(
+            "CAF de certificación tipo $tipoDte agotado (todos los rangos usados, último rango $desde-$hasta, último folio $hw). "
+            . 'Cargue un nuevo CAF de certificación para continuar.'
+        );
     }
 
     /**
