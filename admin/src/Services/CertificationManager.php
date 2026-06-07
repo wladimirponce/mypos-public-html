@@ -127,10 +127,19 @@ class CertificationManager
         $envioRaw     = buildEnvioDTE($dte['xml'], (int)$dte['tipo'], (int)$dte['folio'], $cert);
         $envioFirmado = signDTE($envioRaw, $cert, $privKey, 'SetDoc');
 
-        preg_match_all('/ ID="([^"]+)"/', $dte['xml'],   $mDte);
-        preg_match_all('/ ID="([^"]+)"/', $envioRaw,     $mRaw);
-        preg_match_all('/ ID="([^"]+)"/', $envioFirmado, $mFirm);
-        $lines = explode("\n", $envioFirmado);
+        // Los XML salen en ISO-8859-1 de signDTE. Convertir a UTF-8 para json_encode.
+        $u8 = static function(string $s): string {
+            return preg_match('//u', $s) ? $s : mb_convert_encoding($s, 'UTF-8', 'ISO-8859-1');
+        };
+
+        $dteXmlU8  = $u8($dte['xml']);
+        $envRawU8  = $u8($envioRaw);
+        $envFirmU8 = $u8($envioFirmado);
+
+        preg_match_all('/ ID="([^"]+)"/', $dteXmlU8,  $mDte);
+        preg_match_all('/ ID="([^"]+)"/', $envRawU8,  $mRaw);
+        preg_match_all('/ ID="([^"]+)"/', $envFirmU8, $mFirm);
+        $lines = explode("\n", $envFirmU8);
 
         return [
             'ok'                            => true,
@@ -138,8 +147,8 @@ class CertificationManager
             'dte_ids'                       => $mDte[1],
             'envio_raw_ids'                 => $mRaw[1],
             'envio_firmado_ids'             => $mFirm[1],
-            'dte_xml_primeras_80'           => implode("\n", array_slice(explode("\n", $dte['xml']), 0, 80)),
-            'envio_raw_primeras_80'         => implode("\n", array_slice(explode("\n", $envioRaw), 0, 80)),
+            'dte_xml_primeras_80'           => implode("\n", array_slice(explode("\n", $dteXmlU8), 0, 80)),
+            'envio_raw_primeras_80'         => implode("\n", array_slice(explode("\n", $envRawU8), 0, 80)),
             'envio_firmado_primeras_80'     => implode("\n", array_slice($lines, 0, 80)),
             'envio_firmado_linea_73'        => $lines[72] ?? '(no existe línea 73)',
             'envio_firmado_contexto_60_80'  => implode("\n", array_slice($lines, 59, 21)),

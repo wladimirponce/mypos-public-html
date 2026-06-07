@@ -426,11 +426,20 @@ try {
                 echo json_encode(['ok' => false, 'error' => 'No se encontró caso -1 en el set. Asegúrese de haber subido el set de pruebas.']);
                 break;
             }
-            $caseId2 = 'F-' . $caso1['caso'];
-            echo json_encode(
-                $mgr->buildCaseDTEForDiag($caseId2, $folio),
-                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT
+            $caseId2   = 'F-' . $caso1['caso'];
+            $diagData  = $mgr->buildCaseDTEForDiag($caseId2, $folio);
+            $diagJson  = json_encode(
+                $diagData,
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_INVALID_UTF8_SUBSTITUTE
             );
+            if ($diagJson === false) {
+                echo json_encode(['ok' => false, 'error' => 'json_encode falló: ' . json_last_error_msg(),
+                                  'dte_ids' => $diagData['dte_ids'] ?? [],
+                                  'envio_raw_ids' => $diagData['envio_raw_ids'] ?? [],
+                                  'envio_firmado_ids' => $diagData['envio_firmado_ids'] ?? []]);
+            } else {
+                echo $diagJson;
+            }
             break;
 
         // ── Diagnóstico cvc-id.2 ─────────────────────────────────
