@@ -198,6 +198,7 @@ class EmpresaRepository extends BaseRepository
 
     /**
      * Retorna todos los CAFs activos para (empresa, tipo, ambiente).
+     * En modo SaaS el ambiente es implícito de la empresa; se consulta caf_archivos.
      */
     public function getCAFsActivos(int $empresaId, int $tipoDte, string $ambiente): array
     {
@@ -213,11 +214,29 @@ class EmpresaRepository extends BaseRepository
             return $stmt->fetchAll() ?: [];
         }
 
-        return [];
+        // Para MyPOS SaaS: los CAFs se guardan en caf_archivos.
+        // El ambiente es implícito (pertenece a la empresa activa).
+        $tipoEnum = $this->mapTipoDteToEnum($tipoDte);
+        $sql = "SELECT id, empresa_id,
+                       folio_desde, folio_hasta,
+                       fecha_autorizacion,
+                       created_at   AS fecha_subida,
+                       caf_xml      AS xml_content,
+                       archivo_path AS xml_path,
+                       'normal'     AS nivel_alerta
+                FROM caf_archivos
+                WHERE empresa_id    = ?
+                  AND tipo_documento = ?
+                  AND estado         = 'ACTIVO'
+                ORDER BY folio_desde ASC";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$empresaId, $tipoEnum]);
+        return $stmt->fetchAll() ?: [];
     }
 
     /**
      * Retorna el CAF activo cuyo rango contiene el folio dado.
+     * En modo SaaS consulta caf_archivos.
      */
     public function getCAFForFolio(int $empresaId, int $tipoDte, string $ambiente, int $folio): ?array
     {
@@ -231,14 +250,27 @@ class EmpresaRepository extends BaseRepository
 
             $stmt = $this->db->prepare($sql);
             $stmt->execute([$empresaId, $tipoDte, strtolower($ambiente), $folio]);
-            $result = $stmt->fetch() ?: null;
-            if ($result) return $result;
-        } else {
-            // El modelo SaaS legacy no separa CAF por ambiente.
-            return null;
+            return $stmt->fetch() ?: null;
         }
 
-        return null;
+        // Para MyPOS SaaS: buscar en caf_archivos el CAF cuyo rango contenga el folio.
+        $tipoEnum = $this->mapTipoDteToEnum($tipoDte);
+        $sql = "SELECT id, empresa_id,
+                       folio_desde, folio_hasta,
+                       fecha_autorizacion,
+                       caf_xml      AS xml_content,
+                       archivo_path AS xml_path,
+                       'normal'     AS nivel_alerta
+                FROM caf_archivos
+                WHERE empresa_id    = ?
+                  AND tipo_documento = ?
+                  AND estado         = 'ACTIVO'
+                  AND ? BETWEEN folio_desde AND folio_hasta
+                ORDER BY folio_desde ASC
+                LIMIT 1";
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([$empresaId, $tipoEnum, $folio]);
+        return $stmt->fetch() ?: null;
     }
 
     /**

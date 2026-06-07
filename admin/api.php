@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 if (session_status() === PHP_SESSION_NONE) session_start();
 date_default_timezone_set('America/Santiago');
 ini_set('display_errors', '1'); error_reporting(E_ALL);
@@ -194,7 +194,7 @@ $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? $_SESSION['active_api_key'] ?? $_GET['ap
 // ResoluciÃ³n del empresa_id solicitado en la peticiÃ³n. El cliente (APK u otro
 // consumidor) puede pasar `empresa_id` por GET, POST o body JSON para indicar
 // explÃ­citamente sobre quÃ© empresa operar. Si no se envÃ­a, se cae a la cadena
-// habitual: sesiÃ³n activa â†’ empresa del API key â†’ fallback a constantes
+// habitual: sesiÃ³n activa â†' empresa del API key â†' fallback a constantes
 $requestedEmpresaId = null;
 if (isset($_GET['empresa_id']) && is_numeric($_GET['empresa_id'])) {
     $requestedEmpresaId = (int)$_GET['empresa_id'];
@@ -413,7 +413,7 @@ function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
         return [
             'ok'    => false,
             'code'  => 'XML_MODIFICADO',
-            'error' => "El XML del folio T{$tipo}F{$folio} cambiÃ³ desde el Ãºltimo envÃ­o (hash previo {$hashPrev} â†’ actual {$hashActual}). "
+            'error' => "El XML del folio T{$tipo}F{$folio} cambiÃ³ desde el Ãºltimo envÃ­o (hash previo {$hashPrev} â†' actual {$hashActual}). "
                      . "Si la modificaciÃ³n fue intencional, use force=true con motivo. Si no, regenere el DTE.",
             'hash_previo' => $hashPrev,
             'hash_actual' => $hashActual,
@@ -712,15 +712,15 @@ if ($action) {
          * QuÃ© hace dte_php:
          *   1. autoAsignarDesdePool(): toma folios del pool central y los asigna
          *      a esta sucursal. Cuota = max(50, consumo_medio_30d * 30 dÃ­as).
-         *      Si no hay historial â†’ 100 folios por defecto.
+         *      Si no hay historial â†' 100 folios por defecto.
          *   2. descargarCaf(): devuelve el XML completo en la misma respuesta.
          *
          * Respuesta exitosa:
          *   { ok: true, caf_id, desde, hasta, cantidad, xml, pool_restante }
          *
          * Errores posibles:
-         *   { ok: false, reason: 'pool_vacio' }   â†’ no hay CAFs en pool para este tipo
-         *   { ok: false, reason: 'sin_sucursal' }  â†’ falta sucursal_id
+         *   { ok: false, reason: 'pool_vacio' }   â†' no hay CAFs en pool para este tipo
+         *   { ok: false, reason: 'sin_sucursal' }  â†' falta sucursal_id
          */
         case 'caf_solicitar': {
             $svc     = new \App\Services\CafCentralManager();
@@ -1037,7 +1037,7 @@ if ($action) {
             break;
         }
 
-        // â”€â”€ POS Local: procesar cola â†’ enviar al SII â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // â”€â”€ POS Local: procesar cola â†' enviar al SII â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         case 'dte_cola_procesar': {
             $max  = (int)($data['max'] ?? $_GET['max'] ?? 10);
             $mgr  = new \App\Services\DteLocalQueueManager();
@@ -1154,7 +1154,7 @@ if ($action) {
 
         // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
         //  ENROLAMIENTO DE DISPOSITIVOS
-        //  Flujo: Admin genera token â†’ APK lo presenta â†’ recibe API key
+        //  Flujo: Admin genera token â†' APK lo presenta â†' recibe API key
         // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
         // â”€â”€ Generar token de activaciÃ³n (requiere API key de admin) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1586,7 +1586,7 @@ function sendDTE(array $data): array {
 
     if (!$xml) throw new Exception('No hay XML de DTE para enviar');
 
-    // Certificado segÃºn tipo: boletas (39/41) â†’ Cristina ; guÃ­as/facturas â†’ David
+    // Certificado segÃºn tipo: boletas (39/41) â†' Cristina ; guÃ­as/facturas â†' David
     $GLOBALS['SII_CERT_TIPO'] = $tipo;
     [$cert, $privKey] = loadCertificate($tipo);
 
@@ -2069,7 +2069,7 @@ function loadCAF(int $tipo, int $folio = 0): array {
             if (!$dbCaf) {
                 throw new Exception(
                     "No hay CAF autorizado que contenga el folio $folio (tipo $tipo, ambiente $amb). "
-                    . "Cargue el CAF correspondiente en ConfiguraciÃ³n."
+                    . "Cargue el CAF correspondiente en Configuracion."
                 );
             }
         } else {
@@ -2077,7 +2077,7 @@ function loadCAF(int $tipo, int $folio = 0): array {
             if (!$dbCaf) {
                 throw new Exception(
                     "No hay folios disponibles para tipo $tipo en ambiente $amb. "
-                    . "Solicite y cargue un nuevo CAF en ConfiguraciÃ³n."
+                    . "Solicite y cargue un nuevo CAF en Configuracion."
                 );
             }
         }
@@ -2112,14 +2112,14 @@ function loadCAF(int $tipo, int $folio = 0): array {
     $file = $actualCafDir . "caf_{$tipo}.xml";
     if (!file_exists($file)) {
         $tipoNombre = [
-            33=>'Factura ElectrÃ³nica', 34=>'Factura Exenta',
-            39=>'Boleta ElectrÃ³nica', 41=>'Boleta Exenta',
-            52=>'GuÃ­a de Despacho',   56=>'Nota de DÃ©bito',
-            61=>'Nota de CrÃ©dito',
+            33=>'Factura Electronica', 34=>'Factura Exenta',
+            39=>'Boleta Electronica',  41=>'Boleta Exenta',
+            52=>'Guia de Despacho',    56=>'Nota de Debito',
+            61=>'Nota de Credito',
         ][$tipo] ?? "DTE tipo $tipo";
         throw new Exception(
             "No hay folios disponibles para emitir $tipoNombre (tipo $tipo). "
-            . "Solicite folios al SII (Mi SII â†’ Factura ElectrÃ³nica â†’ AdministraciÃ³n de Folios) "
+            . "Solicite folios al SII (Mi SII > Factura Electronica > Administracion de Folios) "
             . "y cargue el CAF .xml en setup.php. Archivo esperado: $file"
         );
     }
@@ -2179,7 +2179,7 @@ function calcularMontos(array $items, int $tipo): array {
         return ['mntNeto' => 0, 'mntExe' => $exe, 'tasaIVA' => 0, 'iva' => 0, 'mntTotal' => $exe];
     }
 
-    // Boleta afecta (39): el precio ingresado INCLUYE IVA â†’ se desglosa.
+    // Boleta afecta (39): el precio ingresado INCLUYE IVA â†' se desglosa.
     if ($tipo === 39) {
         $neto = $sumaAfecta > 0 ? (int)round($sumaAfecta / 1.19) : 0;
         $iva  = $sumaAfecta > 0 ? $sumaAfecta - $neto : 0;
@@ -2489,7 +2489,7 @@ function buildDocumentoXML(
         $mnt  = $bruto - $dscMonto;
         $lin  = $i + 1;
 
-        // Orden requerido por XSD: NroLinDet â†’ IndExe â†’ NmbItem â†’ DscItem
+        // Orden requerido por XSD: NroLinDet â†' IndExe â†' NmbItem â†' DscItem
         $xmlDet .= "<Detalle>\n  <NroLinDet>$lin</NroLinDet>\n";
         if ($esExento || ($it['exento'] ?? false)) $xmlDet .= "  <IndExe>1</IndExe>\n";
         $xmlDet .= "  <NmbItem>$nom</NmbItem>\n";
@@ -3672,7 +3672,7 @@ function generateAlerts(): array {
                 $alerts[] = ['level'=>'critical','code'=>'CAF_DEPLETED',
                     'title'=>"CAF tipo {$c['tipo']} ({$c['nombre']}) AGOTADO",
                     'body'=>"Sin folios disponibles para emitir.",
-                    'action'=>"Solicitar nuevo rango en sii.cl â†’ AdministraciÃ³n de Folios"];
+                    'action'=>"Solicitar nuevo rango en sii.cl â†' AdministraciÃ³n de Folios"];
             } elseif ($c['estado'] === 'CRITICO') {
                 $alerts[] = ['level'=>'critical','code'=>'CAF_CRITICAL',
                     'title'=>"CAF tipo {$c['tipo']} con solo {$c['restantes']} folios",
@@ -3940,7 +3940,7 @@ function saveRetryQueue(array $q): void {
 
 /**
  * Backoff exponencial en segundos segÃºn nÃºmero de intentos previos.
- * 0â†’60s, 1â†’300s (5m), 2â†’900s (15m), 3â†’3600s (1h), 4â†’21600s (6h)
+ * 0â†'60s, 1â†'300s (5m), 2â†'900s (15m), 3â†'3600s (1h), 4â†'21600s (6h)
  */
 function retryBackoffSeconds(int $intentos): int {
     $tabla = [60, 300, 900, 3600, 21600];
@@ -4161,7 +4161,7 @@ function pollEstadoDTEs(int $maxPerRun = 50): array {
         // (5 min recientemente, 1 hora si ya hicimos varios polls)
         $polls = (int)($entry['polls'] ?? 0);
         $lastPoll = $entry['last_poll_ts'] ?? null;
-        $minInterval = $polls < 3 ? 300 : ($polls < 10 ? 3600 : 21600); // 5m â†’ 1h â†’ 6h
+        $minInterval = $polls < 3 ? 300 : ($polls < 10 ? 3600 : 21600); // 5m â†' 1h â†' 6h
         if ($lastPoll && (time() - strtotime($lastPoll)) < $minInterval) {
             continue;
         }
@@ -4206,7 +4206,7 @@ function pollEstadoDTEs(int $maxPerRun = 50): array {
                     'despues'=> $estadoNuevo,
                     'glosa'  => $res['glosa'] ?? '',
                 ];
-                saveSiiLog('pollEstadoDTEs', "$key: $estadoActual â†’ $estadoNuevo ({$res['glosa']})", siiEstadoEsTerminal($estadoNuevo) ? 'SUCCESS' : 'INFO');
+                saveSiiLog('pollEstadoDTEs', "$key: $estadoActual â†' $estadoNuevo ({$res['glosa']})", siiEstadoEsTerminal($estadoNuevo) ? 'SUCCESS' : 'INFO');
             } else {
                 $report['unchanged']++;
             }
@@ -5806,10 +5806,10 @@ function siiHost(): string {
  * (Ãºtil para pruebas/migraciÃ³n cuando el SII cambia hosts).
  *
  * Devuelve array con claves:
- *   soap_host        â†’ maullin/palena (SOAP de DTE normal y auth clÃ¡sica)
- *   boleta_auth      â†’ apicert/api (semilla+token boletas REST)
- *   boleta_envio     â†’ pangal/rahue (POST boleta.electronica.envio)
- *   boleta_consulta  â†’ apicert/api (GET boleta.electronica/.../estado)
+ *   soap_host        â†' maullin/palena (SOAP de DTE normal y auth clÃ¡sica)
+ *   boleta_auth      â†' apicert/api (semilla+token boletas REST)
+ *   boleta_envio     â†' pangal/rahue (POST boleta.electronica.envio)
+ *   boleta_consulta  â†' apicert/api (GET boleta.electronica/.../estado)
  *
  * Cada uno puede sobreescribirse vÃ­a env: SII_SOAP_HOST, SII_BOLETA_AUTH, etc.
  */
@@ -7024,7 +7024,7 @@ function getCertCaseData(string $caseId): array {
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ENDPOINTS ANDROID â€“ Historial DTE
-// (productos/sucursales/stock â†’ dte_php/fb/index.php)
+// (productos/sucursales/stock â†' dte_php/fb/index.php)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 /**
