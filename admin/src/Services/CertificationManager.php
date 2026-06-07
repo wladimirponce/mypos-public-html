@@ -334,23 +334,33 @@ class CertificationManager
      */
     private function certFolioOffsetMap(): array
     {
-        // Orden completo de casos: num => tipoDTE. Del set subido si existe.
+        // Orden completo: num_suffix => ['tipo' => int, 'caseId' => string]
+        // Usa el set subido si existe; si no, fallback al set 4832043.
         $orden  = [];
         $setMgr = new CertSetManager($this->context);
         $casos  = $setMgr->getFacturas();
         if (!empty($casos)) {
             foreach ($casos as $c) {
                 if (preg_match('/-(\d+)$/', (string)($c['caso'] ?? ''), $m)) {
-                    $n = (int)$m[1];
-                    $orden[$n] = $this->tipoDteForSetBasicoCase($n, (int)($c['tipoDTE'] ?? 33));
+                    $n    = (int)$m[1];
+                    $tipo = (int)($c['tipoDTE'] ?? 33);
+                    // Mismo criterio de prefijo que getPruebasCases()
+                    $pfx  = match(true) {
+                        $tipo === 52 => 'G',
+                        $tipo === 43 => 'L',
+                        $tipo === 46 => 'C',
+                        default      => 'F',
+                    };
+                    $orden[$n] = ['tipo' => $tipo, 'caseId' => $pfx . '-' . $c['caso']];
                 }
             }
         } else {
-            // Fallback al set hardcodeado (4832043): 1-4 factura(33), 5-7 NC(61), 8 ND(56)
+            // Fallback al set 4832043 cuando no hay set subido
             foreach (range(1, 8) as $n) {
                 try {
-                    $data = getCertCaseData('F-4832043-' . $n);
-                    $orden[$n] = (int)($data['tipoDTE'] ?? 33);
+                    $cid  = 'F-4832043-' . $n;
+                    $data = getCertCaseData($cid);
+                    $orden[$n] = ['tipo' => (int)($data['tipoDTE'] ?? 33), 'caseId' => $cid];
                 } catch (\Throwable $e) { /* caso inexistente: omitir */ }
             }
         }
@@ -358,20 +368,24 @@ class CertificationManager
 
         $map = [];
         $offsetByTipo = [];
-        foreach ($orden as $num => $tipo) {
-            $offsetByTipo[$tipo] = $offsetByTipo[$tipo] ?? 0;
-            $map['F-4832043-' . $num] = ['tipo' => $tipo, 'offset' => $offsetByTipo[$tipo]];
-            $offsetByTipo[$tipo]++;
+        foreach ($orden as $entry) {
+            $tipo   = $entry['tipo'];
+            $caseId = $entry['caseId'];
+            $offsetByTipo[$tipo] ??= 0;
+            $map[$caseId] = ['tipo' => $tipo, 'offset' => $offsetByTipo[$tipo]++];
         }
         return $map;
     }
 
     private function tipoDteForSetBasicoCase(int $caseNumber, int $detected): int
     {
+        // Usar el tipo real del set si está disponible (ya no sobreescribir con posición)
+        if ($detected > 0) return $detected;
+        // Fallback posicional solo cuando no hay tipo detectado (set 4832043)
         if ($caseNumber >= 1 && $caseNumber <= 4) return 33;
         if ($caseNumber >= 5 && $caseNumber <= 7) return 61;
         if ($caseNumber === 8) return 56;
-        return $detected > 0 ? $detected : 33;
+        return 33;
     }
 
     private function runOneCase(string $caseId, array &$state): array
@@ -489,13 +503,14 @@ class CertificationManager
     {
         $refInfo = $caso['referencia'] ?? [];
         $casoRef = (string)($refInfo['caso_ref'] ?? '');
-        $razon = trim((string)($refInfo['razon'] ?? 'REFERENCIA SET DE PRUEBAS'));
-        if (preg_match('/-(\d+)$/', (string)($caso['caso'] ?? ''), $mCaso)) {
+        $razon   = trim((string)($refInfo['razon'] ?? 'REFERENCIA SET DE PRUEBAS'));
+        // Fallback posicional solo cuando el set no trae caso_ref explícito
+        if (empty($casoRef) && preg_match('/-(\d+)$/', (string)($caso['caso'] ?? ''), $mCaso)) {
             $numCaso = (int)$mCaso[1];
             if (in_array($numCaso, [5, 6, 7], true)) {
-                $casoRef = preg_replace('/-\d+$/', '-' . ($numCaso - 4), (string)($caso['caso'] ?? '')) ?: $casoRef;
+                $casoRef = preg_replace('/-\d+$/', '-' . ($numCaso - 4), (string)($caso['caso'] ?? '')) ?: '';
             } elseif ($numCaso === 8) {
-                $casoRef = preg_replace('/-\d+$/', '-5', (string)($caso['caso'] ?? '')) ?: $casoRef;
+                $casoRef = preg_replace('/-\d+$/', '-5', (string)($caso['caso'] ?? '')) ?: '';
             }
         }
         $tipoRef = $this->tipoForUploadedCase($casoRef, $casos);
@@ -529,10 +544,23 @@ class CertificationManager
 
     private function legacyKeyForUploadedCase(string $casoRef): string
     {
-        if (preg_match('/-(\d+)$/', $casoRef, $m)) {
-            return 'F-4832043-' . (int)$m[1];
+        if (empty($casoRef)) return 'F-' . $casoRef;
+        // Buscar en el set subido para obtener el prefijo correcto según tipoDTE
+        $setMgr = new CertSetManager($this->context);
+        foreach ($setMgr->getFacturas() as $c) {
+            if ((string)($c['caso'] ?? '') === $casoRef) {
+                $tipo = (int)($c['tipoDTE'] ?? 33);
+                $pfx  = match(true) {
+                    $tipo === 52 => 'G',
+                    $tipo === 43 => 'L',
+                    $tipo === 46 => 'C',
+                    default      => 'F',
+                };
+                return $pfx . '-' . $casoRef;
+            }
         }
-        return 'F-4832043-1';
+        // Fallback: prefijo F- (T33/T61/T56 del set 4832043)
+        return 'F-' . $casoRef;
     }
 
     private function codigoRefForRazon(string $razon): int
@@ -828,14 +856,30 @@ XML;
         $state  = $this->loadState();
         $tmpDir = $this->context->getTmpPath();
 
-        $casesVenta = [
-            'F-4832043-1' => 33, 'F-4832043-2' => 33,
-            'F-4832043-3' => 33, 'F-4832043-4' => 33,
-            'F-4832043-5' => 61, 'F-4832043-6' => 61,
-            'F-4832043-7' => 61, 'F-4832043-8' => 56,
-        ];
+        // Construir lista desde el set subido (sin T52 guías, que van en libro guías)
+        $setMgr     = new CertSetManager($this->context);
+        $casesVenta = [];
+        foreach ($setMgr->getFacturas() as $f) {
+            $tipo = (int)($f['tipoDTE'] ?? 33);
+            if ($tipo === 52) continue;
+            $pfx = match(true) {
+                $tipo === 43 => 'L',
+                $tipo === 46 => 'C',
+                default      => 'F',
+            };
+            $casesVenta[$pfx . '-' . $f['caso']] = $tipo;
+        }
+        // Fallback si no hay set subido
+        if (empty($casesVenta)) {
+            $casesVenta = [
+                'F-4832043-1' => 33, 'F-4832043-2' => 33,
+                'F-4832043-3' => 33, 'F-4832043-4' => 33,
+                'F-4832043-5' => 61, 'F-4832043-6' => 61,
+                'F-4832043-7' => 61, 'F-4832043-8' => 56,
+            ];
+        }
 
-        $detalles = [];
+        $detalles  = [];
         $faltantes = [];
 
         foreach ($casesVenta as $caseId => $tipoDefault) {
@@ -846,7 +890,11 @@ XML;
             }
             $tipo    = (int)($info['tipo'] ?? $tipoDefault);
             $folio   = (int)$info['folio'];
-            $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
+            // Buscar XML: primero en cert_basico/ (generado por runSetBasico), luego en raíz
+            $xmlFile = $tmpDir . "cert_basico/dte_T{$tipo}F{$folio}.xml";
+            if (!file_exists($xmlFile)) {
+                $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
+            }
 
             if (!file_exists($xmlFile)) { $faltantes[] = $caseId; continue; }
 
@@ -1136,10 +1184,24 @@ XML;
 
     private function detectTipo(string $caseId): int
     {
-        if (str_starts_with($caseId, 'B'))                      return 39;
-        if (str_starts_with($caseId, 'G'))                      return 52;
+        // Prefijo del caseId indica tipo directo
+        if (str_starts_with($caseId, 'B')) return 39;
+        if (str_starts_with($caseId, 'G')) return 52;
+        if (str_starts_with($caseId, 'L')) return 43;
+        if (str_starts_with($caseId, 'C')) return 46;
+        // Para F-: buscar en el set subido (fuente de verdad)
+        if (preg_match('/^F-(.+)$/', $caseId, $m)) {
+            $casoId = $m[1];
+            $setMgr = new CertSetManager($this->context);
+            foreach ($setMgr->getFacturas() as $f) {
+                if ((string)($f['caso'] ?? '') === $casoId) {
+                    return (int)($f['tipoDTE'] ?? 33);
+                }
+            }
+        }
+        // Heurística posicional como último recurso (set 4832043)
         if (str_ends_with($caseId, '-5') || str_ends_with($caseId, '-6') || str_ends_with($caseId, '-7')) return 61;
-        if (str_ends_with($caseId, '-8'))                       return 56;
+        if (str_ends_with($caseId, '-8')) return 56;
         return 33;
     }
 

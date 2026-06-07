@@ -17,7 +17,7 @@ if (isset($globalContext)) {
             }
             foreach ($setData['facturas'] ?? [] as $f) {
                 $t   = (int)($f['tipoDTE'] ?? 33);
-                $pfx = match($t) { 52=>'G-', 61=>'NC-', 56=>'ND-', 46=>'C-', default=>'F-' };
+                $pfx = match($t) { 52=>'G-', 43=>'L-', 46=>'C-', default=>'F-' }; // F- para T33/T61/T56 (igual que CertificationManager)
                 $lbl = match($t) { 33=>'Factura T33', 61=>'NC T61', 56=>'ND T56', 52=>'Guía T52', 46=>'FCA T46', default=>'DTE T'.$t };
                 $cid = $pfx . $f['caso'];
                 $setCases['generales'][$cid] = $f['caso'] . ' — ' . $lbl;
@@ -276,7 +276,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
             <span id="libro-ventas-at" style="font-size:.68rem; color:var(--c-text-muted); font-weight:400; display:block"></span>
           </div>
           <div style="font-size:.72rem; color:var(--c-text-muted); margin-bottom:10px">
-            Construido con los 8 casos del Set Básico (facturas, NC, ND).
+            <span id="libro-ventas-desc">Construido con los casos del Set Básico (facturas, NC, ND).</span>
           </div>
           <div style="display:flex; align-items:center; gap:8px">
             <button class="d-btn d-btn-sm d-btn-success flex-fill" onclick="certLibro('ventas')">
@@ -494,11 +494,15 @@ function applyState(estado) {
   const pruebas = estado.pruebas || {};
   let ok=0, fail=0, pend=0;
 
-  // Solo IDs no-boleta en el loop de pruebas (boletas tienen su propio estado)
-  const nonBIds = [...new Set([
-    ...ALL_CASES.filter(id => !id.startsWith('B-')),
-    ...Object.keys(pruebas).filter(id => !id.startsWith('B-'))
-  ])];
+  // Limpiar filas dinámicas de runs anteriores para evitar acumulación de
+  // casos de sets viejos (F-4832043-X, etc.) que ya no son relevantes.
+  const extraContainer = document.getElementById('casos-extra-rows');
+  if (extraContainer) extraContainer.innerHTML = '';
+
+  // Solo IDs del set actual — los IDs de sets anteriores son ruido histórico
+  // y no deben afectar el banner ni el conteo del paso actual.
+  const currentSetIds = new Set(ALL_CASES.filter(id => !id.startsWith('B-')));
+  const nonBIds = [...currentSetIds];
 
   nonBIds.forEach(id => {
     // Crear fila dinámica si no existe aún en el DOM
@@ -774,6 +778,12 @@ async function certLoadSetInfo() {
       const pb1 = document.getElementById('pbadge-1');
       if (pb1) { pb1.textContent = 'Vinculado'; pb1.className = 'd-badge success'; }
       setPasoNum(1, 'done');
+      // Descripción dinámica Libro Ventas
+      const descEl = document.getElementById('libro-ventas-desc');
+      if (descEl) {
+        const nVenta = nF - nG;
+        descEl.textContent = `Construido con los ${nVenta} caso${nVenta!==1?'s':''} del Set Básico (facturas, NC, ND).`;
+      }
       // Atenciones libros
       _setAt('libro-ventas-at',  s.atencion_ventas,      'Lib. Ventas');
       _setAt('libro-compras-at', s.atencion_compras,     'Lib. Compras');
