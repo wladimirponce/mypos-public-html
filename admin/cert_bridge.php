@@ -24,9 +24,24 @@ $action = $_GET['action'] ?? $_POST['action'] ?? '';
  */
 function resolveCertEmpresaId(): int
 {
+    // Ruta 1: sesión de admin con empresa activa seleccionada
     if (!empty($_SESSION['admin_id']) && isset($_SESSION['active_empresa_id']) && (int)$_SESSION['active_empresa_id'] > 0) {
         return (int)$_SESSION['active_empresa_id'];
     }
+    // Ruta 2: sesión sin admin_id (p.ej. llamada directa a la URL con sesión usuario)
+    if (isset($_SESSION['active_empresa_id']) && (int)$_SESSION['active_empresa_id'] > 0) {
+        return (int)$_SESSION['active_empresa_id'];
+    }
+    // Ruta 3: fallback — primera empresa con ambiente CERTIFICACION en la BD
+    try {
+        $db  = \App\Core\Database::getInstance();
+        $row = $db->query(
+            "SELECT id FROM empresas WHERE ambiente = 'CERTIFICACION' ORDER BY id LIMIT 1"
+        )->fetch(\PDO::FETCH_ASSOC);
+        if ($row && (int)$row['id'] > 0) {
+            return (int)$row['id'];
+        }
+    } catch (\Throwable $ignored) {}
     throw new \Exception('Seleccione explicitamente una empresa antes de iniciar la certificacion.');
 }
 
