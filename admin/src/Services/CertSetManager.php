@@ -76,10 +76,26 @@ class CertSetManager
 
     /**
      * Parsea el contenido crudo del .txt y lo persiste asociado a la empresa.
+     *
+     * Si GEMINI_API_KEY está configurada en .env, delega el parseo a Gemini
+     * (más robusto para variaciones de formato y codificación). Si no, usa
+     * el parser nativo PHP. En caso de error de Gemini, cae al parser nativo.
+     *
      * @return array resumen { ok, boletas:int, facturas:int, atencion_basico }
      */
     public function importarTxt(string $rawContent, string $origen = 'set.txt'): array
     {
+        // ── Intentar parser Gemini si la API key está configurada ──────────────
+        if (GeminiParser::disponible()) {
+            try {
+                return $this->importarConGemini($rawContent, $origen);
+            } catch (\RuntimeException $e) {
+                // Loguear el error pero continuar con el parser nativo
+                error_log('[CertSetManager] Gemini falló, usando parser nativo. Error: ' . $e->getMessage());
+            }
+        }
+
+        // ── Parser nativo PHP ─────────────────────────────────────────────────
         $txt = $this->normalizarTexto($rawContent);
 
         $boletas  = $this->parseBoletas($txt);
@@ -110,11 +126,61 @@ class CertSetManager
         return [
             'ok'              => true,
             'boletas'         => count($boletas),
-            'facturas'        => count($facturas),
+            'facturas'        => count($casosGenerales),
             'atencion_basico' => $set['atencion_basico'],
             'atencion_ventas' => $set['atencion_ventas'],
             'atencion_compras'=> $set['atencion_compras'],
             'origen'          => $origen,
+        ];
+    }
+
+    // =========================================================
+    //  PARSEO VÍA GEMINI
+    // =========================================================
+
+    /**
+     * Parsea el .txt usando Gemini y persiste el resultado.
+     * Tiene el mismo contrato de retorno que importarTxt().
+     */
+    private function importarConGemini(string $rawContent, string $origen): array
+    {
+        $gemini = new GeminiParser();
+        $parsed = $gemini->parsearSetTxt($rawContent);
+
+        $boletas        = $parsed['boletas']      ?? [];
+        $casosGenerales = $parsed['facturas']     ?? [];
+        $libroCompras   = $parsed['libroCompras'] ?? [];
+
+        if (empty($boletas) && empty($casosGenerales)) {
+            throw new \RuntimeException('Gemini no reconoció casos en el archivo.');
+        }
+
+        $actual = $this->load() ?? [];
+        $set = [
+            'rut'              => $this->context->getRut(),
+            'uploaded'         => date('c'),
+            'origen'           => $origen,
+            'origen_boletas'   => !empty($boletas) ? $origen : ($actual['origen_boletas'] ?? null),
+            'origen_basico'    => !empty($casosGenerales) ? $origen : ($actual['origen_basico'] ?? null),
+            'atencion_basico'  => $parsed['atencion_basico']  ?? ($actual['atencion_basico']  ?? null),
+            'atencion_ventas'  => $parsed['atencion_ventas']  ?? ($actual['atencion_ventas']  ?? null),
+            'atencion_compras' => $parsed['atencion_compras'] ?? ($actual['atencion_compras'] ?? null),
+            'atencion_guias'   => $parsed['atencion_guias']   ?? ($actual['atencion_guias']   ?? null),
+            'boletas'          => !empty($boletas) ? $boletas : ($actual['boletas'] ?? []),
+            'facturas'         => !empty($casosGenerales) ? $casosGenerales : ($actual['facturas'] ?? []),
+            'libroCompras'     => !empty($libroCompras) ? $libroCompras : ($actual['libroCompras'] ?? []),
+        ];
+        $this->save($set);
+
+        return [
+            'ok'               => true,
+            'via'              => 'gemini',
+            'boletas'          => count($boletas),
+            'facturas'         => count($casosGenerales),
+            'atencion_basico'  => $set['atencion_basico'],
+            'atencion_ventas'  => $set['atencion_ventas'],
+            'atencion_compras' => $set['atencion_compras'],
+            'origen'           => $origen,
         ];
     }
 
@@ -338,12 +404,15 @@ class CertSetManager
 
     public function parseLibroCompras(string $txt): array
     {
-        if (!preg_match('/SET\s+LIBRO\s+DE\s+COMPRAS[^\n]*\n={5,}([\s\S]*?)={5,}/iu', $txt, $m)) {
+        // El .txt del SII tiene una línea en blanco (con espacio) entre el encabezado
+        // y los separadores ====. El patrón salta esas líneas con [\s\S]*? antes del
+        // primer ====, luego salta la sección de cabeceras de columna (hasta el segundo
+        // ====) y captura los registros hasta el tercer ==== o fin del bloque.
+        if (!preg_match('/SET\s+LIBRO\s+DE\s+COMPRAS[\s\S]*?={5,}[^=]+={5,}([\s\S]*?)={5,}/iu', $txt, $m)) {
             return [];
         }
 
         $sub = trim($m[1]);
-        $sub = preg_replace('/TIPO DOCUMENTO[^\n]+\n[^\n]+\n[^\n]+\n/iu', '', $sub);
 
         $lines = explode("\n", $sub);
         $compras = [];
