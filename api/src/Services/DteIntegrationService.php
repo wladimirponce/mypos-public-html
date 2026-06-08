@@ -47,10 +47,16 @@ final class DteIntegrationService
         $empresaId = $this->positiveInt($payload, 'empresa_id');
         $previous = $this->configuracion($empresaId);
         $mode = $this->mode($payload['modo'] ?? 'SIMULADO');
-        $path = $this->requiredString($payload['sistema_path'] ?? $this->defaultSistemaPath(), 'sistema_path');
+        $path = trim((string) ($payload['sistema_path'] ?? $this->defaultSistemaPath()));
 
-        if ($mode === 'REAL' && $this->looksLikeLocalPath($path) && !$this->pathExistsInRuntime($path)) {
-            throw new HttpException('El path del sistema DTE no es accesible desde este runtime', 422);
+        // sistema_path es obligatorio solo en modo REAL
+        if ($mode === 'REAL') {
+            if ($path === '') {
+                throw new HttpException('Error de validacion', 422, ['sistema_path' => ['El campo sistema_path es obligatorio para modo REAL']]);
+            }
+            if ($this->looksLikeLocalPath($path) && !$this->pathExistsInRuntime($path)) {
+                throw new HttpException('El path del sistema DTE no es accesible desde este runtime', 422);
+            }
         }
 
         $this->repository->upsertConfig([

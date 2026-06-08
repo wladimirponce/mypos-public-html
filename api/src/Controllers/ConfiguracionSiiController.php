@@ -42,7 +42,11 @@ final class ConfiguracionSiiController
                 ? (string) $payload['tipo']
                 : 'nueva';
 
-            $current = $this->dteService->configuracion($empresaId);
+            try {
+                $current = $this->dteService->configuracion($empresaId);
+            } catch (\Throwable $e) {
+                $current = ['modo' => 'SIMULADO', 'sistema_path' => '', 'ambiente' => 'CERTIFICACION', 'activo' => true, 'metadata' => []];
+            }
             $metadata = is_array($current['metadata'] ?? null) ? $current['metadata'] : [];
             $metadata['certificacion_solicitada'] = true;
             $metadata['certificacion_tipo'] = $tipo;
@@ -52,7 +56,7 @@ final class ConfiguracionSiiController
             $this->dteService->actualizarConfiguracion($userId, [
                 'empresa_id' => $empresaId,
                 'modo' => (string) ($current['modo'] ?? 'SIMULADO'),
-                'sistema_path' => (string) ($current['sistema_path'] ?? ''),
+                'sistema_path' => '',
                 'endpoint_cli' => $current['endpoint_cli'] ?? null,
                 'endpoint_http' => $current['endpoint_http'] ?? null,
                 'salida_xml_dir' => $current['salida_xml_dir'] ?? null,
@@ -84,7 +88,11 @@ final class ConfiguracionSiiController
         ];
         $datosCompletos = $datosSii['giro'] && $datosSii['unidad_sii'] && $datosSii['email_sii'];
 
-        $dte = $this->dteService->configuracion($empresaId);
+        try {
+            $dte = $this->dteService->configuracion($empresaId);
+        } catch (\Throwable $e) {
+            $dte = ['ambiente' => 'CERTIFICACION', 'metadata' => []];
+        }
         $dteMeta = is_array($dte['metadata'] ?? null) ? $dte['metadata'] : [];
         $ambiente = (string) ($dte['ambiente'] ?? 'CERTIFICACION');
 
