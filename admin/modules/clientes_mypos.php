@@ -158,6 +158,11 @@ if (isset($_POST['action']) && $_POST['action'] === 'forzar_pago_manual' && $dbO
 
         $db->beginTransaction();
 
+        // 1. Marcar onboarding como completado (desbloquea el acceso al app)
+        $db->prepare('UPDATE empresas SET onboarding_completado = 1 WHERE id = ?')
+           ->execute([$empresaId]);
+
+        // 2. Activar/extender suscripción
         $db->prepare(
             'INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado)
              VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? DAY), "activa")
@@ -168,6 +173,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'forzar_pago_manual' && $dbO
                estado     = "activa"'
         )->execute([$empresaId, $planId, $dias, $dias]);
 
+        // 3. Registrar orden manual para que pagos_completados > 0
         $ordenNum = 'ADMIN-MANUAL-' . $empresaId . '-' . time();
         $db->prepare(
             'INSERT INTO suscripciones_ordenes
