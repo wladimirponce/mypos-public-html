@@ -7,6 +7,7 @@ ini_set('error_log', __DIR__ . '/php_errors.log');
 
 use Mypos\Config\Database;
 use Mypos\Controllers\AnulacionController;
+use Mypos\Controllers\ConfiguracionSiiController;
 use Mypos\Controllers\AuditoriaController;
 use Mypos\Controllers\AuthController;
 use Mypos\Controllers\CajaController;
@@ -564,6 +565,10 @@ $router->get('/api/v1/folios/disponibles', protectedRoute([$folioController, 'av
 $router->post('/api/v1/folios/consumir', protectedRoute([$folioController, 'consume'], 'folios.consumir'));
 $router->get('/api/v1/folios/consumidos', protectedRoute([$folioController, 'consumed'], 'folios.ver'));
 $router->get('/api/v1/folios/alertas', protectedRoute([$folioController, 'alerts'], 'folios.alertas.ver'));
+
+$configuracionSiiController = new ConfiguracionSiiController();
+$router->get('/api/v1/configuracion-sii/estado', protectedRoute([$configuracionSiiController, 'estado'], 'configuracion.ver'));
+$router->post('/api/v1/configuracion-sii/solicitar-certificacion', protectedRoute([$configuracionSiiController, 'solicitarCertificacion'], 'configuracion.editar'));
 
 $dteController = new DteController();
 $router->get('/api/v1/dte/configuracion', protectedRoute([$dteController, 'config'], 'dte.configuracion.ver'));

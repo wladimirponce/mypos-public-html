@@ -86,11 +86,13 @@ final class AuthRepository
                 e.onboarding_completado,
                 r.codigo AS rol,
                 eu.sucursal_id,
-                s.nombre AS sucursal_nombre
+                s.nombre AS sucursal_nombre,
+                (ec.empresa_id IS NULL OR ec.giro IS NULL OR ec.giro = \'\') AS sii_pendiente
              FROM empresa_usuarios eu
              INNER JOIN empresas e ON e.id = eu.empresa_id
              INNER JOIN roles r ON r.id = eu.rol_id
              LEFT JOIN sucursales s ON s.id = eu.sucursal_id
+             LEFT JOIN empresa_configuracion ec ON ec.empresa_id = e.id
              WHERE eu.usuario_id = :user_id
                AND eu.activo = 1
                AND e.activo = 1
