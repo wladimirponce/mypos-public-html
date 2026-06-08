@@ -136,6 +136,54 @@ if ($useSiiTables) {
         : "";
 }
 
+// ── Acción: Forzar Pago Manual ───────────────────────────────────────────────
+$pagoMsg = null;
+$pagoError = null;
+if (isset($_POST['action']) && $_POST['action'] === 'forzar_pago_manual' && $dbOk) {
+    try {
+        $empresaId = (int)($_POST['empresa_id'] ?? 0);
+        $dias = max(1, min(365, (int)($_POST['dias_vigencia'] ?? 30)));
+        if ($empresaId <= 0) throw new Exception('Empresa inválida.');
+
+        $stmtSub = $db->prepare('SELECT plan_id FROM empresas_suscripcion WHERE empresa_id = ?');
+        $stmtSub->execute([$empresaId]);
+        $subActual = $stmtSub->fetch(PDO::FETCH_ASSOC);
+        $planId = $subActual['plan_id'] ?? 'basico';
+
+        $stmtUsr = $db->prepare('SELECT usuario_id FROM empresa_usuarios WHERE empresa_id = ? AND activo = 1 ORDER BY id ASC LIMIT 1');
+        $stmtUsr->execute([$empresaId]);
+        $usrRow = $stmtUsr->fetch(PDO::FETCH_ASSOC);
+        if (!$usrRow) throw new Exception('La empresa no tiene usuarios activos.');
+        $usuarioId = (int)$usrRow['usuario_id'];
+
+        $db->beginTransaction();
+
+        $db->prepare(
+            'INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado)
+             VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? DAY), "activa")
+             ON DUPLICATE KEY UPDATE
+               plan_id    = VALUES(plan_id),
+               fecha_inicio = IF(estado != "activa", NOW(), fecha_inicio),
+               fecha_fin  = DATE_ADD(NOW(), INTERVAL ? DAY),
+               estado     = "activa"'
+        )->execute([$empresaId, $planId, $dias, $dias]);
+
+        $ordenNum = 'ADMIN-MANUAL-' . $empresaId . '-' . time();
+        $db->prepare(
+            'INSERT INTO suscripciones_ordenes
+               (orden_numero, empresa_id, usuario_id, gateway, plan_id, monto, moneda, estado)
+             VALUES (?, ?, ?, "flow", ?, 0, "CLP", "completado")'
+        )->execute([$ordenNum, $empresaId, $usuarioId, $planId]);
+
+        $db->commit();
+        $pagoMsg = 'Pago manual registrado. Suscripción activa por ' . $dias . ' días.';
+    } catch (Exception $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        $pagoError = $e->getMessage();
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 $clientes = $db->query(
     "SELECT
         e.id,
@@ -205,6 +253,12 @@ function isTrialSubscription(array $cliente): bool
 }
 ?>
 
+<?php if ($pagoMsg): ?>
+    <div class="d-alert success"><i class="bi bi-check-circle"></i> <?= htmlspecialchars($pagoMsg) ?></div>
+<?php endif; ?>
+<?php if ($pagoError): ?>
+    <div class="d-alert danger"><i class="bi bi-exclamation-circle"></i> <?= htmlspecialchars($pagoError) ?></div>
+<?php endif; ?>
 <?php if (!$hasSiiSchema): ?>
     <div class="d-alert warning">
         <i class="bi bi-exclamation-triangle"></i>
@@ -282,15 +336,31 @@ function isTrialSubscription(array $cliente): bool
                                 <span class="text-muted small"><?= $cliente['ultimo_documento_at'] ? htmlspecialchars((string)$cliente['ultimo_documento_at']) : 'Sin emision reciente' ?></span>
                             </td>
                             <td>
-                                <?php if (!$hasSii): ?>
-                                    <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=empresas">Crear ficha SII</a>
-                                <?php elseif (!$hasCert): ?>
-                                    <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=config&switch_empresa=<?= (int)$cliente['sii_empresa_id'] ?>">Certificado</a>
-                                <?php elseif (!$hasFolios): ?>
-                                    <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=cafs&switch_empresa=<?= (int)$cliente['sii_empresa_id'] ?>">Cargar CAF</a>
-                                <?php else: ?>
-                                    <a class="d-btn d-btn-sm d-btn-secondary" href="dashboard.php?module=emision&switch_empresa=<?= (int)$cliente['sii_empresa_id'] ?>">Prueba DTE</a>
-                                <?php endif; ?>
+                                <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">
+                                    <?php if (!$hasSii): ?>
+                                        <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=empresas">Crear ficha SII</a>
+                                    <?php elseif (!$hasCert): ?>
+                                        <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=config&switch_empresa=<?= (int)$cliente['sii_empresa_id'] ?>">Certificado</a>
+                                    <?php elseif (!$hasFolios): ?>
+                                        <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=cafs&switch_empresa=<?= (int)$cliente['sii_empresa_id'] ?>">Cargar CAF</a>
+                                    <?php else: ?>
+                                        <a class="d-btn d-btn-sm d-btn-secondary" href="dashboard.php?module=emision&switch_empresa=<?= (int)$cliente['sii_empresa_id'] ?>">Prueba DTE</a>
+                                    <?php endif; ?>
+                                    <form method="POST" style="display:flex;gap:4px;align-items:center"
+                                          onsubmit="return confirm('¿Registrar pago manual para <?= htmlspecialchars(addslashes((string)($cliente['razon_social'] ?: $cliente['nombre_fantasia']))) ?>?')">
+                                        <input type="hidden" name="action" value="forzar_pago_manual">
+                                        <input type="hidden" name="empresa_id" value="<?= (int)$cliente['id'] ?>">
+                                        <select name="dias_vigencia" style="padding:2px 4px;font-size:11px;border:1px solid var(--c-border,#ccc);border-radius:4px;background:var(--c-bg,#fff);color:var(--c-text,#333)">
+                                            <option value="30">30d</option>
+                                            <option value="60">60d</option>
+                                            <option value="90">90d</option>
+                                            <option value="365">365d</option>
+                                        </select>
+                                        <button type="submit" class="d-btn d-btn-sm" style="background:#198754;color:#fff;border:none" title="Registrar pago manual">
+                                            <i class="bi bi-cash-coin"></i> Pago
+                                        </button>
+                                    </form>
+                                </div>
                             </td>
                         </tr>
                     <?php endforeach; ?>
