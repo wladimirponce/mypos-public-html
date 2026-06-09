@@ -121,7 +121,7 @@ final class ProductoService
                 $this->productos->createBarcode($productoId, [
                     'empresa_id' => $empresaId,
                     'codigo_barra' => $codigoBarraVal,
-                    'tipo_codigo' => 'BARRA',
+                    'tipo_codigo' => $bc['tipo_codigo'] ?? 'BARRA',
                     'principal' => $principalVal,
                     'descripcion' => $principalVal ? 'Código de barra principal' : 'Código de barra adicional',
                     'imagen_url' => $imagenUrlVal,
@@ -197,7 +197,7 @@ final class ProductoService
                 $this->productos->createBarcode($id, [
                     'empresa_id' => $empresaId,
                     'codigo_barra' => $codigoBarraVal,
-                    'tipo_codigo' => 'BARRA',
+                    'tipo_codigo' => $bc['tipo_codigo'] ?? 'BARRA',
                     'principal' => $principalVal,
                     'descripcion' => $principalVal ? 'Código de barra principal' : 'Código de barra adicional',
                     'imagen_url' => $imagenUrlVal,
