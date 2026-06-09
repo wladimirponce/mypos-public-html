@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use Mypos\Config\Database;
 use Mypos\Core\HttpException;
 use Mypos\Repositories\CompraRepository;
+use Mypos\Repositories\LoteRepository;
 use Mypos\Repositories\ProveedorRepository;
 use Mypos\Repositories\StockRepository;
 use Throwable;
@@ -249,6 +250,10 @@ final class CompraService
                 'neto' => $net,
                 'iva' => $iva,
                 'total' => $total,
+                'numero_lote'       => isset($item['numero_lote']) && trim((string) $item['numero_lote']) !== ''
+                    ? trim((string) $item['numero_lote']) : null,
+                'fecha_vencimiento' => $item['fecha_vencimiento'] ?? null,
+                'fecha_fabricacion' => $item['fecha_fabricacion'] ?? null,
             ];
         }
 
@@ -264,18 +269,40 @@ final class CompraService
                 continue;
             }
 
-            $stockService->sumarPorCompra([
-                'empresa_id' => $empresaId,
-                'sucursal_id' => $sucursalId,
-                'producto_id' => (int) $item['producto_id'],
-                'usuario_id' => $userId,
-                'tipo' => 'COMPRA',
-                'referencia_tipo' => 'COMPRA',
-                'referencia_id' => $purchaseId,
-                'cantidad' => $item['cantidad'],
-                'costo_unitario' => (int) $item['costo_unitario'],
-                'observacion' => 'Compra #' . $purchaseId,
-            ], $connection);
+            // Si el item trae numero_lote, registrar via LoteService (que internamente
+            // llama a StockService y actualiza tambien stock_lotes_ubicacion).
+            if (($item['numero_lote'] ?? null) !== null) {
+                $loteService = new LoteService(
+                    new \Mypos\Repositories\LoteRepository($connection)
+                );
+                $loteService->registrarEntradaLote($userId, [
+                    'empresa_id'        => $empresaId,
+                    'sucursal_id'       => $sucursalId,
+                    'producto_id'       => (int) $item['producto_id'],
+                    'numero_lote'       => $item['numero_lote'],
+                    'fecha_vencimiento' => $item['fecha_vencimiento'] ?? null,
+                    'fecha_fabricacion' => $item['fecha_fabricacion'] ?? null,
+                    'cantidad'          => $item['cantidad'],
+                    'costo_unitario'    => (int) $item['costo_unitario'],
+                    'compra_id'         => $purchaseId,
+                    'referencia_tipo'   => 'COMPRA',
+                    'referencia_id'     => $purchaseId,
+                    'observacion'       => 'Compra #' . $purchaseId,
+                ], $connection);
+            } else {
+                $stockService->sumarPorCompra([
+                    'empresa_id' => $empresaId,
+                    'sucursal_id' => $sucursalId,
+                    'producto_id' => (int) $item['producto_id'],
+                    'usuario_id' => $userId,
+                    'tipo' => 'COMPRA',
+                    'referencia_tipo' => 'COMPRA',
+                    'referencia_id' => $purchaseId,
+                    'cantidad' => $item['cantidad'],
+                    'costo_unitario' => (int) $item['costo_unitario'],
+                    'observacion' => 'Compra #' . $purchaseId,
+                ], $connection);
+            }
         }
     }
 

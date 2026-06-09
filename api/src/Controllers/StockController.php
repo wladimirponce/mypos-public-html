@@ -116,6 +116,16 @@ final class StockController
         }, 'Traslado de stock registrado');
     }
 
+    public function merma(): void
+    {
+        $this->respond(function (int $userId): array {
+            $payload = Request::json();
+            $payload['usuario_id'] = $userId;
+
+            return $this->service->registrarMerma($payload);
+        }, 'Merma de stock registrada');
+    }
+
     private function respond(callable $callback, ?string $message = null): void
     {
         try {

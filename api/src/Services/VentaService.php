@@ -9,6 +9,9 @@ use Mypos\Core\HttpException;
 use Mypos\Repositories\CreditoRepository;
 use Mypos\Repositories\StockRepository;
 use Mypos\Repositories\VentaRepository;
+use Mypos\Validators\LoteRequeridoValidator;
+use Mypos\Validators\VariantesValidator;
+use Mypos\Validators\VentaValidatorChain;
 use Throwable;
 
 final class VentaService
@@ -175,6 +178,7 @@ final class VentaService
                             ? (int) $payload['ubicacion_id']
                             : null,
                         'producto_id' => $item['producto_id'],
+                        'lote_id' => $item['lote_id'] ?? null,
                         'usuario_id' => $userId,
                         'tipo' => 'VENTA',
                         'referencia_tipo' => 'VENTA',
@@ -292,6 +296,7 @@ final class VentaService
 
     private function prepareItems(int $empresaId, array $items): array
     {
+        $chain    = $this->buildValidatorChain($empresaId);
         $prepared = [];
 
         foreach ($items as $item) {
@@ -300,7 +305,7 @@ final class VentaService
             }
 
             $quantity = $this->quantity($item['cantidad'] ?? null);
-            $product = isset($item['producto_id'])
+            $product  = isset($item['producto_id'])
                 ? $this->repository->findProductById($empresaId, (int) $item['producto_id'])
                 : $this->repository->findProductByCode($empresaId, (string) ($item['codigo'] ?? ''));
 
@@ -308,9 +313,24 @@ final class VentaService
                 throw new HttpException('Producto no existe', 422);
             }
 
-            $unitPrice = (int) $product['precio_venta'];
+            // Enriquecer el producto con flags computados que los validadores necesitan.
+            $product['tiene_variantes'] = $this->repository->productoTieneVariantes(
+                $empresaId,
+                (int) $product['id']
+            );
+
+            // Ejecutar todos los validadores del chain en orden.
+            $chain->validar($product, $item, $empresaId);
+
+            // Para productos vendidos por peso, precio_por_kg es el precio base (por kg).
+            // La 'cantidad' del item ya viene en kg desde el frontend.
+            $esPeso = (int) ($product['es_producto_peso'] ?? 0) === 1;
+            $precioBase = $esPeso && isset($product['precio_por_kg']) && (float) $product['precio_por_kg'] > 0
+                ? (float) $product['precio_por_kg']
+                : (float) $product['precio_venta'];
+            $unitPrice = (int) round($precioBase);
             $unitCost = (int) ($product['precio_costo'] ?? $product['costo_actual'] ?? 0);
-            $subtotal = (int) round($unitPrice * $quantity);
+            $subtotal = (int) round($precioBase * $quantity);
             $discount = $this->descuentos->calcularMejorDescuento($this->repository->activeDiscounts($empresaId, (int) $product['id']), $subtotal);
             $baseAfterDiscount = $subtotal - $discount['total'];
             $taxes = $this->impuestos->calcular($this->repository->activeTaxes($empresaId, (int) $product['id']), $baseAfterDiscount);
@@ -339,10 +359,34 @@ final class VentaService
                 'comision_vendedor' => $commission,
                 'impuestos_detalle' => $taxes['detalle'],
                 'controla_stock' => (int) $product['controla_stock'],
+                'lote_id' => isset($item['lote_id']) && (int) $item['lote_id'] > 0
+                    ? (int) $item['lote_id'] : null,
             ];
         }
 
         return $prepared;
+    }
+
+    /**
+     * Construye el chain de validadores para una venta segun las capacidades
+     * activas de la empresa. El chain se construye una vez por llamada a
+     * prepareItems(), no una vez por item.
+     *
+     * Reglas de inclusion:
+     *  - VariantesValidator: siempre activo (no requiere capacidad).
+     *  - LoteRequeridoValidator: solo cuando LOTES_VENCIMIENTO esta activo.
+     */
+    private function buildValidatorChain(int $empresaId): VentaValidatorChain
+    {
+        $chain = new VentaValidatorChain();
+        $chain->add(new VariantesValidator());
+
+        $capacidades = (new PerfilNegocioService())->capacidadesActivas($empresaId);
+        if ($capacidades['LOTES_VENCIMIENTO'] ?? false) {
+            $chain->add(new LoteRequeridoValidator());
+        }
+
+        return $chain;
     }
 
     private function cashOpening(int $empresaId, int $sucursalId, array $payload): ?array

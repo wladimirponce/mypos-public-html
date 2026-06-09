@@ -438,7 +438,15 @@ final class ProductoRepository
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.codigo, p.nombre, p.precio_venta, p.controla_stock,
                     r.nombre AS rubro, cc.nombre AS centro_costo, pcb.codigo_barra AS codigo_barra_usado,
-                    pi.imagen_url AS imagen_principal
+                    pi.imagen_url AS imagen_principal,
+                    EXISTS(
+                        SELECT 1 FROM producto_variantes pv
+                        WHERE pv.producto_padre_id = p.id AND pv.empresa_id = p.empresa_id AND pv.activo = 1
+                    ) AS tiene_variantes,
+                    EXISTS(
+                        SELECT 1 FROM producto_variantes pv2
+                        WHERE pv2.producto_id = p.id AND pv2.empresa_id = p.empresa_id AND pv2.activo = 1
+                    ) AS es_variante_hijo
              FROM productos p
              LEFT JOIN productos_codigos_barra pcb ON pcb.producto_id = p.id
                 AND pcb.empresa_id = p.empresa_id AND pcb.codigo_barra = :codigo_barra_join AND pcb.activo = 1
@@ -451,15 +459,19 @@ final class ProductoRepository
              LIMIT 1'
         );
         $statement->execute([
-            'empresa_id' => $empresaId,
-            'codigo' => $code,
-            'sku' => $code,
+            'empresa_id'       => $empresaId,
+            'codigo'           => $code,
+            'sku'              => $code,
             'codigo_barra_join' => $code,
-            'codigo_barra' => $code,
+            'codigo_barra'     => $code,
         ]);
         $row = $statement->fetch();
-
-        return is_array($row) ? $row : null;
+        if (!is_array($row)) {
+            return null;
+        }
+        $row['tiene_variantes']  = (bool) $row['tiene_variantes'];
+        $row['es_variante_hijo'] = (bool) $row['es_variante_hijo'];
+        return $row;
     }
 
     private function clearBarcodePrincipal(int $productoId, int $empresaId): void

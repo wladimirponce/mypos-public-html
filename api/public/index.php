@@ -16,6 +16,9 @@ use Mypos\Controllers\CierreDiarioController;
 use Mypos\Controllers\CompraController;
 use Mypos\Controllers\CompraInteligenteController;
 use Mypos\Controllers\FarmaciaController;
+use Mypos\Controllers\PerfilNegocioController;
+use Mypos\Controllers\ReporteCapacidadController;
+use Mypos\Controllers\VarianteController;
 use Mypos\Controllers\ComunicacionVentasController;
 use Mypos\Controllers\ConfiguracionController;
 use Mypos\Controllers\ClienteController;
@@ -480,6 +483,7 @@ $router->post('/api/v1/stock/traslados', protectedRoute([$stockController, 'tras
 $router->get('/api/v1/stock', protectedRoute([$stockController, 'index'], 'stock.ver'));
 $router->get('/api/v1/stock/producto/{producto_id}', protectedRoute([$stockController, 'showProduct'], 'stock.ver'));
 $router->post('/api/v1/stock/ajustes', protectedRoute([$stockController, 'ajuste'], 'stock.ajustar'));
+$router->post('/api/v1/stock/merma', protectedRoute([$stockController, 'merma'], 'stock.ajustar'));
 $router->get('/api/v1/stock/movimientos', protectedRoute([$stockController, 'movimientos'], 'stock.movimientos.ver'));
 $router->get('/api/v1/stock/integridad', protectedRoute([$stockController, 'integridad'], 'stock.movimientos.ver'));
 
@@ -524,6 +528,30 @@ $router->get('/api/v1/farmacia/atributos', protectedRoute([$farmaciaController, 
 $router->get('/api/v1/farmacia/buscar', protectedRoute([$farmaciaController, 'buscar'], 'farmacia.ver'));
 $router->get('/api/v1/farmacia/productos-con-receta', protectedRoute([$farmaciaController, 'productosConReceta'], 'farmacia.ver'));
 $router->get('/api/v1/farmacia/productos/{id}/ficha', protectedRoute([$farmaciaController, 'ficha'], 'farmacia.ver'));
+
+$perfilNegocioController = new PerfilNegocioController();
+$router->get('/api/v1/perfil-negocio/perfiles', protectedRoute([$perfilNegocioController, 'perfiles'], 'configuracion.ver'));
+$router->get('/api/v1/perfil-negocio/capacidades', protectedRoute([$perfilNegocioController, 'capacidades'], 'configuracion.ver'));
+$router->post('/api/v1/perfil-negocio/activar', protectedRoute([$perfilNegocioController, 'activar'], 'configuracion.editar'));
+$router->post('/api/v1/perfil-negocio/toggle-capacidad', protectedRoute([$perfilNegocioController, 'toggleCapacidad'], 'configuracion.editar'));
+
+$varianteController = new VarianteController();
+$router->get('/api/v1/productos/{id}/variantes', protectedRoute([$varianteController, 'listar'], 'productos.ver'));
+$router->get('/api/v1/productos/{id}/ejes-variante', protectedRoute([$varianteController, 'ejes'], 'productos.ver'));
+$router->post('/api/v1/productos/{id}/variantes', protectedRoute([$varianteController, 'generar'], 'productos.editar'));
+
+$loteController = new \Mypos\Controllers\LoteController();
+$router->post('/api/v1/lotes', protectedRoute([$loteController, 'registrar'], 'stock.editar'));
+$router->get('/api/v1/lotes/stock', protectedRoute([$loteController, 'stock'], 'stock.ver'));
+$router->get('/api/v1/lotes/alertas', protectedRoute([$loteController, 'alertas'], 'stock.ver'));
+$router->get('/api/v1/lotes/fefo', protectedRoute([$loteController, 'fefo'], 'stock.ver'));
+
+$reporteCapacidadController = new ReporteCapacidadController();
+$router->get('/api/v1/reportes/merma', protectedRoute([$reporteCapacidadController, 'merma'], 'reportes.ver'));
+$router->get('/api/v1/reportes/lotes/vencimientos', protectedRoute([$reporteCapacidadController, 'lotesPorVencer'], 'reportes.ver'));
+$router->get('/api/v1/reportes/lotes/vencidos', protectedRoute([$reporteCapacidadController, 'lotesVencidos'], 'reportes.ver'));
+$router->get('/api/v1/reportes/variantes/stock', protectedRoute([$reporteCapacidadController, 'stockVariantes'], 'reportes.ver'));
+$router->get('/api/v1/reportes/variantes/ventas', protectedRoute([$reporteCapacidadController, 'ventasVariantes'], 'reportes.ver'));
 
 $documentoIaController = new DocumentoIaController();
 $router->get('/api/v1/documentos-ia', protectedRoute([$documentoIaController, 'index'], 'documentos_ia.ver'));

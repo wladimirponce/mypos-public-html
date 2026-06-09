@@ -21,6 +21,7 @@ final class StockService
         'TRASPASO_SALIDA',
         'ANULACION_VENTA',
         'REVERSA_COMPRA',
+        'MERMA',
     ];
 
     private const TIPOS_UBICACION = [
@@ -268,6 +269,21 @@ final class StockService
                 $repository->recalcSucursalStock($empresaId, $rollupSucursalId, $productoId);
             }
 
+            // 3) Detalle por lote: si el payload trae lote_id, actualiza stock_lotes_ubicacion.
+            //    La fuente de verdad sigue siendo stock_ubicacion; stock_lotes_ubicacion es el
+            //    desglose auditado por lote bajo esa misma ubicacion.
+            $loteId = isset($data['lote_id']) && (int) $data['lote_id'] > 0 ? (int) $data['lote_id'] : null;
+            if ($loteId !== null) {
+                $loteRepo = new \Mypos\Repositories\LoteRepository($connection);
+                $loteRepo->ensureLoteUbicacion($empresaId, $loteId, $ubicacionId, $productoId);
+                $loteRow = $loteRepo->lockLoteUbicacion($empresaId, $loteId, $ubicacionId);
+                $nuevaCantidadLote = round((float) $loteRow['cantidad'] + $delta, 3);
+                $loteRepo->updateLoteUbicacionCantidad(
+                    (int) $loteRow['id'],
+                    number_format($nuevaCantidadLote, 3, '.', '')
+                );
+            }
+
             $movementId = $repository->insertMovement([
                 'uuid' => $data['uuid'] ?? null,
                 'empresa_id' => $empresaId,
@@ -277,6 +293,7 @@ final class StockService
                 'ubicacion_destino_id' => $data['ubicacion_destino_id'] ?? null,
                 'dispositivo_id' => $data['dispositivo_id'] ?? null,
                 'producto_id' => $productoId,
+                'lote_id' => $loteId,
                 'usuario_id' => $data['usuario_id'] ?? null,
                 'tipo_movimiento' => $tipo,
                 'referencia_tipo' => $data['referencia_tipo'] ?? null,
@@ -468,6 +485,22 @@ final class StockService
         return $this->registrarMovimiento($data, $connection);
     }
 
+    /**
+     * Registra una merma operativa: perdida de stock por deterioro, vencimiento,
+     * rotura u otro evento no comercial. Siempre descuenta (delta negativo).
+     * Solo disponible cuando la empresa tiene la capacidad MERMA_OPERATIVA activa.
+     */
+    public function registrarMerma(array $data, ?PDO $connection = null): array
+    {
+        $data['tipo'] = 'MERMA';
+        // Normalizamos: la merma siempre descuenta aunque el frontend mande positivo.
+        if (isset($data['cantidad'])) {
+            $data['cantidad'] = abs((float) $data['cantidad']);
+        }
+
+        return $this->registrarMovimiento($data, $connection);
+    }
+
     public function revertirMovimiento(int $empresaId, int $movimientoId, ?int $usuarioId = null, ?PDO $connection = null): array
     {
         $repository = $connection === null ? $this->repository : new StockRepository($connection);
@@ -601,7 +634,7 @@ final class StockService
     private function delta(string $tipo, float $cantidad): float
     {
         return match ($tipo) {
-            'VENTA', 'TRASPASO_SALIDA', 'REVERSA_COMPRA' => -abs($cantidad),
+            'VENTA', 'TRASPASO_SALIDA', 'REVERSA_COMPRA', 'MERMA' => -abs($cantidad),
             'COMPRA', 'DEVOLUCION', 'TRASPASO_ENTRADA', 'ANULACION_VENTA' => abs($cantidad),
             'AJUSTE' => $cantidad,
         };

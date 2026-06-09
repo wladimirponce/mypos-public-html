@@ -166,12 +166,12 @@ final class StockRepository
         $statement = $this->connection->prepare(
             'INSERT INTO stock_movimientos (
                 uuid, empresa_id, sucursal_id, ubicacion_id, ubicacion_origen_id, ubicacion_destino_id,
-                dispositivo_id, producto_id, usuario_id,
+                dispositivo_id, producto_id, lote_id, usuario_id,
                 tipo_movimiento, referencia_tipo, referencia_id, cantidad, stock_anterior,
                 stock_nuevo, costo_unitario, observacion
              ) VALUES (
                 :uuid, :empresa_id, :sucursal_id, :ubicacion_id, :ubicacion_origen_id, :ubicacion_destino_id,
-                :dispositivo_id, :producto_id, :usuario_id,
+                :dispositivo_id, :producto_id, :lote_id, :usuario_id,
                 :tipo_movimiento, :referencia_tipo, :referencia_id, :cantidad, :stock_anterior,
                 :stock_nuevo, :costo_unitario, :observacion
              )'
@@ -185,6 +185,7 @@ final class StockRepository
             'ubicacion_destino_id' => $data['ubicacion_destino_id'] ?? null,
             'dispositivo_id' => $data['dispositivo_id'] ?? null,
             'producto_id' => $data['producto_id'],
+            'lote_id' => $data['lote_id'] ?? null,
             'usuario_id' => $data['usuario_id'] ?? null,
             'tipo_movimiento' => $data['tipo_movimiento'],
             'referencia_tipo' => $data['referencia_tipo'] ?? null,

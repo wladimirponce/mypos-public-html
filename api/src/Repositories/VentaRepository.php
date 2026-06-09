@@ -29,7 +29,8 @@ final class VentaRepository
     {
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.codigo, p.sku, p.nombre, p.precio_venta,
-                    p.precio_costo, p.costo_actual, p.controla_stock
+                    p.precio_costo, p.costo_actual, p.controla_stock,
+                    p.es_producto_peso, p.precio_por_kg, p.requiere_lote
              FROM productos p
              WHERE p.id = :id AND p.empresa_id = :empresa_id AND p.activo = 1
              LIMIT 1'
@@ -40,11 +41,23 @@ final class VentaRepository
         return is_array($row) ? $row : null;
     }
 
+    public function productoTieneVariantes(int $empresaId, int $productoId): bool
+    {
+        $statement = $this->connection->prepare(
+            'SELECT 1 FROM producto_variantes
+             WHERE empresa_id = :empresa_id AND producto_padre_id = :producto_id AND activo = 1
+             LIMIT 1'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'producto_id' => $productoId]);
+        return (bool) $statement->fetchColumn();
+    }
+
     public function findProductByCode(int $empresaId, string $code): ?array
     {
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.codigo, p.sku, p.nombre, p.precio_venta,
                     p.precio_costo, p.costo_actual, p.controla_stock,
+                    p.es_producto_peso, p.precio_por_kg, p.requiere_lote,
                     pcb.codigo_barra AS codigo_barra_usado
              FROM productos p
              LEFT JOIN productos_codigos_barra pcb ON pcb.producto_id = p.id
