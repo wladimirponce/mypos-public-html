@@ -1055,12 +1055,16 @@ XML;
             return ['ok' => false, 'error' => 'Faltan casos por generar antes de construir el libro: ' . implode(', ', $faltantes)];
         }
 
+        $set        = $setMgr->load() ?? [];
+        $folioNotif = (int)($set['atencion_ventas'] ?? 0);
+
         $result = sendLibro([
-            'tipoLibro' => 'VENTA',
-            'tipoEnvio' => 'TOTAL',
-            'periodo'   => date('Y-m'),
-            'folioDsde' => 1,
-            'detalles'  => $detalles,
+            'tipoLibro'         => 'VENTA',
+            'tipoEnvio'         => 'ESPECIAL',
+            'periodo'           => date('Y-m'),
+            'folioDsde'         => 1,
+            'folioNotificacion' => $folioNotif,
+            'detalles'          => $detalles,
         ]);
 
         $state['libros']['ventas'] = [
@@ -1146,7 +1150,7 @@ XML;
 
         $libroParams = [
             'tipoLibro'          => 'GUIA',
-            'tipoEnvio'          => 'TOTAL',
+            'tipoEnvio'          => 'ESPECIAL',
             'periodo'            => date('Y-m'),
             'folioNotificacion'  => $folioNotif,
             'detalles'           => $detalles,
@@ -1225,12 +1229,16 @@ XML;
             $detalles[] = $d;
         }
 
+        $set        = $setMgr->load() ?? [];
+        $folioNotif = (int)($set['atencion_compras'] ?? 0);
+
         $result = sendLibro([
-            'tipoLibro' => 'COMPRA',
-            'tipoEnvio' => 'TOTAL',
-            'periodo'   => date('Y-m'),
-            'folioDsde' => 1,
-            'detalles'  => $detalles,
+            'tipoLibro'         => 'COMPRA',
+            'tipoEnvio'         => 'ESPECIAL',
+            'periodo'           => date('Y-m'),
+            'folioDsde'         => 1,
+            'folioNotificacion' => $folioNotif,
+            'detalles'          => $detalles,
         ]);
 
         $state['libros']['compras'] = [

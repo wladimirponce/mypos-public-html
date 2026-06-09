@@ -4973,6 +4973,8 @@ function generateLibro(array $data): array {
     $tipoEnvio = strtoupper($data['tipoEnvio'] ?? 'TOTAL'); // TOTAL, PARCIAL, AJUSTE, ESPECIAL
     $folioDsde = (int)($data['folioDsde'] ?? 1);
     $detalles  = $data['detalles']  ?? [];
+    $folioNotif = (int)($data['folioNotificacion'] ?? 0);
+    $xmlFolioNotif = $folioNotif > 0 ? "  <FolioNotificacion>{$folioNotif}</FolioNotificacion>\n" : '';
 
     $idLibro = "L" . str_replace('-', '', $periodo) . "T" . time();
 
@@ -5119,7 +5121,7 @@ function generateLibro(array $data): array {
   <TipoOperacion>$tipoLibro</TipoOperacion>
   <TipoLibro>MENSUAL</TipoLibro>
   <TipoEnvio>$tipoEnvio</TipoEnvio>
-</Caratula>
+$xmlFolioNotif</Caratula>
 $resumenXml
 $xmlDetalles
 <TmstFirma>$tmst</TmstFirma>

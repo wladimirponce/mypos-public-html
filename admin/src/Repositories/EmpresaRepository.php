@@ -467,13 +467,14 @@ class EmpresaRepository extends BaseRepository
     public function registrarCAF(array $data): int
     {
         if ($this->useSiiTables) {
+            // Desactiva TODOS los CAFs previos del mismo tipo/ambiente para esta empresa.
+            // No filtrar por rango: el CAF anterior tiene un rango distinto al nuevo y
+            // sin esto quedan dos CAFs activos → certFolioBaseLibre elige el viejo (folio bajo).
             $sqlOff = "UPDATE sii_caf SET activo = 0
-                       WHERE empresa_id = ? AND tipo_dte = ? AND ambiente_sii = ?
-                         AND folio_desde = ? AND folio_hasta = ?";
+                       WHERE empresa_id = ? AND tipo_dte = ? AND ambiente_sii = ?";
             $stmtOff = $this->db->prepare($sqlOff);
             $stmtOff->execute([
                 $data['empresa_id'], $data['tipo_dte'], strtolower($data['ambiente']),
-                $data['desde'], $data['hasta'],
             ]);
 
             $sql = "INSERT INTO sii_caf (
