@@ -1,4 +1,4 @@
-﻿CREATE TABLE IF NOT EXISTS empleados (
+CREATE TABLE IF NOT EXISTS empleados (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     empresa_id BIGINT UNSIGNED NOT NULL,
     rut VARCHAR(20) NOT NULL,
@@ -31,12 +31,15 @@ CREATE TABLE IF NOT EXISTS ventas_credito_interno (
     CONSTRAINT fk_vcredint_usuario FOREIGN KEY (created_by) REFERENCES usuarios(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO permisos (modulo, accion, codigo, descripcion) VALUES 
-('Recursos Humanos', 'Ver Empleados', 'empleados.ver', 'Permite listar y ver detalles de empleados.'),
-('Recursos Humanos', 'Crear Empleado', 'empleados.crear', 'Permite registrar nuevos empleados en la plataforma.'),
-('Recursos Humanos', 'Editar Empleado', 'empleados.editar', 'Permite modificar los datos de empleados existentes.'),
-('Recursos Humanos', 'Eliminar Empleado', 'empleados.eliminar', 'Permite desactivar empleados.'),
-('Recursos Humanos', 'Ver Descuentos Credito', 'rrhh.descuentos.ver', 'Permite ver el listado de descuentos por planilla (crédito interno).');
+INSERT INTO permisos (codigo, nombre, descripcion) VALUES
+('empleados.ver', 'Ver empleados', 'Permite listar y ver detalles de empleados.'),
+('empleados.crear', 'Crear empleado', 'Permite registrar nuevos empleados en la plataforma.'),
+('empleados.editar', 'Editar empleado', 'Permite modificar los datos de empleados existentes.'),
+('empleados.eliminar', 'Eliminar empleado', 'Permite desactivar empleados.'),
+('rrhh.descuentos.ver', 'Ver descuentos credito', 'Permite ver el listado de descuentos por planilla (credito interno).')
+ON DUPLICATE KEY UPDATE
+    nombre = VALUES(nombre),
+    descripcion = VALUES(descripcion);
 
 -- Asignar los nuevos permisos al rol Administrador (id = 1 asumiendo seeds o buscar por id)
 INSERT IGNORE INTO rol_permisos (rol_id, permiso_id)

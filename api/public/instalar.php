@@ -32,6 +32,7 @@ function mypos_resolve_file(array $candidates): ?string
 
 function mypos_sql_statements(string $sql): array
 {
+    $sql = preg_replace('/^\xEF\xBB\xBF/', '', $sql) ?? $sql;
     $sql = str_replace(["\r\n", "\r"], "\n", $sql);
     $lines = explode("\n", $sql);
     $delimiter = ';';
@@ -129,8 +130,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $log = "<ul class='list-group mt-3'>";
             $exito = 0;
+            $errores = 0;
+            $seedsExitosos = 0;
+            $seedsErrores = 0;
 
             // Desactivar temporalmente revisiones de llaves foráneas para evitar conflictos
+            $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;");
+            $pdo->exec("SET collation_connection = 'utf8mb4_unicode_ci';");
             $pdo->exec("SET FOREIGN_KEY_CHECKS=0;");
 
             foreach ($archivos as $archivo) {
@@ -142,6 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $exito++;
                     } catch (PDOException $e) {
                         $log .= "<li class='list-group-item list-group-item-danger'>❌ Error en " . basename($archivo) . ": " . $e->getMessage() . "</li>";
+                        $errores++;
                     }
                 }
             }
@@ -160,8 +167,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             try {
                                 mypos_execute_sql_file($pdo, $seed);
                                 $log .= "<li class='list-group-item list-group-item-info'>🌱 Seed: " . basename($seed) . " instalado.</li>";
+                                $seedsExitosos++;
                             } catch (PDOException $e) {
-                                $log .= "<li class='list-group-item list-group-item-warning'>⚠️ Seed " . basename($seed) . " (quizás ya existe): " . $e->getMessage() . "</li>";
+                                $log .= "<li class='list-group-item list-group-item-danger'>❌ Error en seed " . basename($seed) . ": " . $e->getMessage() . "</li>";
+                                $seedsErrores++;
                             }
                         }
                     }
@@ -173,7 +182,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->exec("SET FOREIGN_KEY_CHECKS=1;");
             $log .= "</ul>";
 
-            $mensaje = "<div class='alert alert-success'><h5>¡Instalación Finalizada!</h5>Se procesaron $exito archivos base. Detalles: $log</div>";
+            $totalErrores = $errores + $seedsErrores;
+            if ($totalErrores === 0) {
+                $mensaje = "<div class='alert alert-success'><h5>¡Instalación Finalizada!</h5>Se instalaron $exito archivos base y $seedsExitosos seeds sin errores. Detalles: $log</div>";
+            } else {
+                $mensaje = "<div class='alert alert-danger'><h5>Instalación incompleta</h5>Se instalaron $exito archivos base y $seedsExitosos seeds, con $totalErrores errores. Corrige los errores antes de usar el sistema. Detalles: $log</div>";
+            }
 
             // Guardar también las credenciales en el archivo .env automáticamente
             $envPath = mypos_resolve_file([

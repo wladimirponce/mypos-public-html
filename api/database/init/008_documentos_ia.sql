@@ -32,7 +32,7 @@ WHERE archivo_url IS NULL;
 ALTER TABLE documentos_ia
     MODIFY COLUMN estado VARCHAR(30) NOT NULL DEFAULT 'SUBIDO',
     ADD CONSTRAINT chk_documentos_ia_estado CHECK (
-        estado IN ('SUBIDO', 'PROCESANDO', 'PROCESADO', 'EDITADO', 'CONFIRMADO', 'ERROR')
+        estado IN ('SUBIDO', 'PROCESANDO', 'PROCESADO', 'EDITADO', 'CONFIRMADO', 'COMPRA_GENERADA', 'ERROR')
     );
 
 CREATE INDEX IF NOT EXISTS idx_documentos_ia_folio_detectado

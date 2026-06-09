@@ -1,6 +1,9 @@
 -- Ambiente demo controlado para frontend.
 -- Idempotente: no borra datos, no trunca tablas y no reduce stock existente.
 
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+SET collation_connection = 'utf8mb4_unicode_ci';
+
 SET @demo_empresa_rut := '76111111-1';
 SET @demo_password_hash := '$2y$10$9k3Gn09cplHwGcAdI908WOUZ7I16bcpTMvkpGTrB0BiBdslenUWwW';
 

@@ -2,4 +2,4 @@
 -- Se agrega la columna a la tabla recién creada en la migración 029
 
 ALTER TABLE `whatsapp_conversations`
-ADD COLUMN `total_tokens_used` BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER `context_summary`;
+ADD COLUMN IF NOT EXISTS `total_tokens_used` BIGINT UNSIGNED NOT NULL DEFAULT 0 AFTER `context_summary`;
