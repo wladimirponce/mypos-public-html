@@ -299,6 +299,35 @@ try {
             break;
 
 
+        // ── Avanzar HW de folio para un tipo (folios quemados en SII) ───────────
+        // Inserta una entrada phantom en state['pruebas'] para que certFolioBaseLibre
+        // omita folios ya enviados al SII que el state no conoce (p.ej. tras reset).
+        case 'cert_advance_hw':
+            ob_clean();
+            $tipo  = (int)($_GET['tipo']  ?? $_POST['tipo']  ?? 0);
+            $folio = (int)($_GET['folio'] ?? $_POST['folio'] ?? 0);
+            if (!$tipo || !$folio) {
+                echo json_encode(['ok' => false, 'error' => 'Parámetros tipo y folio son requeridos.']);
+                break;
+            }
+            $state = $mgr->loadState();
+            $phKey = "__hw_t{$tipo}_f{$folio}__";
+            $state['pruebas'][$phKey] = [
+                'tipo'    => $tipo,
+                'folio'   => $folio,
+                'status'  => 'ok',
+                'trackId' => null,
+                'error'   => null,
+                'ts'      => date('Y-m-d\TH:i:s'),
+                'note'    => 'phantom: folio quemado en SII, solo avanza HW',
+            ];
+            $mgr->saveStatePublic($state);
+            echo json_encode([
+                'ok'      => true,
+                'mensaje' => "HW avanzado: T{$tipo} folio {$folio} registrado en state.",
+            ]);
+            break;
+
         // Elimina registros de sii_folio_consumo y sii_dte cuyo estado sea
         // 'emitido'/'firmado' (nunca confirmados por el SII). Permite reintentar
         // el mismo caso reutilizando los mismos folios sin desperdiciarlos.
