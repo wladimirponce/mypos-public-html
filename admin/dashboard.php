@@ -51,14 +51,14 @@ if (isset($_GET['switch_empresa'])) {
         }
     }
     // Redirigir para limpiar URL
-    header("Location: dashboard.php?module=" . ($_GET['module'] ?? 'clientes_mypos'));
+    header("Location: dashboard.php?module=" . ($_GET['module'] ?? 'empresas'));
     exit;
 }
 
 // —— Módulo activo ——
-$module = $_GET['module'] ?? 'clientes_mypos';
+$module = $_GET['module'] ?? 'empresas';
 $allowed = ['clientes_mypos','emision','consultas','historial','libros','empresas','config','certificacion','cafs','pos_urgencia','dispositivos',];
-if (!in_array($module, $allowed)) $module = 'clientes_mypos';
+if (!in_array($module, $allowed)) $module = 'empresas';
 
 // —— Intentar conexión DB (opcional, no bloquea) ——
 $dbOk = false;
@@ -98,8 +98,8 @@ $posPendiente = 0;
 
 // —— Títulos por módulo ——
 $titles = [
-    'clientes_mypos' => ['Clientes MyPOS', 'Estado DTE, folios y certificacion por cliente'],
     'empresas'      => ['Empresas', 'Gestión multi-cliente y Onboarding'],
+    'clientes_mypos' => ['Clientes MyPOS', 'Estado DTE, folios y certificación por cliente'],
     'config'        => ['Configuración DTE', 'Certificados y firma electrónica'],
     'cafs'          => ['Folios CAF', 'Gestión centralizada por sucursal'],
     'dispositivos'  => ['Dispositivos POS', 'Enrolamiento de hardware'],
@@ -119,7 +119,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= $pageTitle ?> â€” DTE Pro</title>
+    <title><?= $pageTitle ?> – DTE Pro</title>
     <link rel="stylesheet" href="assets/css/dashboard.css">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -153,9 +153,9 @@ $pageSubtitle = $titles[$module][1] ?? '';
 
 <div class="dash-layout">
 
-    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+    <!-- ══════════════════════════════════════════════ -->
     <!-- SIDEBAR -->
-    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+    <!-- ══════════════════════════════════════════════ -->
     <aside class="dash-sidebar" id="sidebar">
         <!-- Brand -->
         <div class="dash-sidebar-brand">
@@ -164,7 +164,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
             </div>
             <div class="brand-text">
                 DTE Pro
-                <small>Facturación ElectrÃ³nica</small>
+                <small>Facturación Electrónica</small>
             </div>
         </div>
         
@@ -176,7 +176,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
                 <option value="" <?= empty($_SESSION['active_empresa_id']) ? 'selected' : '' ?>>Seleccione una empresa</option>
                 <?php foreach ($empresas as $emp): ?>
                     <option value="<?= $emp['id'] ?>" <?= (isset($_SESSION['active_empresa_id']) && $_SESSION['active_empresa_id'] == $emp['id']) ? 'selected' : '' ?>>
-                        <?= strtolower((string)$emp['ambiente_default']) === 'produccion' ? 'ðŸ¢' : '🧪' ?> <?= htmlspecialchars($emp['razon_social']) ?>
+                        <?= strtolower((string)$emp['ambiente_default']) === 'produccion' ? '🏢' : '🧪' ?> <?= htmlspecialchars($emp['razon_social']) ?>
                     </option>
                 <?php endforeach; ?>
             </select>
@@ -190,14 +190,14 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <!-- Navigation -->
         <nav class="dash-nav">
             <div class="dash-nav-section">1. Configuración del Cliente</div>
-            <a href="dashboard.php?module=clientes_mypos" class="dash-nav-item <?= $module === 'clientes_mypos' ? 'active' : '' ?>">
-                <i class="bi bi-clipboard2-pulse"></i> Clientes MyPOS
-            </a>
             <a href="dashboard.php?module=empresas" class="dash-nav-item <?= $module === 'empresas' ? 'active' : '' ?>">
                 <i class="bi bi-buildings"></i> Empresas
                 <?php if (count($empresas) > 0): ?>
                     <span class="dash-nav-badge warning"><?= count($empresas) ?></span>
                 <?php endif; ?>
+            </a>
+            <a href="dashboard.php?module=clientes_mypos" class="dash-nav-item <?= $module === 'clientes_mypos' ? 'active' : '' ?>">
+                <i class="bi bi-clipboard2-pulse"></i> Clientes MyPOS
             </a>
 
             <div class="dash-nav-section">2. Operación y Hardware</div>
@@ -290,9 +290,9 @@ $pageSubtitle = $titles[$module][1] ?? '';
         </div>
     </aside>
 
-    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+    <!-- ══════════════════════════════════════════════ -->
     <!-- MAIN -->
-    <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+    <!-- ══════════════════════════════════════════════ -->
     <main class="dash-main">
         <!-- Header -->
         <header class="dash-header">
