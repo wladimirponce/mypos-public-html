@@ -21,7 +21,19 @@ final class PerfilNegocioService
 {
     private PerfilNegocioRepository $repository;
 
-    private const PERFILES_VALIDOS = ['FARMACIA', 'ZAPATERIA', 'MINIMARKET', 'GENERICO'];
+    private const PERFILES_VALIDOS = [
+        'FARMACIA',
+        'MINIMARKET',
+        'BOTILLERIA',
+        'ALMACEN',
+        'FERRETERIA',
+        'PANADERIA_PASTELERIA',
+        'CARNICERIA',
+        'VERDULERIA',
+        'ROPA_CALZADO',
+        'DISTRIBUIDORA_MAYORISTA',
+        'GENERICO',
+    ];
 
     public function __construct(?PerfilNegocioRepository $repository = null)
     {
@@ -48,7 +60,7 @@ final class PerfilNegocioService
      *   perfil (INSERT IGNORE — no sobrescribe atributos ya creados).
      *
      * @param int    $empresaId ID de la empresa
-     * @param string $perfil    Código de perfil (FARMACIA|ZAPATERIA|MINIMARKET|GENERICO)
+     * @param string $perfil    Código de uno de los perfiles disponibles
      * @param int    $usuarioId Usuario que realiza la acción
      */
     public function activarPerfil(int $empresaId, string $perfil, int $usuarioId): array

@@ -45,10 +45,19 @@ final class PerfilNegocioRepository
     {
         // Mapeo fijo de perfil → codigos de capacidades que activa
         $map = [
-            'FARMACIA'    => ['CONTROL_RECETAS', 'LOTES_VENCIMIENTO', 'REPORTES_FARMACIA'],
-            'ZAPATERIA'   => ['VARIANTES', 'REPORTES_ZAPATERIA'],
-            'MINIMARKET'  => ['PRECIO_POR_PESO', 'MERMA_OPERATIVA', 'REPORTES_MINIMARKET'],
-            'GENERICO'    => [],
+            'FARMACIA'               => ['CONTROL_RECETAS', 'LOTES_VENCIMIENTO', 'REPORTES_FARMACIA'],
+            'MINIMARKET'             => ['PRECIO_POR_PESO', 'MERMA_OPERATIVA', 'REPORTES_MINIMARKET'],
+            'BOTILLERIA'             => ['VARIANTES'],
+            'ALMACEN'                => ['PRECIO_POR_PESO'],
+            'FERRETERIA'             => ['VARIANTES', 'PRECIO_POR_PESO'],
+            'PANADERIA_PASTELERIA'   => ['PRECIO_POR_PESO', 'MERMA_OPERATIVA', 'LOTES_VENCIMIENTO'],
+            'CARNICERIA'             => ['PRECIO_POR_PESO', 'MERMA_OPERATIVA', 'LOTES_VENCIMIENTO'],
+            'VERDULERIA'             => ['PRECIO_POR_PESO', 'MERMA_OPERATIVA'],
+            'ROPA_CALZADO'           => ['VARIANTES', 'REPORTES_ZAPATERIA'],
+            'DISTRIBUIDORA_MAYORISTA'=> ['VARIANTES', 'LOTES_VENCIMIENTO'],
+            // Compatibilidad con empresas que ya activaron el perfil historico.
+            'ZAPATERIA'              => ['VARIANTES', 'REPORTES_ZAPATERIA'],
+            'GENERICO'               => [],
         ];
 
         $codigos = $map[$perfil] ?? [];
@@ -193,10 +202,22 @@ final class PerfilNegocioRepository
     public function perfilesDisponibles(): array
     {
         return [
-            ['codigo' => 'FARMACIA',   'nombre' => 'Farmacia',   'descripcion' => 'Medicamentos, principio activo, recetas, lotes y vencimientos'],
-            ['codigo' => 'ZAPATERIA',  'nombre' => 'Zapatería',  'descripcion' => 'Calzado y vestuario con variantes de talla, color y temporada'],
-            ['codigo' => 'MINIMARKET', 'nombre' => 'Minimarket', 'descripcion' => 'Abarrotes, perecibles, precio por peso y control de mermas'],
-            ['codigo' => 'GENERICO',   'nombre' => 'Genérico',   'descripcion' => 'Catálogo base sin atributos predefinidos; agrega los que necesites'],
+            ['codigo' => 'FARMACIA', 'nombre' => 'Farmacia', 'descripcion' => 'Medicamentos, ISP, recetas, lotes y vencimientos', 'capacidades' => $this->profileCapabilityCodes('FARMACIA')],
+            ['codigo' => 'MINIMARKET', 'nombre' => 'Minimarket', 'descripcion' => 'Alta rotacion, perecibles, precio por peso y mermas', 'capacidades' => $this->profileCapabilityCodes('MINIMARKET')],
+            ['codigo' => 'BOTILLERIA', 'nombre' => 'Botilleria', 'descripcion' => 'Bebidas, tabaco, formatos, packs, retornables e impuestos adicionales', 'capacidades' => $this->profileCapabilityCodes('BOTILLERIA')],
+            ['codigo' => 'ALMACEN', 'nombre' => 'Almacen de barrio', 'descripcion' => 'Venta simple por unidad o peso, reposicion y fiado', 'capacidades' => $this->profileCapabilityCodes('ALMACEN')],
+            ['codigo' => 'FERRETERIA', 'nombre' => 'Ferreteria', 'descripcion' => 'Productos tecnicos, medidas, variantes, marcas y equivalencias', 'capacidades' => $this->profileCapabilityCodes('FERRETERIA')],
+            ['codigo' => 'PANADERIA_PASTELERIA', 'nombre' => 'Panaderia y pasteleria', 'descripcion' => 'Ingredientes, produccion diaria, pedidos, vencimientos y mermas', 'capacidades' => $this->profileCapabilityCodes('PANADERIA_PASTELERIA')],
+            ['codigo' => 'CARNICERIA', 'nombre' => 'Carniceria', 'descripcion' => 'Venta por peso, cortes, lotes, vencimientos y rendimiento', 'capacidades' => $this->profileCapabilityCodes('CARNICERIA')],
+            ['codigo' => 'VERDULERIA', 'nombre' => 'Verduleria', 'descripcion' => 'Perecibles por peso, precios variables y merma diaria', 'capacidades' => $this->profileCapabilityCodes('VERDULERIA')],
+            ['codigo' => 'ROPA_CALZADO', 'nombre' => 'Ropa y calzado', 'descripcion' => 'Variantes de talla, color, temporada y genero', 'capacidades' => $this->profileCapabilityCodes('ROPA_CALZADO')],
+            ['codigo' => 'DISTRIBUIDORA_MAYORISTA', 'nombre' => 'Distribuidora mayorista', 'descripcion' => 'Venta por volumen, formatos, bodegas, lotes y despacho', 'capacidades' => $this->profileCapabilityCodes('DISTRIBUIDORA_MAYORISTA')],
+            ['codigo' => 'GENERICO', 'nombre' => 'Otro comercio', 'descripcion' => 'Catalogo base configurable para otros comercios de productos', 'capacidades' => []],
         ];
+    }
+
+    private function profileCapabilityCodes(string $perfil): array
+    {
+        return array_column($this->findCapacidadesByPerfil($perfil), 'codigo');
     }
 }
