@@ -402,7 +402,7 @@ class CertificationManager
      *
      * @return array<string,array{tipo:int,offset:int}>
      */
-    private function certFolioOffsetMap(): array
+    public function certFolioOffsetMap(): array
     {
         // BUG FIX: El array $orden NO debe usar el sufijo numérico ($n) como clave.
         // Cuando hay dos sets con casos del mismo número (ej: 4884260-1 y 4884263-1,

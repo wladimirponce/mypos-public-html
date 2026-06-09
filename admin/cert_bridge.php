@@ -179,6 +179,36 @@ try {
             echo json_encode(['ok' => true, 'resultados' => $results, 'estado' => $mgr->loadState()]);
             break;
 
+        // ── Correr solo casos de tipos específicos (ej: T33+T52 sin tocar T61/T56) ──
+        // Uso: ?action=cert_run_tipos&tipos=33,52
+        case 'cert_run_tipos':
+            set_time_limit(300);
+            ob_clean();
+            $tiposParam  = $_GET['tipos'] ?? '33,52';
+            $tiposFiltro = array_map('intval', array_filter(explode(',', $tiposParam)));
+            if (empty($tiposFiltro)) {
+                echo json_encode(['ok' => false, 'error' => 'Parámetro tipos inválido.']);
+                break;
+            }
+            $offsetMap   = $mgr->certFolioOffsetMap();
+            $casesFiltro = array_keys(array_filter(
+                $offsetMap,
+                fn($m) => in_array($m['tipo'], $tiposFiltro, true)
+            ));
+            if (empty($casesFiltro)) {
+                echo json_encode(['ok' => false, 'error' => 'No hay casos para tipos: ' . $tiposParam]);
+                break;
+            }
+            $state = [];
+            echo json_encode([
+                'ok'        => true,
+                'tipos'     => $tiposFiltro,
+                'casos'     => $casesFiltro,
+                'resultados'=> $mgr->runPruebas($state, $casesFiltro),
+                'estado'    => $mgr->loadState(),
+            ]);
+            break;
+
         case 'cert_retry':
             set_time_limit(600);
             ob_clean();
