@@ -618,6 +618,27 @@ class CertificationManager
                     'comuna'    => 'SANTIAGO',
                     'ciudad'    => 'SANTIAGO',
                 ];
+                // La tabla del traslado interno del set SII solo trae CANTIDAD
+                // (la guía va SIN valores). Si el parser confundió columnas
+                // (cantidades correlativas 1,2,3.. y la cantidad real quedó como
+                // precio), reinterpretar: cantidad = "precio" leído, precio = 0.
+                // Reparo SII que esto corrige: "Los Valores ... No Cuadran".
+                $itemsInt   = array_values($data['items'] ?? []);
+                $confundido = !empty($itemsInt);
+                foreach ($itemsInt as $i => $it) {
+                    if ((int)($it['cantidad'] ?? 0) !== $i + 1 || (int)($it['precio'] ?? 0) <= 0) {
+                        $confundido = false;
+                        break;
+                    }
+                }
+                if ($confundido) {
+                    foreach ($itemsInt as $i => $it) {
+                        $itemsInt[$i]['nombre']   = 'ITEM ' . ($i + 1);
+                        $itemsInt[$i]['cantidad'] = (int)$it['precio'];
+                        $itemsInt[$i]['precio']   = 0;
+                    }
+                    $data['items'] = $itemsInt;
+                }
             } else {
                 // Venta. TipoDespacho según quién traslada (reparo SII "Los
                 // Indicadores (Despacho/Traslado) No Corresponden" con el mapeo
