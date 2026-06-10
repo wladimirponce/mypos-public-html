@@ -467,10 +467,11 @@ class CertSetManager
                 elseif (stripos($tipoDocStr, 'FACTURA NO AFECTA') !== false) $tipo = 34;
                 elseif (stripos($tipoDocStr, 'NOTA DE CREDITO ELECTRONICA') !== false) $tipo = 61;
                 elseif (stripos($tipoDocStr, 'NOTA DE DEBITO ELECTRONICA') !== false) $tipo = 56;
-                // Tipos papel (sin "ELECTRONICA")
+                // Tipos papel (sin "ELECTRONICA"). OJO códigos SII: 60=NC papel, 55=ND papel
+                // (el SII reparó tipo 55 con montos de NC: LBR-2 "[TpoDoc] debe ser [40,43]")
                 elseif (stripos($tipoDocStr, 'FACTURA DE COMPRA') !== false) $tipo = 45;
-                elseif (stripos($tipoDocStr, 'NOTA DE CREDITO') !== false) $tipo = 55;
-                elseif (stripos($tipoDocStr, 'NOTA DE DEBITO') !== false) $tipo = 60;
+                elseif (stripos($tipoDocStr, 'NOTA DE CREDITO') !== false) $tipo = 60;
+                elseif (stripos($tipoDocStr, 'NOTA DE DEBITO') !== false) $tipo = 55;
                 else $tipo = 30; // Factura Papel (no electrónica)
 
                 $compras[] = [

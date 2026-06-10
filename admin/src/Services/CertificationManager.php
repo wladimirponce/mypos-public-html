@@ -1241,16 +1241,21 @@ XML;
         $setMgr = new \App\Services\CertSetManager($this->context);
         $detalles = [];
         foreach ($setMgr->getLibroCompras() as $c) {
-            // NC (T55 papel, T61 electrónica) y ND (T60, T56) reducen el total → negativos
-            $esCredito = in_array((int)$c['tipo'], [55, 61], true);
-            $signo = $esCredito ? -1 : 1;
-            $neto  = $signo * (int)$c['afecto'];
-            $exe   = $signo * (int)$c['exento'];
+            // Montos SIEMPRE positivos: el SII solo acepta negativos en liquidaciones
+            // (40/43) — reparo LBR-2 "[TpoDoc] debe ser [40,43]". Las NC (60/61)
+            // rebajan por su TpoDoc, no por signo. Tolera tipo 55 legado en set.json
+            // (mapeo viejo NC papel=55; el correcto es 60) corrigiéndolo al vuelo.
+            $tipoDoc = (int)$c['tipo'];
+            if ($tipoDoc === 55 && stripos($c['obs'] ?? '', 'NOTA DE CREDITO') !== false) {
+                $tipoDoc = 60;
+            }
+            $neto  = (int)$c['afecto'];
+            $exe   = (int)$c['exento'];
             $iva   = (int)round($neto * 0.19);
             $total = $neto + $iva + $exe;
 
             $d = [
-                'tipo'  => $c['tipo'],
+                'tipo'  => $tipoDoc,
                 'folio' => $c['folio'],
                 'fecha' => $fecha,
                 'rut'   => $rutSII,

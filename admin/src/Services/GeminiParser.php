@@ -121,8 +121,8 @@ LIBRO DE COMPRAS
   · "NOTA DE DEBITO ELECTRONICA" → 56
   · "FACTURA" (sin "ELECTRONICA") → 30  ← papel
   · "FACTURA DE COMPRA" (sin "ELECTRONICA") → 45  ← papel
-  · "NOTA DE CREDITO" (sin "ELECTRONICA") → 55  ← papel
-  · "NOTA DE DEBITO" (sin "ELECTRONICA") → 60  ← papel
+  · "NOTA DE CREDITO" (sin "ELECTRONICA") → 60  ← papel
+  · "NOTA DE DEBITO" (sin "ELECTRONICA") → 55  ← papel
 
 NÚMEROS DE ATENCIÓN
 - SET BASICO → atencion_basico
@@ -191,7 +191,7 @@ Retorna SOLO el JSON, sin markdown, sin explicaciones:
       "afecto": 6814
     },
     {
-      "tipo": 55,
+      "tipo": 60,
       "folio": 451,
       "obs": "NOTA DE CREDITO POR DESCUENTO A FACTURA 234",
       "exento": 0,
