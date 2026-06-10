@@ -255,22 +255,22 @@ try {
             break;
 
         // ── Libros de certificación ──────────────────────────────
+        // periodo opcional (AAAA-MM): un libro TOTAL cerrado (LTC) no acepta otro
+        // TOTAL del mismo período → LNC. Cambiar el período permite reenviar
+        // corregido; el revisor del set valida por folioNotificacion, no por período.
         case 'cert_libro_ventas':
-            set_time_limit(120);
-            ob_clean();
-            echo json_encode($mgr->runLibroVentas());
-            break;
-
         case 'cert_libro_guias':
-            set_time_limit(120);
-            ob_clean();
-            echo json_encode($mgr->runLibroGuias());
-            break;
-
         case 'cert_libro_compras':
             set_time_limit(120);
             ob_clean();
-            echo json_encode($mgr->runLibroCompras());
+            $periodoLib = $_GET['periodo'] ?? $_POST['periodo'] ?? '';
+            $periodoLib = preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $periodoLib) ? $periodoLib : null;
+            $resLibro = match ($action) {
+                'cert_libro_ventas'  => $mgr->runLibroVentas($periodoLib),
+                'cert_libro_guias'   => $mgr->runLibroGuias($periodoLib),
+                'cert_libro_compras' => $mgr->runLibroCompras($periodoLib),
+            };
+            echo json_encode($resLibro);
             break;
 
         // ── Restaurar estado desde XMLs existentes en tmp/ ───────

@@ -1021,7 +1021,7 @@ XML;
      * 4820751 — Libro de Ventas.
      * Construido con los DTEs del Set Básico ya emitidos (F-4820750-*).
      */
-    public function runLibroVentas(): array
+    public function runLibroVentas(?string $periodo = null): array
     {
         $state  = $this->loadState();
         $tmpDir = $this->context->getTmpPath();
@@ -1108,7 +1108,7 @@ XML;
         $result = sendLibro([
             'tipoLibro'         => 'VENTA',
             'tipoEnvio'         => 'TOTAL',
-            'periodo'           => date('Y-m'),
+            'periodo'           => $periodo ?: date('Y-m'),
             'folioDsde'         => 1,
             'folioNotificacion' => $folioNotif,
             'detalles'          => $detalles,
@@ -1129,7 +1129,7 @@ XML;
      * 4820754 — Libro de Guías.
      * Caso 1: traslado interno. Caso 2: facturada. Caso 3: anulada.
      */
-    public function runLibroGuias(): array
+    public function runLibroGuias(?string $periodo = null): array
     {
         $state  = $this->loadState();
         $tmpDir = $this->context->getTmpPath();
@@ -1198,7 +1198,7 @@ XML;
         $libroParams = [
             'tipoLibro'          => 'GUIA',
             'tipoEnvio'          => 'TOTAL',
-            'periodo'            => date('Y-m'),
+            'periodo'            => $periodo ?: date('Y-m'),
             'folioNotificacion'  => $folioNotif,
             'detalles'           => $detalles,
         ];
@@ -1230,7 +1230,7 @@ XML;
      *   FCA electrónica 9   — neto 9.253 — retención total IVA (cód. 6)
      *   NC papel       211  — neto -3.068 — descuento sobre FE 32
      */
-    public function runLibroCompras(): array
+    public function runLibroCompras(?string $periodo = null): array
     {
         $state  = $this->loadState();
         $fecha  = date('Y-m-d');
@@ -1290,7 +1290,7 @@ XML;
         $result = sendLibro([
             'tipoLibro'         => 'COMPRA',
             'tipoEnvio'         => 'TOTAL',
-            'periodo'           => date('Y-m'),
+            'periodo'           => $periodo ?: date('Y-m'),
             'folioDsde'         => 1,
             'folioNotificacion' => $folioNotif,
             'detalles'          => $detalles,

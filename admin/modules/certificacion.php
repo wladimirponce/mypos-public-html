@@ -292,6 +292,13 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
     <i class="bi bi-chevron-down ms-2" id="pchev-4"></i>
   </div>
   <div class="paso-body" id="pbody-4">
+    <!-- Período tributario: un libro TOTAL cerrado (LTC) rechaza otro TOTAL del
+         mismo período (LNC). Para reenviar un libro corregido, cambie el período. -->
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px">
+      <span style="font-size:.82rem; font-weight:600" title="Si el SII responde LNC (libro ya cerrado para el período), cambie el período aquí y reenvíe. El revisor valida por N° de atención, no por período.">Período tributario:</span>
+      <input type="month" id="libro-periodo" value="<?= date('Y-m') ?>" style="padding:4px 8px; border:1px solid var(--c-border); border-radius:6px; font-size:.8rem">
+      <span style="font-size:.7rem; color:var(--c-text-muted)">Cámbielo si el SII responde LNC (libro cerrado para el período).</span>
+    </div>
     <div class="row g-3">
 
       <!-- Libro Ventas -->
@@ -1160,9 +1167,10 @@ async function certLibro(tipo) {
   const info   = document.getElementById(`libro-${tipo}-info`);
   if (badge) { badge.className='cert-badge cb-running'; badge.textContent='⟳...'; }
   const label = tipo.charAt(0).toUpperCase() + tipo.slice(1);
-  log(`Enviando Libro de ${label}…`, 'info');
+  const periodo = (document.getElementById('libro-periodo')||{}).value || '';
+  log(`Enviando Libro de ${label}${periodo?' (período '+periodo+')':''}…`, 'info');
   try {
-    const res = await api(action);
+    const res = await api(action, periodo ? { periodo } : {});
     if (res.ok) {
       if (badge) { badge.className='cert-badge cb-ok'; badge.textContent='✓ OK'; }
       if (info)  info.textContent = 'TrackID: ' + (res.trackId||'—');
