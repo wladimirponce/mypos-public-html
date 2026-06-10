@@ -493,6 +493,19 @@ class EmpresaRepository extends BaseRepository
 
         // Para MyPOS SaaS:
         $tipoEnum = $this->mapTipoDteToEnum((int)$data['tipo_dte']);
+
+        // En CERTIFICACION el SII solo reconoce el CAF más reciente emitido — los
+        // anteriores quedan inválidos aunque no estén agotados. Desactivarlos evita
+        // que certFolioBaseLibre los elija primero y genere folios fuera del rango
+        // aceptado por maullin.sii.cl (error CAF-3-605).
+        if (strtoupper((string)($data['ambiente'] ?? '')) === 'CERTIFICACION') {
+            $stmtDeact = $this->db->prepare(
+                "UPDATE caf_archivos SET estado = 'ANULADO'
+                 WHERE empresa_id = ? AND tipo_documento = ? AND estado = 'ACTIVO'"
+            );
+            $stmtDeact->execute([$data['empresa_id'], $tipoEnum]);
+        }
+
         $xmlContent = '';
         if (file_exists($data['xml_path'])) {
             $xmlContent = file_get_contents($data['xml_path']);
