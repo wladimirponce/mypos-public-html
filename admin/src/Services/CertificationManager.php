@@ -619,12 +619,17 @@ class CertificationManager
                     'ciudad'    => 'SANTIAGO',
                 ];
             } else {
-                // Venta
+                // Venta. TipoDespacho según quién traslada (reparo SII "Los
+                // Indicadores (Despacho/Traslado) No Corresponden" con el mapeo
+                // anterior): 1=por cuenta del receptor (cliente), 2=por cuenta
+                // del emisor a instalaciones del cliente, 3=por cuenta del
+                // emisor a otras instalaciones. OJO: evaluar 'emisor' primero,
+                // porque "EMISOR ... AL LOCAL DEL CLIENTE" también dice cliente.
                 $data['indTraslado'] = 1;
-                if (strpos($trasladoPor, 'cliente') !== false) {
-                    $data['tipoDespacho'] = 3; // Despacho por cuenta del cliente
+                if (strpos($trasladoPor, 'emisor') !== false) {
+                    $data['tipoDespacho'] = 2;
                 } else {
-                    $data['tipoDespacho'] = 2; // Despacho por cuenta del vendedor al local del cliente
+                    $data['tipoDespacho'] = 1; // traslada el cliente
                 }
             }
         }
@@ -734,42 +739,64 @@ class CertificationManager
 
     private function itemsForUploadedReference(array $ref, array $caso, array $casos): array
     {
+        // NC de texto (CodRef=2, ej: corrige giro): UNA línea descriptiva AFECTA
+        // con monto 0. El revisor SII rechaza la línea si va marcada exenta
+        // ("Los Valores de la Linea 1 No Cuadran"); SimpleAPI usa Afecto=true.
         if ((int)($ref['codigo'] ?? 0) === 2) {
             return [[
                 'nombre'   => mb_substr((string)($ref['razon'] ?? 'CORRIGE TEXTO'), 0, 80, 'UTF-8'),
                 'cantidad' => 1,
                 'precio'   => 0,
-                'exento'   => true,
+                'exento'   => false,
             ]];
         }
 
         $casoRef = (string)(($caso['referencia'] ?? [])['caso_ref'] ?? '');
         foreach ($casos as $candidate) {
-            if ((string)($candidate['caso'] ?? '') === $casoRef && !empty($candidate['items'])) {
-                $currentItems = $caso['items'] ?? [];
-                if (!empty($currentItems)) {
-                    $priced = [];
-                    foreach (array_values($currentItems) as $idx => $item) {
-                        $refItem = $candidate['items'][$idx] ?? [];
-                        $priced[] = array_merge($item, [
-                            'precio' => (int)($item['precio'] ?? 0) > 0
-                                ? (int)$item['precio']
-                                : (int)($refItem['precio'] ?? 0),
-                            'descuento' => $item['descuento'] ?? 0,
-                            'exento' => $item['exento'] ?? ($refItem['exento'] ?? false),
-                        ]);
-                    }
-                    return $priced;
-                }
-                return $candidate['items'];
+            if ((string)($candidate['caso'] ?? '') !== $casoRef) {
+                continue;
             }
+            // El caso referenciado es una NC de texto sin ítems (ej: ND caso 8
+            // que anula la NC caso 5): la ND replica la línea descriptiva de la
+            // NC (su razón de referencia), afecta y con monto 0.
+            if (empty($candidate['items'])) {
+                $razonCand = (string)((($candidate['referencia'] ?? [])['razon'])
+                    ?? ($ref['razon'] ?? 'REFERENCIA SET DE PRUEBAS'));
+                return [[
+                    'nombre'   => mb_substr($razonCand, 0, 80, 'UTF-8'),
+                    'cantidad' => 1,
+                    'precio'   => 0,
+                    'exento'   => false,
+                ]];
+            }
+            $currentItems = $caso['items'] ?? [];
+            if (!empty($currentItems)) {
+                $priced = [];
+                foreach (array_values($currentItems) as $idx => $item) {
+                    $refItem = $candidate['items'][$idx] ?? [];
+                    $priced[] = array_merge($item, [
+                        'precio' => (int)($item['precio'] ?? 0) > 0
+                            ? (int)$item['precio']
+                            : (int)($refItem['precio'] ?? 0),
+                        // Heredar el descuento de la línea original: una NC de
+                        // devolución debe replicar precio Y descuento de la
+                        // factura referenciada (reparo "Valores No Cuadran").
+                        'descuento' => (int)($item['descuento'] ?? 0) > 0
+                            ? (int)$item['descuento']
+                            : (int)($refItem['descuento'] ?? 0),
+                        'exento' => $item['exento'] ?? ($refItem['exento'] ?? false),
+                    ]);
+                }
+                return $priced;
+            }
+            return $candidate['items'];
         }
 
         return [[
             'nombre'   => mb_substr((string)($ref['razon'] ?? 'AJUSTE REFERENCIA'), 0, 80, 'UTF-8'),
             'cantidad' => 1,
             'precio'   => 0,
-            'exento'   => true,
+            'exento'   => false,
         ]];
     }
 

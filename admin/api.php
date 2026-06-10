@@ -5117,7 +5117,11 @@ function generateLibro(array $data): array {
             }
         }
         
-        if ($tot['TotOpIVARetTotal'] > 0) {
+        // TotOpIVARetTotal/TotIVARetTotal son campos del libro de VENTAS (formato
+        // IECV: el resumen de COMPRAS no los contempla; ahí la retención va solo
+        // en el detalle vía <IVARetTotal>). Incluirlos en COMPRAS hizo que el SII
+        // reparara "No Informa Adecuadamente IVA Retenido Total".
+        if ($tot['TotOpIVARetTotal'] > 0 && $tipoLibro !== 'COMPRA') {
             $resumenXml .= "    <TotOpIVARetTotal>{$tot['TotOpIVARetTotal']}</TotOpIVARetTotal>\n";
             $resumenXml .= "    <TotIVARetTotal>{$tot['TotIVARetTotal']}</TotIVARetTotal>\n";
         }

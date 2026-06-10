@@ -97,6 +97,8 @@ NC / ND (sin ítems de precio)
 - referencia.caso_ref = "ATENCION-NUM" del caso al que referencia
 - referencia.razon = texto de RAZON REFERENCIA
 - Las NC de devolución parcial (CASO 6) SÍ tienen ítems con cantidad (sin precio)
+- Si el caso NO muestra una tabla de ítems, devolver "items": [] — NUNCA
+  inventar ítems ni copiar texto de otras secciones del archivo
 
 TIPOS DTE (mapeo)
 - FACTURA ELECTRONICA           → 33
@@ -109,6 +111,9 @@ TIPOS DTE (mapeo)
 GUÍAS DE DESPACHO
 - Extraer campo motivo (texto de MOTIVO:)
 - Extraer trasladoPor (texto de TRASLADO POR:) — puede ser null
+- ⚠️ Si la tabla de ítems tiene SOLO la columna CANTIDAD (sin PRECIO UNITARIO,
+  típico en traslado interno entre bodegas), el número de cada fila es la
+  CANTIDAD y el precio es 0. Ejemplo: "ITEM 1   71" → cantidad=71, precio=0
 
 LIBRO DE COMPRAS
 - Sección "SET LIBRO DE COMPRAS"
