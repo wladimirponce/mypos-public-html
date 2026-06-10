@@ -148,6 +148,7 @@ Retorna SOLO el JSON, sin markdown, sin explicaciones:
   "atencion_compras": null,
   "atencion_guias": null,
   "atencion_libro_guias": null,
+  "factor_iva_uso_comun": null,
   "boletas": [
     {
       "caso": "CASO-1",

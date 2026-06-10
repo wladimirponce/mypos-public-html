@@ -5028,6 +5028,8 @@ function generateLibro(array $data): array {
 
     foreach ($detalles as $d) {
         $tipo  = (int)($d['tipo']  ?? 33);
+        $tipoImp = (int)($d['tipoImp'] ?? 1);
+        $resumenKey = $tipo . ':' . $tipoImp;
         $neto  = (int)($d['neto']  ?? 0);
         $iva   = (int)($d['iva']   ?? 0);
         $exe   = (int)($d['exe']   ?? 0);
@@ -5039,19 +5041,20 @@ function generateLibro(array $data): array {
         $totTotal += $total;
 
         // Agrupar para TotalesPeriodo
-        if (!isset($resumenPorTipo[$tipo])) {
-            $resumenPorTipo[$tipo] = [
+        if (!isset($resumenPorTipo[$resumenKey])) {
+            $resumenPorTipo[$resumenKey] = [
+                'TpoDoc' => $tipo, 'TpoImp' => $tipoImp,
                 'TotDoc' => 0, 'TotMntExe' => 0, 'TotMntNeto' => 0, 'TotMntIVA' => 0, 'TotMntTotal' => 0,
                 'TotOpIVAUsoComun' => 0, 'TotIVAUsoComun' => 0, 'FctProp' => null,
                 'TotOpIVARetTotal' => 0, 'TotIVARetTotal' => 0,
-                'IVANoRecup' => [],
+                'IVANoRecup' => [], 'OtrosImp' => [],
             ];
         }
-        $resumenPorTipo[$tipo]['TotDoc']++;
-        $resumenPorTipo[$tipo]['TotMntExe'] += $exe;
-        $resumenPorTipo[$tipo]['TotMntNeto'] += $neto;
-        $resumenPorTipo[$tipo]['TotMntIVA'] += $iva;
-        $resumenPorTipo[$tipo]['TotMntTotal'] += $total;
+        $resumenPorTipo[$resumenKey]['TotDoc']++;
+        $resumenPorTipo[$resumenKey]['TotMntExe'] += $exe;
+        $resumenPorTipo[$resumenKey]['TotMntNeto'] += $neto;
+        $resumenPorTipo[$resumenKey]['TotMntIVA'] += $iva;
+        $resumenPorTipo[$resumenKey]['TotMntTotal'] += $total;
 
         // Campos especiales Libro de Compras: IVA uso comÃºn, no recuperable, retenciÃ³n
         $codIvaNoRec   = isset($d['codIvaNoRec'])   ? (int)$d['codIvaNoRec']            : null;
@@ -5059,38 +5062,65 @@ function generateLibro(array $data): array {
         $mntIvaUsoComun= isset($d['mntIvaUsoComun'])? (int)$d['mntIvaUsoComun']         : null;
         $fctProp       = isset($d['fctProp'])       ? number_format((float)$d['fctProp'], 3, '.', '') : null;
         $ivaRetTotal   = isset($d['ivaRetTotal'])   ? (int)$d['ivaRetTotal']            : null;
+        $otrosImp      = is_array($d['otrosImp'] ?? null) ? $d['otrosImp'] : [];
 
         if ($mntIvaUsoComun > 0) {
-            $resumenPorTipo[$tipo]['TotOpIVAUsoComun']++;
-            $resumenPorTipo[$tipo]['TotIVAUsoComun'] += $mntIvaUsoComun;
-            if ($fctProp !== null) $resumenPorTipo[$tipo]['FctProp'] = $fctProp;
+            $resumenPorTipo[$resumenKey]['TotOpIVAUsoComun']++;
+            $resumenPorTipo[$resumenKey]['TotIVAUsoComun'] += $mntIvaUsoComun;
+            if ($fctProp !== null) $resumenPorTipo[$resumenKey]['FctProp'] = $fctProp;
         }
 
         if ($ivaRetTotal > 0) {
-            $resumenPorTipo[$tipo]['TotOpIVARetTotal']++;
-            $resumenPorTipo[$tipo]['TotIVARetTotal'] += $ivaRetTotal;
+            $resumenPorTipo[$resumenKey]['TotOpIVARetTotal']++;
+            $resumenPorTipo[$resumenKey]['TotIVARetTotal'] += $ivaRetTotal;
         }
 
         if ($mntIvaNoRec > 0 && $codIvaNoRec !== null) {
-            if (!isset($resumenPorTipo[$tipo]['IVANoRecup'][$codIvaNoRec])) {
-                $resumenPorTipo[$tipo]['IVANoRecup'][$codIvaNoRec] = ['TotOp' => 0, 'TotMnt' => 0];
+            if (!isset($resumenPorTipo[$resumenKey]['IVANoRecup'][$codIvaNoRec])) {
+                $resumenPorTipo[$resumenKey]['IVANoRecup'][$codIvaNoRec] = ['TotOp' => 0, 'TotMnt' => 0];
             }
-            $resumenPorTipo[$tipo]['IVANoRecup'][$codIvaNoRec]['TotOp']++;
-            $resumenPorTipo[$tipo]['IVANoRecup'][$codIvaNoRec]['TotMnt'] += $mntIvaNoRec;
+            $resumenPorTipo[$resumenKey]['IVANoRecup'][$codIvaNoRec]['TotOp']++;
+            $resumenPorTipo[$resumenKey]['IVANoRecup'][$codIvaNoRec]['TotMnt'] += $mntIvaNoRec;
         }
+
+        $otrosImpXml = '';
+        foreach ($otrosImp as $otroImp) {
+            $codImp = (int)($otroImp['codigo'] ?? 0);
+            if ($codImp <= 0) continue;
+            $tasaOtroImp = $otroImp['tasa'] ?? null;
+            $mntImp = (int)($otroImp['monto'] ?? 0);
+            $resumenPorTipo[$resumenKey]['OtrosImp'][$codImp] =
+                ($resumenPorTipo[$resumenKey]['OtrosImp'][$codImp] ?? 0) + $mntImp;
+            $otrosImpXml .= "  <OtrosImp>\n"
+                . "    <CodImp>$codImp</CodImp>\n"
+                . ($tasaOtroImp !== null ? "    <TasaImp>" . htmlspecialchars((string)$tasaOtroImp, ENT_XML1) . "</TasaImp>\n" : "")
+                . "    <MntImp>$mntImp</MntImp>\n"
+                . "  </OtrosImp>\n";
+        }
+
+        $emitMntIvaCero = $tipoLibro === 'COMPRA'
+            && $neto != 0
+            && ($codIvaNoRec !== null || $mntIvaUsoComun !== null);
+        $tpoDocRef = isset($d['tipoDocRef']) ? (int)$d['tipoDocRef'] : null;
+        $folioDocRef = isset($d['folioDocRef']) ? (int)$d['folioDocRef'] : null;
+        $tasaImp = $d['tasaImp'] ?? 19;
 
         $xmlDetalles .= "<Detalle>\n"
             . "  <TpoDoc>" . $tipo . "</TpoDoc>\n"
             . "  <NroDoc>" . (int)($d['folio'] ?? 1)  . "</NroDoc>\n"
-            . "  <TasaImp>19</TasaImp>\n"
+            . ($tipoImp !== 1 ? "  <TpoImp>$tipoImp</TpoImp>\n" : "")
+            . "  <TasaImp>" . htmlspecialchars((string)$tasaImp, ENT_XML1) . "</TasaImp>\n"
             . "  <FchDoc>" . ($d['fecha'] ?? date('Y-m-d')) . "</FchDoc>\n"
             . "  <RUTDoc>" . ($d['rut']   ?? '66666666-6') . "</RUTDoc>\n"
             . "  <RznSoc>" . htmlspecialchars($d['razon'] ?? '', ENT_XML1) . "</RznSoc>\n"
+            . ($tpoDocRef !== null ? "  <TpoDocRef>$tpoDocRef</TpoDocRef>\n" : "")
+            . ($folioDocRef !== null ? "  <FolioDocRef>$folioDocRef</FolioDocRef>\n" : "")
             . ($exe   != 0 || ($neto == 0 && $iva == 0) ? "  <MntExe>$exe</MntExe>\n" : "")
             . ($neto  != 0 ? "  <MntNeto>$neto</MntNeto>\n"         : "")
-            . ($iva   != 0 ? "  <MntIVA>$iva</MntIVA>\n"           : "")
+            . ($iva   != 0 || $emitMntIvaCero ? "  <MntIVA>$iva</MntIVA>\n" : "")
             . ($codIvaNoRec !== null && $mntIvaNoRec !== null ? "  <IVANoRec>\n    <CodIVANoRec>$codIvaNoRec</CodIVANoRec>\n    <MntIVANoRec>$mntIvaNoRec</MntIVANoRec>\n  </IVANoRec>\n" : "")
             . ($mntIvaUsoComun !== null ? "  <IVAUsoComun>$mntIvaUsoComun</IVAUsoComun>\n" : "")
+            . $otrosImpXml
             . ($ivaRetTotal !== null ? "  <IVARetTotal>$ivaRetTotal</IVARetTotal>\n" : "")
             . "  <MntTotal>$total</MntTotal>\n"
             . "</Detalle>\n";
@@ -5099,9 +5129,12 @@ function generateLibro(array $data): array {
     // ResumenPeriodo con TotalesPeriodo agrupados
     $resumenXml = "<ResumenPeriodo>\n";
     ksort($resumenPorTipo);
-    foreach ($resumenPorTipo as $tipo => $tot) {
+    foreach ($resumenPorTipo as $tot) {
         $resumenXml .= "  <TotalesPeriodo>\n";
-        $resumenXml .= "    <TpoDoc>$tipo</TpoDoc>\n";
+        $resumenXml .= "    <TpoDoc>{$tot['TpoDoc']}</TpoDoc>\n";
+        if ($tot['TpoImp'] !== 1) {
+            $resumenXml .= "    <TpoImp>{$tot['TpoImp']}</TpoImp>\n";
+        }
         $resumenXml .= "    <TotDoc>{$tot['TotDoc']}</TotDoc>\n";
         
         $resumenXml .= "    <TotMntExe>{$tot['TotMntExe']}</TotMntExe>\n";
@@ -5126,6 +5159,13 @@ function generateLibro(array $data): array {
                 $credUC = (int)round((float)$tot['FctProp'] * (int)$tot['TotIVAUsoComun']);
                 $resumenXml .= "    <TotCredIVAUsoComun>{$credUC}</TotCredIVAUsoComun>\n";
             }
+        }
+
+        foreach ($tot['OtrosImp'] as $codImp => $mntImp) {
+            $resumenXml .= "    <TotOtrosImp>\n";
+            $resumenXml .= "      <CodImp>$codImp</CodImp>\n";
+            $resumenXml .= "      <TotMntImp>$mntImp</TotMntImp>\n";
+            $resumenXml .= "    </TotOtrosImp>\n";
         }
         
         // IVA retenido: el resumen DEBE traer TotIVARetTotal cuando el detalle
@@ -5173,6 +5213,7 @@ XML;
         'ok'      => true,
         'xml'     => $xmlFirmado,
         'totales' => ['neto' => $totNeto, 'iva' => $totIVA, 'exe' => $totExe, 'total' => $totTotal],
+        'resumen' => $resumenPorTipo,
         'mensaje' => "Libro de $tipoLibro periodo $periodo generado y firmado ({$tipoEnvio}). Total: \${$totTotal}.",
     ];
 }
@@ -5400,6 +5441,160 @@ XML;
     ];
 }
 
+function validateLibroResumenDetalleXml(string $xml): array {
+    $dom = new DOMDocument();
+    if (!@$dom->loadXML($xml)) {
+        return ['valid' => false, 'errors' => ['No se pudo leer el XML del libro para conciliar resumen y detalle.']];
+    }
+
+    $xp = new DOMXPath($dom);
+    $childInt = static function (DOMNode $node, string $name) use ($xp): int {
+        $found = $xp->query("./*[local-name()='$name']", $node)->item(0);
+        return $found ? (int)$found->textContent : 0;
+    };
+    $emptyTotals = static fn(): array => [
+        'TotDoc' => 0, 'TotMntExe' => 0, 'TotMntNeto' => 0, 'TotMntIVA' => 0,
+        'TotIVAUsoComun' => 0, 'TotIVARetTotal' => 0, 'TotMntTotal' => 0,
+        'IVANoRecup' => [], 'OtrosImp' => [],
+    ];
+
+    $fromDetalle = [];
+    foreach ($xp->query("//*[local-name()='EnvioLibro']/*[local-name()='Detalle']") as $detalle) {
+        $tipo = $childInt($detalle, 'TpoDoc');
+        $tipoImp = $childInt($detalle, 'TpoImp') ?: 1;
+        $key = "$tipo:$tipoImp";
+        $fromDetalle[$key] ??= $emptyTotals();
+        $fromDetalle[$key]['TotDoc']++;
+        foreach (['MntExe'=>'TotMntExe', 'MntNeto'=>'TotMntNeto', 'MntIVA'=>'TotMntIVA',
+                  'IVAUsoComun'=>'TotIVAUsoComun', 'IVARetTotal'=>'TotIVARetTotal', 'MntTotal'=>'TotMntTotal'] as $source => $target) {
+            $fromDetalle[$key][$target] += $childInt($detalle, $source);
+        }
+        foreach ($xp->query("./*[local-name()='IVANoRec']", $detalle) as $ivaNoRec) {
+            $cod = $childInt($ivaNoRec, 'CodIVANoRec');
+            $fromDetalle[$key]['IVANoRecup'][$cod] =
+                ($fromDetalle[$key]['IVANoRecup'][$cod] ?? 0) + $childInt($ivaNoRec, 'MntIVANoRec');
+        }
+        foreach ($xp->query("./*[local-name()='OtrosImp']", $detalle) as $otroImp) {
+            $cod = $childInt($otroImp, 'CodImp');
+            $fromDetalle[$key]['OtrosImp'][$cod] =
+                ($fromDetalle[$key]['OtrosImp'][$cod] ?? 0) + $childInt($otroImp, 'MntImp');
+        }
+    }
+
+    $fromResumen = [];
+    $duplicates = [];
+    foreach ($xp->query("//*[local-name()='EnvioLibro']/*[local-name()='ResumenPeriodo']/*[local-name()='TotalesPeriodo']") as $total) {
+        $tipo = $childInt($total, 'TpoDoc');
+        $tipoImp = $childInt($total, 'TpoImp') ?: 1;
+        $key = "$tipo:$tipoImp";
+        if (isset($fromResumen[$key])) $duplicates[] = $key;
+        $fromResumen[$key] = $emptyTotals();
+        foreach (['TotDoc', 'TotMntExe', 'TotMntNeto', 'TotMntIVA', 'TotIVAUsoComun', 'TotIVARetTotal', 'TotMntTotal'] as $field) {
+            $fromResumen[$key][$field] = $childInt($total, $field);
+        }
+        foreach ($xp->query("./*[local-name()='TotIVANoRec']", $total) as $ivaNoRec) {
+            $fromResumen[$key]['IVANoRecup'][$childInt($ivaNoRec, 'CodIVANoRec')] = $childInt($ivaNoRec, 'TotMntIVANoRec');
+        }
+        foreach ($xp->query("./*[local-name()='TotOtrosImp']", $total) as $otroImp) {
+            $fromResumen[$key]['OtrosImp'][$childInt($otroImp, 'CodImp')] = $childInt($otroImp, 'TotMntImp');
+        }
+    }
+
+    $errors = [];
+    foreach ($duplicates as $key) $errors[] = "Línea de resumen duplicada para TpoDoc/TpoImp $key.";
+    $detailKeys = array_keys($fromDetalle);
+    $summaryKeys = array_keys($fromResumen);
+    sort($detailKeys);
+    sort($summaryKeys);
+    if ($detailKeys !== $summaryKeys) {
+        $errors[] = 'Las líneas de resumen no corresponden exactamente a los tipos de documento/impuesto del detalle.';
+    }
+    foreach ($fromDetalle as $key => $expected) {
+        if (!isset($fromResumen[$key])) continue;
+        $actual = $fromResumen[$key];
+        foreach (['TotDoc', 'TotMntExe', 'TotMntNeto', 'TotMntIVA', 'TotIVAUsoComun', 'TotIVARetTotal', 'TotMntTotal'] as $field) {
+            if ($expected[$field] !== $actual[$field]) {
+                $errors[] = "$key $field no cuadra: detalle={$expected[$field]}, resumen={$actual[$field]}.";
+            }
+        }
+        ksort($expected['IVANoRecup']);
+        ksort($actual['IVANoRecup']);
+        ksort($expected['OtrosImp']);
+        ksort($actual['OtrosImp']);
+        if ($expected['IVANoRecup'] !== $actual['IVANoRecup']) $errors[] = "$key IVA no recuperable no cuadra.";
+        if ($expected['OtrosImp'] !== $actual['OtrosImp']) $errors[] = "$key otros impuestos no cuadran.";
+    }
+
+    return [
+        'valid' => !$errors,
+        'errors' => $errors,
+        'detalle_keys' => $detailKeys,
+        'resumen_keys' => $summaryKeys,
+    ];
+}
+
+function archiveLibroBeforeSend(string $xml, array $data): array {
+    $tipoLibro = preg_replace('/[^A-Z0-9_-]/', '', strtoupper((string)($data['tipoLibro'] ?? 'LIBRO'))) ?: 'LIBRO';
+    $periodo = preg_match('/^\d{4}-\d{2}$/', (string)($data['periodo'] ?? ''))
+        ? (string)$data['periodo']
+        : date('Y-m');
+    $dir = archiveBaseDir() . DIRECTORY_SEPARATOR . 'libros' . DIRECTORY_SEPARATOR . $tipoLibro
+        . DIRECTORY_SEPARATOR . $periodo;
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+        return ['ok' => false, 'error' => "No se pudo crear el directorio de archivo de libros: $dir"];
+    }
+
+    $attemptId = date('YmdHis') . '_' . bin2hex(random_bytes(6));
+    $xmlFile = $dir . DIRECTORY_SEPARATOR . "envio_$attemptId.xml";
+    $metaFile = $dir . DIRECTORY_SEPARATOR . "envio_$attemptId.meta.json";
+    $hash = 'sha256:' . hash('sha256', $xml);
+    $meta = [
+        'attempt_id' => $attemptId,
+        'tipo_libro' => $tipoLibro,
+        'periodo' => $periodo,
+        'folio_notificacion' => (int)($data['folioNotificacion'] ?? 0),
+        'created_at' => date('Y-m-d\TH:i:s'),
+        'status' => 'PENDING_SEND',
+        'xml_hash' => $hash,
+    ];
+    if (file_put_contents($xmlFile, $xml, LOCK_EX) === false
+        || file_put_contents($metaFile, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX) === false) {
+        return ['ok' => false, 'error' => 'No se pudo preservar el XML exacto del libro antes del envío.'];
+    }
+    if (hash('sha256', (string)file_get_contents($xmlFile)) !== hash('sha256', $xml)) {
+        return ['ok' => false, 'error' => 'El XML archivado no coincide con el XML que se enviaría al SII.'];
+    }
+    return [
+        'ok' => true,
+        'xml_path' => $xmlFile,
+        'relative_path' => str_replace(archiveBaseDir() . DIRECTORY_SEPARATOR, '', $xmlFile),
+        'meta_path' => $metaFile,
+        'hash' => $hash,
+        'meta' => $meta,
+    ];
+}
+
+function finalizeLibroArchive(array $archive, array $response): void {
+    if (empty($archive['ok']) || empty($archive['meta_path'])) return;
+    $meta = $archive['meta'] ?? [];
+    $meta['completed_at'] = date('Y-m-d\TH:i:s');
+    $meta['status'] = !empty($response['ok']) ? 'SENT' : 'SEND_FAILED';
+    $meta['track_id'] = $response['trackId'] ?? null;
+    $meta['estado_inicial'] = $response['estado'] ?? null;
+    $meta['error'] = !empty($response['ok']) ? null : ($response['error'] ?? null);
+    file_put_contents($archive['meta_path'], json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+    file_put_contents(archiveIndexPath(), json_encode([
+        'ts' => $meta['completed_at'],
+        'kind' => 'LIBRO',
+        'tipo_libro' => $meta['tipo_libro'],
+        'periodo' => $meta['periodo'],
+        'trackId' => $meta['track_id'],
+        'status' => $meta['status'],
+        'path' => str_replace(archiveBaseDir() . DIRECTORY_SEPARATOR, '', $archive['xml_path']),
+        'hash' => $archive['hash'],
+    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
+}
+
 /**
  * Genera, firma y envÃ­a un Libro de Compras/Ventas (IECV) al SII.
  * Usa el mismo endpoint multipart que el EnvioDTE.
@@ -5419,12 +5614,35 @@ function sendLibro(array $data): array {
         ];
     }
 
-    [$cert, $privKey] = loadCertificate();
-    $semilla = getSemilla();
-    $token   = getToken($semilla, $cert, $privKey);
-    $resp    = uploadDTE($gen['xml'], $token, $cert);
-
     $tipoLibro = strtoupper($data['tipoLibro'] ?? 'VENTA');
+    if (in_array($tipoLibro, ['COMPRA', 'VENTA'], true)) {
+        $semantic = validateLibroResumenDetalleXml($gen['xml']);
+        if (!$semantic['valid']) {
+            return [
+                'ok' => false,
+                'error' => 'Resumen del libro no cuadra con el detalle: ' . implode('; ', array_slice($semantic['errors'], 0, 5)),
+                'errors' => $semantic['errors'],
+            ];
+        }
+    }
+
+    $archive = archiveLibroBeforeSend($gen['xml'], $data);
+    if (empty($archive['ok'])) {
+        return ['ok' => false, 'error' => $archive['error'] ?? 'No se pudo archivar el libro antes del envío'];
+    }
+
+    try {
+        [$cert, $privKey] = loadCertificate();
+        $semilla = getSemilla();
+        $token   = getToken($semilla, $cert, $privKey);
+        $resp = uploadDTE($gen['xml'], $token, $cert);
+    } catch (Throwable $e) {
+        $resp = ['ok' => false, 'error' => $e->getMessage()];
+        finalizeLibroArchive($archive, $resp);
+        throw $e;
+    }
+    finalizeLibroArchive($archive, $resp);
+
     $periodo   = $data['periodo'] ?? date('Y-m');
     $nivel = $resp['ok'] ? 'SUCCESS' : 'ERROR';
     saveSiiLog('sendLibro', "Libro $tipoLibro $periodo enviado. TrackID: " . ($resp['trackId'] ?? 'N/A'), $nivel);
@@ -5437,6 +5655,8 @@ function sendLibro(array $data): array {
         'error'   => $errDetail,
         'totales' => $gen['totales'],
         'xml'     => $gen['xml'],
+        'xml_hash'=> $archive['hash'],
+        'archive_path' => $archive['relative_path'],
         'mensaje' => $resp['ok']
             ? "Libro $tipoLibro $periodo enviado al SII. TrackID {$resp['trackId']}."
             : "Error enviando libro: $errDetail",
@@ -7142,5 +7362,3 @@ function getHistorialPaginado(int $page = 1, ?int $tipo = null, ?string $sucursa
         return ['success' => false, 'entries' => [], 'error' => $e->getMessage()];
     }
 }
-
-

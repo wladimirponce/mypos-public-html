@@ -121,6 +121,7 @@ class CertSetManager
         $boletas  = $this->parseBoletas($txt);
         $casosGenerales = $this->parseCasosGenerales($txt);
         $libroCompras = $this->parseLibroCompras($txt);
+        $factorIvaUsoComun = $this->extraerFactorIvaUsoComun($txt);
 
         if (empty($boletas) && empty($casosGenerales)) {
             return ['ok' => false, 'error' => 'No se reconocieron casos de boleta ni de facturación en el archivo. Verifique que sea el .txt del Set de Pruebas del SII.'];
@@ -141,6 +142,7 @@ class CertSetManager
             'boletas'              => !empty($boletas) ? $boletas : ($actual['boletas'] ?? []),
             'facturas'             => !empty($casosGenerales) ? $casosGenerales : ($actual['facturas'] ?? []),
             'libroCompras'         => !empty($libroCompras) ? $libroCompras : ($actual['libroCompras'] ?? []),
+            'factor_iva_uso_comun' => $factorIvaUsoComun ?? ($actual['factor_iva_uso_comun'] ?? null),
         ];
         $this->save($set);
 
@@ -178,6 +180,9 @@ class CertSetManager
 
         // Fallback nativo para AT numbers que Gemini no extrae (ej: atencion_libro_guias)
         $txt = $this->normalizarTexto($rawContent);
+        $factorIvaUsoComun = isset($parsed['factor_iva_uso_comun'])
+            ? (float)$parsed['factor_iva_uso_comun']
+            : $this->extraerFactorIvaUsoComun($txt);
 
         $actual = $this->load() ?? [];
         $set = [
@@ -194,6 +199,7 @@ class CertSetManager
             'boletas'              => !empty($boletas) ? $boletas : ($actual['boletas'] ?? []),
             'facturas'             => !empty($casosGenerales) ? $casosGenerales : ($actual['facturas'] ?? []),
             'libroCompras'         => !empty($libroCompras) ? $libroCompras : ($actual['libroCompras'] ?? []),
+            'factor_iva_uso_comun' => $factorIvaUsoComun ?? ($actual['factor_iva_uso_comun'] ?? null),
         ];
         $this->save($set);
 
@@ -485,5 +491,14 @@ class CertSetManager
             }
         }
         return $compras;
+    }
+
+    private function extraerFactorIvaUsoComun(string $txt): ?float
+    {
+        if (!preg_match('/factor\s+de\s+proporcionalidad[\s\S]{0,120}?([0-9]+(?:[.,][0-9]+)?)/iu', $txt, $m)) {
+            return null;
+        }
+        $factor = (float)str_replace(',', '.', $m[1]);
+        return $factor > 0 ? $factor : null;
     }
 }

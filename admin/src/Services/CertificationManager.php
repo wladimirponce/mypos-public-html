@@ -1327,6 +1327,8 @@ XML;
         $rutSII  = '60803000-K';
         $nomSII  = 'SII DE PRUEBAS';
         $setMgr = new \App\Services\CertSetManager($this->context);
+        $set = $setMgr->load() ?? [];
+        $factorIvaUsoComun = isset($set['factor_iva_uso_comun']) ? (float)$set['factor_iva_uso_comun'] : null;
         $detalles = [];
         foreach ($setMgr->getLibroCompras() as $c) {
             // Montos SIEMPRE positivos: el SII solo acepta negativos en liquidaciones
@@ -1356,8 +1358,14 @@ XML;
 
             $obs = strtolower($c['obs']);
             if (strpos($obs, 'uso comun') !== false || strpos($obs, 'uso común') !== false) {
+                if ($factorIvaUsoComun === null || $factorIvaUsoComun <= 0) {
+                    return [
+                        'ok' => false,
+                        'error' => 'El set importado contiene IVA de uso común, pero no informa su factor de proporcionalidad. Reimporte el archivo original del set.',
+                    ];
+                }
                 $d['mntIvaUsoComun'] = $iva;
-                $d['fctProp'] = 0.60;
+                $d['fctProp'] = $factorIvaUsoComun;
                 $d['iva'] = 0;
             }
             if (strpos($obs, 'gratuita') !== false || strpos($obs, 'no recuperable') !== false) {
@@ -1372,12 +1380,17 @@ XML;
                 // MntTotal = neto + iva - retención = neto.
                 $d['ivaRetTotal'] = $iva;
                 $d['total'] = $neto + $exe;
+                // Instructivo de llenado de compras (campos 15-17): la retención
+                // de una factura de compra se informa ADEMÁS en la tabla "Otros
+                // Impuestos/Retenciones" (código 15 = IVA retenido total, tasa 19)
+                // y se resta del Monto Total. Sin esto el revisor del set reparó
+                // "No Informa Adecuadamente IVA Retenido Total".
+                $d['otrosImp'] = [['codigo' => 15, 'tasa' => 19, 'monto' => $iva]];
             }
 
             $detalles[] = $d;
         }
 
-        $set        = $setMgr->load() ?? [];
         $folioNotif = (int)($set['atencion_compras'] ?? 0);
 
         $result = sendLibro([
