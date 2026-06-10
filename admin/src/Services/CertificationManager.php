@@ -983,6 +983,169 @@ class CertificationManager
     }
 
     // =========================================================
+    // SIMULACIÓN — SOBRE ÚNICO (requisito SII: 20-100 docs, 1 TrackID)
+    // =========================================================
+
+    /**
+     * Construye UN solo EnvioDTE con $cantPorTipo documentos de cada tipo
+     * ($tipos, default [33,39]) y lo sube a maullin.sii.cl via SOAP.
+     *
+     * El SII exige para la etapa de Simulación:
+     *   - 1 único sobre (EnvioDTE)
+     *   - 20 a 100 documentos dentro del mismo envío
+     *   - Todos los tipos que se están certificando
+     *   - 1 solo N° de Envío (TrackID) para declarar en el portal
+     *
+     * @param array $tipos       Tipos de DTE a incluir, default [33, 39]
+     * @param int   $cantPorTipo Documentos por tipo, default 15 (15+15=30 total)
+     */
+    public function runSimulacionSobre(array $tipos = [33, 39], int $cantPorTipo = 15): array
+    {
+        if (empty($tipos) || $cantPorTipo < 1) {
+            return ['ok' => false, 'error' => 'Parámetros inválidos: tipos vacíos o cantidad < 1.'];
+        }
+
+        $totalDocs = count($tipos) * $cantPorTipo;
+        if ($totalDocs < 20 || $totalDocs > 100) {
+            return [
+                'ok'    => false,
+                'error' => "Total de documentos ($totalDocs) fuera del rango SII (20-100). "
+                         . "Ajuste cantPorTipo (actual: $cantPorTipo) o los tipos (actual: "
+                         . implode(',', $tipos) . ').',
+            ];
+        }
+
+        $state  = $this->loadState();
+        $repo   = new EmpresaRepository();
+        $xmlDtes = [];          // XML de cada DTE individual para armar el sobre
+        $foliosPorTipo = [];    // [tipo => [folios usados con éxito]]
+
+        // ── Generar DTEs por tipo ────────────────────────────────────────────
+        foreach ($tipos as $tipo) {
+            $tipo = (int)$tipo;
+            $rutRec = in_array($tipo, [39, 41]) ? '66666666-6' : '55555555-5';
+
+            $cafRow = $repo->getCAFNextAvailable(
+                $this->context->getEmpresaId(), $tipo, $this->context->getAmbiente()
+            );
+            if (!$cafRow) {
+                return [
+                    'ok'    => false,
+                    'error' => "No hay CAF disponible para tipo $tipo en ambiente "
+                             . $this->context->getAmbiente()
+                             . '. Cargue el CAF en Configuración.',
+                ];
+            }
+            $cafDesde = (int)$cafRow['folio_desde'];
+            $cafHasta = (int)$cafRow['folio_hasta'];
+
+            // Calcular primer folio libre (igual que runSimulacion)
+            $hw = $repo->getUltimoFolioUsadoEnRango(
+                $this->context->getEmpresaId(), $tipo, $this->context->getAmbiente(),
+                $cafDesde, $cafHasta
+            );
+            foreach (($state['pruebas'] ?? []) as $prueba) {
+                if ((int)($prueba['tipo'] ?? 0) === $tipo) {
+                    $f = (int)($prueba['folio'] ?? 0);
+                    if ($f >= $cafDesde && $f <= $cafHasta) $hw = max($hw, $f);
+                }
+            }
+            // Respetar también folios usados en simulaciones previas (individuales)
+            foreach (($state['simulacion']["t$tipo"]['folios_ok'] ?? []) as $fOk) {
+                $fOk = (int)$fOk;
+                if ($fOk >= $cafDesde && $fOk <= $cafHasta) $hw = max($hw, $fOk);
+            }
+            $nextFolio = max($cafDesde, $hw + 1);
+
+            $foliosPorTipo[$tipo] = [];
+            for ($i = 0; $i < $cantPorTipo; $i++) {
+                $folioToUse = $nextFolio + $i;
+                if ($folioToUse > $cafHasta) {
+                    return [
+                        'ok'    => false,
+                        'error' => "CAF tipo $tipo insuficiente: se necesita folio $folioToUse "
+                                 . "pero el rango llega hasta $cafHasta. "
+                                 . "Cargue un CAF con más folios para tipo $tipo.",
+                    ];
+                }
+
+                $recSimul = ['rut' => $rutRec, 'nombre' => 'Receptor Simulacion', 'giro' => 'Giro Pruebas'];
+                if (!in_array($tipo, [39, 41])) {
+                    $recSimul['direccion'] = 'Direccion Simulacion 123';
+                    $recSimul['comuna']    = 'Santiago';
+                }
+
+                $dte = generateDTE([
+                    'tipoDTE'  => $tipo,
+                    'folio'    => $folioToUse,
+                    'receptor' => $recSimul,
+                    'items'    => [[
+                        'nombre'   => 'Servicio Simulacion ' . ($i + 1),
+                        'cantidad' => 1,
+                        'precio'   => 10000 + ($i * 100),
+                    ]],
+                ]);
+
+                if (empty($dte['ok'])) {
+                    return ['ok' => false, 'error' => "Error generando DTE T{$tipo} folio $folioToUse: " . ($dte['error'] ?? '?')];
+                }
+
+                $xmlDtes[]            = $dte['xml'];
+                $foliosPorTipo[$tipo][] = $folioToUse;
+            }
+        }
+
+        // ── Armar y enviar el sobre único ────────────────────────────────────
+        if (empty($xmlDtes)) {
+            return ['ok' => false, 'error' => 'No se generaron DTEs para el sobre.'];
+        }
+
+        // buildEnvioDTE acepta un array de XMLs de DTE individuales y
+        // los empaqueta en un único EnvioDTE firmado listo para uploadDTE.
+        $sobre = buildEnvioDTE($xmlDtes);
+        if (empty($sobre['ok'])) {
+            return ['ok' => false, 'error' => 'Error armando el sobre: ' . ($sobre['error'] ?? '?')];
+        }
+
+        $upload = uploadDTE($sobre['xml']);
+        if (empty($upload['ok'])) {
+            return ['ok' => false, 'error' => 'Error enviando el sobre al SII: ' . ($upload['error'] ?? '?')];
+        }
+
+        $trackId = $upload['trackId'] ?? null;
+
+        // ── Persistir resultado en el estado ─────────────────────────────────
+        $state['simulacion']['sobre'] = [
+            'status'     => 'ok',
+            'trackId'    => $trackId,
+            'total_docs' => count($xmlDtes),
+            'tipos'      => $tipos,
+            'cant_por_tipo' => $cantPorTipo,
+            'ts'         => date('Y-m-d\TH:i:s'),
+        ];
+        foreach ($tipos as $tipo) {
+            $tipo = (int)$tipo;
+            $state['simulacion']["t$tipo"] = [
+                'status'    => 'ok',
+                'tipo'      => $tipo,
+                'folios_ok' => $foliosPorTipo[$tipo],
+                'folios_failed' => [],
+                'ts'        => date('Y-m-d\TH:i:s'),
+            ];
+        }
+        $this->saveState($state);
+
+        return [
+            'ok'          => true,
+            'trackId'     => $trackId,
+            'total_docs'  => count($xmlDtes),
+            'tipos'       => $tipos,
+            'folios'      => $foliosPorTipo,
+            'cant_por_tipo' => $cantPorTipo,
+        ];
+    }
+
+    // =========================================================
     // RETRY
     // =========================================================
 

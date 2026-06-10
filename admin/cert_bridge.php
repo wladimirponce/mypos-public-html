@@ -188,6 +188,18 @@ try {
             echo json_encode(['ok' => true, 'mensaje' => 'Estado de simulación reiniciado. Set de Pruebas y libros intactos.']);
             break;
 
+        // ── Simulación en sobre único (requisito SII: 20-100 docs, 1 TrackID) ─
+        // Uso: ?action=cert_sim_sobre[&cant=15][&tipos=33,39]
+        case 'cert_sim_sobre':
+            set_time_limit(600);
+            ob_clean();
+            $cantSobre  = max(1, (int)($_GET['cant'] ?? $_POST['cant'] ?? 15));
+            $tiposParam = trim($_GET['tipos'] ?? $_POST['tipos'] ?? '33,39');
+            $tiposSobre = array_values(array_filter(array_map('intval', explode(',', $tiposParam))));
+            if (empty($tiposSobre)) $tiposSobre = [33, 39];
+            echo json_encode($mgr->runSimulacionSobre($tiposSobre, $cantSobre));
+            break;
+
         // ── Correr solo casos de tipos específicos (ej: T33+T52 sin tocar T61/T56) ──
         // Uso: ?action=cert_run_tipos&tipos=33,52
         case 'cert_run_tipos':

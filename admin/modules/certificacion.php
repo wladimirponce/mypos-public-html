@@ -391,17 +391,37 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   <div class="paso-header" onclick="togglePaso(5)">
     <div class="paso-num" id="pnum-5">5</div>
     <div class="paso-title">Simulación
-      <span class="paso-desc">Etapa 2 SII — Enviar 50 T33 + 50 T39 al ambiente de certificación</span>
+      <span class="paso-desc">Etapa 2 SII — 1 sobre con 20-100 docs (T33 + T39) → 1 TrackID</span>
     </div>
     <span id="pbadge-5" class="d-badge"></span>
     <i class="bi bi-chevron-down ms-2" id="pchev-5"></i>
   </div>
   <div class="paso-body hidden" id="pbody-5">
     <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:14px">
-      El SII exige enviar <strong>50 documentos de prueba por tipo</strong> antes de
-      aprobar la certificación. Se envían al servidor <code>maullin.sii.cl</code>
-      (ambiente de certificación). Si ya está completa, no se vuelve a ejecutar.
+      El SII exige <strong>1 único sobre</strong> con <strong>20 a 100 documentos</strong> de
+      <strong>todos los tipos certificados</strong> (T33 + T39). El número de envío (<em>TrackID</em>)
+      que arroja este sobre es el que debes ingresar en el portal SII para declarar la simulación.
+      Se envía a <code>maullin.sii.cl</code> (ambiente de certificación).
     </p>
+
+    <!-- Panel TrackID (visible tras ejecutar el sobre) -->
+    <div id="sim-sobre-panel" style="display:none; background:var(--c-surface-2,#1e2736); border:2px solid #27ae60;
+         border-radius:10px; padding:16px 20px; margin-bottom:16px">
+      <div style="font-size:.75rem; color:#27ae60; font-weight:700; margin-bottom:6px; letter-spacing:.04em">
+        <i class="bi bi-check-circle-fill"></i> SOBRE ENVIADO — N° DE ENVío PARA PORTAL SII
+      </div>
+      <div style="display:flex; align-items:center; gap:10px">
+        <span id="sim-sobre-trackid" style="font-size:1.45rem; font-weight:800; letter-spacing:.06em;
+              color:#2ecc71; font-family:monospace">—</span>
+        <button class="d-btn d-btn-sm d-btn-outline" onclick="navigator.clipboard.writeText(document.getElementById('sim-sobre-trackid').textContent)"
+          title="Copiar TrackID al portapapeles">
+          <i class="bi bi-clipboard"></i> Copiar
+        </button>
+      </div>
+      <div id="sim-sobre-meta" style="font-size:.72rem; color:var(--c-text-muted); margin-top:6px"></div>
+    </div>
+
+    <!-- Cards T33 / T39 (estado individual) -->
     <div class="row g-3 mb-3">
       <!-- T33 Facturas -->
       <div class="col-md-6">
@@ -410,7 +430,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
             <i class="bi bi-file-earmark-text" style="color:#3b6aec"></i> T33 — Facturas
           </div>
           <div style="font-size:.72rem; color:var(--c-text-muted); margin-bottom:8px">
-            50 facturas de prueba al ambiente de certificación SII.
+            Facturas de prueba incluidas en el sobre de simulación.
           </div>
           <div style="display:flex; align-items:center; gap:8px">
             <button class="d-btn d-btn-sm d-btn-outline flex-fill" onclick="certSimulacion(33)">
@@ -428,7 +448,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
             <i class="bi bi-receipt" style="color:#e67e22"></i> T39 — Boletas
           </div>
           <div style="font-size:.72rem; color:var(--c-text-muted); margin-bottom:8px">
-            50 boletas de prueba al ambiente de certificación SII.
+            Boletas de prueba incluidas en el sobre de simulación.
           </div>
           <div style="display:flex; align-items:center; gap:8px">
             <button class="d-btn d-btn-sm d-btn-outline flex-fill" onclick="certSimulacion(39)">
@@ -440,8 +460,15 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
         </div>
       </div>
     </div>
-    <button class="d-btn d-btn-primary" onclick="certSimulacionAll()">
-      <i class="bi bi-rocket-takeoff-fill"></i> Ejecutar Simulación Completa (T33 + T39)
+
+    <!-- Botón principal: sobre único (flujo correcto SII) -->
+    <button class="d-btn d-btn-primary" onclick="certSimulacionSobre()" style="margin-right:8px">
+      <i class="bi bi-envelope-arrow-up-fill"></i> Enviar Sobre de Simulación (15 T33 + 15 T39)
+    </button>
+    <!-- Botón heredado: envio individual (modo avanzado / re-intento) -->
+    <button class="d-btn d-btn-sm d-btn-outline" onclick="certSimulacionAll()"
+      title="Envía DTEs individualmente (un sobre por doc). Útselo solo si el SII rechazó el sobre único.">
+      <i class="bi bi-rocket-takeoff-fill"></i> Modo individual (avanzado)
     </button>
     <button class="d-btn d-btn-sm d-btn-outline" id="btn-sim-reset" onclick="certResetSim()"
       style="display:none; color:#e74c3c; margin-left:8px"
@@ -699,6 +726,22 @@ function applyState(estado) {
   // Mostrar botón de reset solo cuando la simulación está completada
   const btnSimReset = document.getElementById('btn-sim-reset');
   if (btnSimReset) btnSimReset.style.display = simOk ? '' : 'none';
+  // Mostrar panel TrackID del sobre si existe
+  const sobre = sim.sobre || {};
+  const sobrePanel = document.getElementById('sim-sobre-panel');
+  const sobreTrk   = document.getElementById('sim-sobre-trackid');
+  const sobreMeta  = document.getElementById('sim-sobre-meta');
+  if (sobrePanel && sobre.trackId) {
+    sobrePanel.style.display = '';
+    if (sobreTrk) sobreTrk.textContent = sobre.trackId;
+    if (sobreMeta) {
+      const tipos = (sobre.tipos||[]).join('+');
+      const ts    = (sobre.ts||'').slice(0,16).replace('T',' ');
+      sobreMeta.textContent = `${sobre.total_docs||0} docs (${tipos}) · ${ts}`;
+    }
+  } else if (sobrePanel) {
+    sobrePanel.style.display = 'none';
+  }
 
   // Paso 6 — Intercambio
   const ic  = estado.intercambio || {};
@@ -1195,7 +1238,33 @@ async function certLibro(tipo) {
   }
 }
 
-// ── Simulación ────────────────────────────────────────────────────────────────
+// ── Simulación en sobre único (requisito SII: 20-100 docs, 1 TrackID) ──────────
+async function certSimulacionSobre() {
+  const statusEl = document.getElementById('sim-status');
+  if (statusEl) statusEl.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span>'
+    + ' Generando y enviando sobre único (15 T33 + 15 T39 = 30 docs)… puede tardar 1-2 minutos.</div>';
+  log('Enviando sobre de simulación (15 T33 + 15 T39 = 30 docs)…', 'info');
+  try {
+    const res = await api('cert_sim_sobre');
+    if (res.ok) {
+      const trk = res.trackId || '(sin trackId)';
+      if (statusEl) statusEl.innerHTML = `<div class="d-alert success">`
+        + `<i class="bi bi-check-circle"></i> Sobre enviado OK. `
+        + `<strong>N° de Envío: ${trk}</strong> `
+        + `— ${res.total_docs||0} documentos. Copia este número e ingrésalo en el portal SII.</div>`;
+      log(`Sobre simulación OK. TrackID: ${trk} (${res.total_docs||0} docs)`, 'ok');
+    } else {
+      if (statusEl) statusEl.innerHTML = `<div class="d-alert danger"><i class="bi bi-x-circle"></i> ${res.error||'Error desconocido'}</div>`;
+      log('Error sobre simulación: ' + (res.error||'?'), 'error');
+    }
+    await loadState();
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
+    log('Error: ' + e.message, 'error');
+  }
+}
+
+// ── Simulación individual heredada (avanzado / re-intento) ────────────────────
 async function certSimulacion(tipo) {
   const statusEl = document.getElementById('sim-status');
   const badge    = document.getElementById('sim-t'+tipo+'-badge');
