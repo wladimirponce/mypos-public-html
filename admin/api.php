@@ -4975,6 +4975,7 @@ function generateLibro(array $data): array {
     $detalles  = $data['detalles']  ?? [];
     $folioNotif = (int)($data['folioNotificacion'] ?? 0);
     $xmlFolioNotif = $folioNotif > 0 ? "  <FolioNotificacion>{$folioNotif}</FolioNotificacion>\n" : '';
+    $xmlTipoLibro = $folioNotif > 0 ? 'ESPECIAL' : 'MENSUAL';
 
     $idLibro = "L" . str_replace('-', '', $periodo) . "T" . time();
 
@@ -5119,7 +5120,7 @@ function generateLibro(array $data): array {
   <FchResol>$fchR</FchResol>
   <NroResol>$nroR</NroResol>
   <TipoOperacion>$tipoLibro</TipoOperacion>
-  <TipoLibro>MENSUAL</TipoLibro>
+  <TipoLibro>{$xmlTipoLibro}</TipoLibro>
   <TipoEnvio>$tipoEnvio</TipoEnvio>
 $xmlFolioNotif</Caratula>
 $resumenXml
