@@ -787,14 +787,19 @@ class CertificationManager
                 break;
             }
             try {
+                $recSimul = [
+                    'rut'    => $rutRec,
+                    'nombre' => 'Receptor Simulacion',
+                    'giro'   => 'Giro Pruebas',
+                ];
+                if (!in_array($tipo, [39, 41])) {
+                    $recSimul['direccion'] = 'Direccion Simulacion 123';
+                    $recSimul['comuna']    = 'Santiago';
+                }
                 $dte = generateDTE([
                     'tipoDTE' => $tipo,
                     'folio'   => $folioToUse,
-                    'receptor' => [
-                        'rut'    => $rutRec,
-                        'nombre' => 'Receptor Simulacion',
-                        'giro'   => 'Giro Pruebas',
-                    ],
+                    'receptor' => $recSimul,
                     'items' => [[
                         'nombre'   => 'Producto Simulacion ' . ($done + $i + 1),
                         'cantidad' => 1,
