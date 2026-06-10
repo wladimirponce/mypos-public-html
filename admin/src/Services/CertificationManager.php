@@ -268,6 +268,7 @@ class CertificationManager
                     'folio'  => (int)$dte['folio'],
                     'ts'     => date('Y-m-d\TH:i:s'),
                 ];
+                $this->preservarFolioAnterior($state, $caseId, (int)$dte['folio']);
                 $state['pruebas'][$caseId] = $results[$caseId];
             } catch (\Throwable $e) {
                 $results[$caseId] = [
@@ -277,6 +278,7 @@ class CertificationManager
                     'error'  => $e->getMessage(),
                     'ts'     => date('Y-m-d\TH:i:s'),
                 ];
+                $this->preservarFolioAnterior($state, $caseId, null);
                 $state['pruebas'][$caseId] = $results[$caseId];
                 $this->saveState($state);
                 return $results;
@@ -479,6 +481,31 @@ class CertificationManager
         return 33;
     }
 
+    /**
+     * Preserva el folio anterior de un caso como phantom antes de sobreescribirlo.
+     * El state guarda solo el ÚLTIMO folio por caseId: sin esto, los folios de
+     * corridas previas desaparecen del historial y certFolioBaseLibre puede
+     * reasignarlos (pasó con T61: el folio 10 quemado fue reelegido después de
+     * que la corrida siguiente sobreescribiera el caso con folio 14).
+     */
+    private function preservarFolioAnterior(array &$state, string $caseId, $nuevoFolio): void
+    {
+        $prev = $state['pruebas'][$caseId] ?? null;
+        if (!$prev || empty($prev['folio']) || empty($prev['tipo'])) return;
+        if ($nuevoFolio !== null && (int)$prev['folio'] === (int)$nuevoFolio) return;
+        $phKey = "__hw_t{$prev['tipo']}_f{$prev['folio']}__";
+        if (isset($state['pruebas'][$phKey])) return;
+        $state['pruebas'][$phKey] = [
+            'tipo'    => (int)$prev['tipo'],
+            'folio'   => (int)$prev['folio'],
+            'status'  => 'ok',
+            'trackId' => $prev['trackId'] ?? null,
+            'error'   => null,
+            'ts'      => date('Y-m-d\TH:i:s'),
+            'note'    => "phantom: folio de corrida anterior preservado al reasignar {$caseId}",
+        ];
+    }
+
     private function runOneCase(string $caseId, array &$state): array
     {
         $dte = ['ok' => false, 'tipo' => null, 'folio' => null]; // inicializar para preservar en catch
@@ -518,6 +545,7 @@ class CertificationManager
             ];
         }
 
+        $this->preservarFolioAnterior($state, $caseId, $result['folio'] ?? null);
         $state['pruebas'][$caseId] = $result;
         return $result;
     }
