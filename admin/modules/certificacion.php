@@ -723,9 +723,9 @@ function applyState(estado) {
   }
   _updSimCard('t33', s33);
   _updSimCard('t39', s39);
-  // Mostrar botón de reset solo cuando la simulación está completada
+  // Mostrar botón de reset cuando hay cualquier estado de simulación (parcial u ok)
   const btnSimReset = document.getElementById('btn-sim-reset');
-  if (btnSimReset) btnSimReset.style.display = simOk ? '' : 'none';
+  if (btnSimReset) btnSimReset.style.display = (s33.status || s39.status || sim.sobre) ? '' : 'none';
   // Mostrar panel TrackID del sobre si existe
   const sobre = sim.sobre || {};
   const sobrePanel = document.getElementById('sim-sobre-panel');
