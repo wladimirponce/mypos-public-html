@@ -47,4 +47,35 @@ class UsuarioRepository extends BaseRepository
         $stmt = $this->db->prepare($sql);
         $stmt->execute([$id, $empresaId]);
     }
+
+    public function actualizarUsuario(int $id, int $empresaId, array $data): bool
+    {
+        $fields = [
+            'sucursal_id = ?',
+            'nombre = ?',
+            'email = ?',
+            'rol = ?',
+            'pin_caja = ?'
+        ];
+        $params = [
+            $data['sucursal_id'] ?: null,
+            $data['nombre'],
+            $data['email'],
+            $data['rol'] ?? 'cajero',
+            $data['pin_caja'] ?? null
+        ];
+
+        if (!empty($data['password'])) {
+            $fields[] = 'password_hash = ?';
+            $params[] = password_hash($data['password'], PASSWORD_DEFAULT);
+        }
+
+        $params[] = $id;
+        $params[] = $empresaId;
+
+        $sql = "UPDATE sii_usuario SET " . implode(', ', $fields) . " WHERE id = ? AND empresa_id = ?";
+        $stmt = $this->db->prepare($sql);
+        return $stmt->execute($params);
+    }
 }
+

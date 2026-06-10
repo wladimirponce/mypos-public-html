@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 if (session_status() === PHP_SESSION_NONE) session_start();
 date_default_timezone_set('America/Santiago');
 ini_set('display_errors', '1'); error_reporting(E_ALL);
@@ -587,6 +587,34 @@ if ($action) {
             try {
                 $id = $repo->crearUsuario($data);
                 echo json_encode(['ok' => true, 'id' => $id]);
+            } catch (\Exception $e) {
+                echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+            }
+            break;
+        case 'actualizar_usuario':
+            $repo = new \App\Repositories\UsuarioRepository();
+            try {
+                $id = (int)($data['id'] ?? $_GET['id'] ?? $_POST['id'] ?? 0);
+                $empId = (int)($data['empresa_id'] ?? $_GET['empresa_id'] ?? $_POST['empresa_id'] ?? 0);
+                if ($id <= 0 || $empId <= 0) {
+                    throw new Exception('ID de usuario o empresa inválidos.');
+                }
+                $ok = $repo->actualizarUsuario($id, $empId, $data);
+                echo json_encode(['ok' => $ok]);
+            } catch (\Exception $e) {
+                echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+            }
+            break;
+        case 'desactivar_usuario':
+            $repo = new \App\Repositories\UsuarioRepository();
+            try {
+                $id = (int)($data['id'] ?? $_GET['id'] ?? $_POST['id'] ?? 0);
+                $empId = (int)($data['empresa_id'] ?? $_GET['empresa_id'] ?? $_POST['empresa_id'] ?? 0);
+                if ($id <= 0 || $empId <= 0) {
+                    throw new Exception('ID de usuario o empresa inválidos.');
+                }
+                $repo->desactivarUsuario($id, $empId);
+                echo json_encode(['ok' => true]);
             } catch (\Exception $e) {
                 echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
             }

@@ -10,6 +10,25 @@ if (!$dbOk) {
     return;
 }
 
+// Interceptor AJAX para obtener sucursales
+if (isset($_GET['action']) && $_GET['action'] === 'get_sucursales') {
+    header('Content-Type: application/json; charset=UTF-8');
+    ob_clean();
+    try {
+        $empresaId = (int)($_GET['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            throw new Exception('Empresa inválida.');
+        }
+        $stmt = $db->prepare("SELECT id, nombre FROM sii_sucursal WHERE empresa_id = ? AND activa = 1 ORDER BY nombre");
+        $stmt->execute([$empresaId]);
+        $sucursales = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        echo json_encode(['ok' => true, 'sucursales' => $sucursales]);
+    } catch (Exception $e) {
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
 $tableExists = static function (PDO $db, string $table): bool {
     $stmt = $db->prepare(
         'SELECT COUNT(*)
@@ -343,6 +362,11 @@ function isTrialSubscription(array $cliente): bool
                             </td>
                             <td>
                                 <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">
+                                    <?php if ($hasSii): ?>
+                                        <button type="button" class="d-btn d-btn-sm d-btn-info w-100 mb-1" style="background:#0dcaf0;color:#000;border:none;text-align:left;display:flex;align-items:center;gap:6px" onclick="abrirModalUsuarios(<?= (int)$cliente['sii_empresa_id'] ?>, '<?= htmlspecialchars(addslashes($cliente['razon_social'] ?: $cliente['nombre_fantasia'])) ?>')">
+                                            <i class="bi bi-people"></i> Usuarios
+                                        </button>
+                                    <?php endif; ?>
                                     <?php if (!$hasSii): ?>
                                         <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=empresas">Crear ficha SII</a>
                                     <?php elseif (!$hasCert): ?>
@@ -375,3 +399,323 @@ function isTrialSubscription(array $cliente): bool
         <?php endif; ?>
     </div>
 </div>
+
+<!-- Modal Gestión de Usuarios -->
+<div class="modal fade" id="modalUsuarios" tabindex="-1" aria-labelledby="modalUsuariosLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalUsuariosLabel"><i class="bi bi-people-fill"></i> Usuarios - <span id="nombre-empresa-modal"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        
+        <!-- Alertas dinámicas -->
+        <div id="modal-alert" class="alert d-none" role="alert"></div>
+
+        <!-- Vista 1: Tabla de Usuarios -->
+        <div id="vista-lista">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="mb-0">Listado de Operadores/Usuarios POS</h6>
+            <button class="btn btn-sm btn-primary" onclick="mostrarFormularioCrear()"><i class="bi bi-person-plus"></i> Nuevo Usuario</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover table-striped align-middle" style="font-size: 13px;">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Email</th>
+                  <th>Rol</th>
+                  <th>Sucursal</th>
+                  <th>PIN</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-usuarios-body">
+                <!-- AJAX -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Vista 2: Formulario (Crear / Editar) -->
+        <div id="vista-formulario" class="d-none">
+          <h6 id="titulo-formulario" class="mb-3">Nuevo Usuario</h6>
+          <form id="form-usuario" onsubmit="guardarUsuario(event)">
+            <input type="hidden" id="usr-id" name="id" value="">
+            <input type="hidden" id="usr-empresa-id" name="empresa_id" value="">
+            
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label for="usr-nombre" class="form-label">Nombre Completo</label>
+                <input type="text" class="form-control form-control-sm" id="usr-nombre" required>
+              </div>
+              <div class="col-md-6">
+                <label for="usr-email" class="form-label">Correo Electrónico (Email)</label>
+                <input type="email" class="form-control form-control-sm" id="usr-email" required>
+              </div>
+              <div class="col-md-6">
+                <label for="usr-password" class="form-label">Contraseña <span class="text-muted small" id="lbl-password-req">(Obligatoria)</span></label>
+                <input type="password" class="form-control form-control-sm" id="usr-password">
+                <div class="form-text small" id="help-password" style="display:none">Dejar en blanco para conservar la actual.</div>
+              </div>
+              <div class="col-md-6">
+                <label for="usr-rol" class="form-label">Rol / Permiso</label>
+                <select class="form-select form-select-sm" id="usr-rol" required>
+                  <option value="cajero">Cajero</option>
+                  <option value="supervisor">Supervisor</option>
+                  <option value="admin">Administrador</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="usr-sucursal" class="form-label">Sucursal Asignada</label>
+                <select class="form-select form-select-sm" id="usr-sucursal">
+                  <!-- AJAX -->
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label for="usr-pin" class="form-label">PIN Caja (login rápido POS)</label>
+                <input type="text" class="form-control form-control-sm" id="usr-pin" placeholder="Ej: 1234">
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2 mt-4">
+              <button type="button" class="btn btn-sm btn-secondary" onclick="mostrarLista()"><i class="bi bi-x-circle"></i> Cancelar</button>
+              <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-circle"></i> Guardar</button>
+            </div>
+          </form>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let modalInstancia = null;
+let sucursalesCache = [];
+
+function abrirModalUsuarios(empresaId, razonSocial) {
+    document.getElementById('nombre-empresa-modal').textContent = razonSocial;
+    document.getElementById('usr-empresa-id').value = empresaId;
+    
+    mostrarLista();
+    limpiarAlerta();
+    
+    const modalEl = document.getElementById('modalUsuarios');
+    if (!modalInstancia) {
+        modalInstancia = new bootstrap.Modal(modalEl);
+    }
+    modalInstancia.show();
+    
+    cargarUsuarios(empresaId);
+}
+
+async function cargarUsuarios(empresaId) {
+    const tbody = document.getElementById('tabla-usuarios-body');
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2" role="status"></div> Cargando usuarios...</td></tr>';
+    
+    try {
+        const resp = await fetch(`api.php?action=listar_usuarios&empresa_id=${empresaId}`);
+        const data = await resp.json();
+        
+        if (!data.ok) {
+            mostrarAlerta(data.error || 'Error al obtener usuarios', 'danger');
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Error al cargar datos</td></tr>';
+            return;
+        }
+        
+        const usuarios = data.data || [];
+        
+        await cargarSucursalesSelect(empresaId);
+        
+        if (usuarios.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No hay usuarios registrados en esta empresa.</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = usuarios.map(u => {
+            const rolLabel = u.rol === 'admin' ? '<span class="badge bg-primary">Admin</span>' : (u.rol === 'supervisor' ? '<span class="badge bg-warning text-dark">Supervisor</span>' : '<span class="badge bg-secondary">Cajero</span>');
+            const sucursalLabel = u.sucursal_nombre ? u.sucursal_nombre : '<em class="text-muted">Casa Matriz/Ninguna</em>';
+            const pinLabel = u.pin_caja ? `<code>${u.pin_caja}</code>` : '<span class="text-muted">-</span>';
+            
+            const uEscaped = JSON.stringify(u).replace(/"/g, '&quot;');
+            
+            return `
+                <tr>
+                    <td><strong>${esc(u.nombre)}</strong></td>
+                    <td>${esc(u.email)}</td>
+                    <td>${rolLabel}</td>
+                    <td>${esc(sucursalLabel)}</td>
+                    <td>${pinLabel}</td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-primary" onclick="editarUsuario(${uEscaped})" title="Editar usuario"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-outline-danger" onclick="desactivarUsuario(${u.id}, ${u.empresa_id})" title="Desactivar usuario"><i class="bi bi-trash"></i></button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        
+    } catch (e) {
+        mostrarAlerta(e.message, 'danger');
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-4">Error en la conexión</td></tr>';
+    }
+}
+
+async function cargarSucursalesSelect(empresaId) {
+    const select = document.getElementById('usr-sucursal');
+    select.innerHTML = '<option value="">Casa Matriz / Sin Sucursal</option>';
+    
+    try {
+        const resp = await fetch(`dashboard.php?module=clientes_mypos&action=get_sucursales&empresa_id=${empresaId}`);
+        const data = await resp.json();
+        
+        if (data.ok && data.sucursales) {
+            sucursalesCache = data.sucursales;
+            data.sucursales.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.nombre;
+                select.appendChild(opt);
+            });
+        }
+    } catch (e) {
+        console.error('Error cargando sucursales:', e);
+    }
+}
+
+function mostrarLista() {
+    document.getElementById('vista-lista').classList.remove('d-none');
+    document.getElementById('vista-formulario').classList.add('d-none');
+}
+
+function mostrarFormularioCrear() {
+    document.getElementById('titulo-formulario').innerHTML = '<i class="bi bi-person-plus"></i> Nuevo Usuario';
+    document.getElementById('form-usuario').reset();
+    document.getElementById('usr-id').value = '';
+    document.getElementById('lbl-password-req').style.display = '';
+    document.getElementById('help-password').style.display = 'none';
+    document.getElementById('usr-password').required = true;
+    
+    document.getElementById('vista-lista').classList.add('d-none');
+    document.getElementById('vista-formulario').classList.remove('d-none');
+}
+
+function editarUsuario(u) {
+    document.getElementById('titulo-formulario').innerHTML = '<i class="bi bi-pencil-square"></i> Editar Usuario';
+    document.getElementById('form-usuario').reset();
+    
+    document.getElementById('usr-id').value = u.id;
+    document.getElementById('usr-nombre').value = u.nombre;
+    document.getElementById('usr-email').value = u.email;
+    document.getElementById('usr-rol').value = u.rol;
+    document.getElementById('usr-sucursal').value = u.sucursal_id || '';
+    document.getElementById('usr-pin').value = u.pin_caja || '';
+    
+    document.getElementById('lbl-password-req').style.display = 'none';
+    document.getElementById('help-password').style.display = 'block';
+    document.getElementById('usr-password').required = false;
+    
+    document.getElementById('vista-lista').classList.add('d-none');
+    document.getElementById('vista-formulario').classList.remove('d-none');
+}
+
+async function guardarUsuario(event) {
+    event.preventDefault();
+    limpiarAlerta();
+    
+    const id = document.getElementById('usr-id').value;
+    const empresaId = document.getElementById('usr-empresa-id').value;
+    const action = id ? 'actualizar_usuario' : 'crear_usuario';
+    
+    const payload = {
+        id: id ? parseInt(id) : undefined,
+        empresa_id: parseInt(empresaId),
+        nombre: document.getElementById('usr-nombre').value.trim(),
+        email: document.getElementById('usr-email').value.trim(),
+        password: document.getElementById('usr-password').value || undefined,
+        rol: document.getElementById('usr-rol').value,
+        sucursal_id: document.getElementById('usr-sucursal').value ? parseInt(document.getElementById('usr-sucursal').value) : null,
+        pin_caja: document.getElementById('usr-pin').value.trim() || null
+    };
+    
+    try {
+        const resp = await fetch('api.php?action=' + action, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        
+        if (!data.ok) {
+            mostrarAlerta(data.error || 'Error al guardar el usuario', 'danger');
+            return;
+        }
+        
+        mostrarAlerta(id ? 'Usuario actualizado con éxito' : 'Usuario creado con éxito', 'success');
+        mostrarLista();
+        cargarUsuarios(empresaId);
+        
+    } catch (e) {
+        mostrarAlerta('Error de red al guardar: ' + e.message, 'danger');
+    }
+}
+
+async function desactivarUsuario(id, empresaId) {
+    if (!confirm('¿Seguro que deseas desactivar este usuario? Ya no aparecerá en el listado activo.')) {
+        return;
+    }
+    
+    limpiarAlerta();
+    try {
+        const resp = await fetch('api.php?action=desactivar_usuario', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ id, empresa_id: empresaId })
+        });
+        const data = await resp.json();
+        
+        if (!data.ok) {
+            mostrarAlerta(data.error || 'Error al desactivar el usuario', 'danger');
+            return;
+        }
+        
+        mostrarAlerta('Usuario desactivado con éxito', 'success');
+        cargarUsuarios(empresaId);
+        
+    } catch (e) {
+        mostrarAlerta('Error de red al desactivar: ' + e.message, 'danger');
+    }
+}
+
+function mostrarAlerta(msg, type) {
+    const alertEl = document.getElementById('modal-alert');
+    alertEl.className = `alert alert-${type} mb-3 py-2 px-3 small`;
+    alertEl.textContent = msg;
+    alertEl.classList.remove('d-none');
+}
+
+function limpiarAlerta() {
+    const alertEl = document.getElementById('modal-alert');
+    alertEl.classList.add('d-none');
+    alertEl.textContent = '';
+}
+
+function esc(s) {
+    if (s === null || s === undefined) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+</script>
+
+
