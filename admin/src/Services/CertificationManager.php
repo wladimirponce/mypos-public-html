@@ -1318,11 +1318,11 @@ XML;
                 $d['iva'] = 0;
             }
             if (strpos($obs, 'retencion') !== false || strpos($obs, 'retención') !== false) {
-                // Retención total: el IVA retenido va SOLO en IVARetTotal (no en
-                // MntIVA) y el total del documento = neto (reparos SII: "El Monto
-                // Total No Cuadra" / "No Informa Adecuadamente IVA Retenido Total").
+                // Retención total: MntIVA SÍ se informa (el SII valida MntIVA =
+                // MntNeto*TasaImp y rechaza "Falta [MntIVA]" si se omite). La
+                // retención se expresa en IVARetTotal y descuenta del total:
+                // MntTotal = neto + iva - retención = neto.
                 $d['ivaRetTotal'] = $iva;
-                $d['iva']   = 0;
                 $d['total'] = $neto + $exe;
             }
 
