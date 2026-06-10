@@ -2373,6 +2373,12 @@ function buildExportacionXML(
     $xmlRef = '';
     foreach (array_slice($referencias, 0, 40) as $idx => $ref) {
         $l = $idx + 1;
+        // Referencia al SET de pruebas de certificación: FolioRef = folio del
+        // propio documento (recién conocido aquí) y FchRef = fecha de emisión.
+        if (($ref['tipo'] ?? '') === 'SET' && empty($ref['folio'])) {
+            $ref['folio'] = $folio;
+            if (empty($ref['fecha'])) $ref['fecha'] = date('Y-m-d');
+        }
         $xmlRef .= "<Referencia>\n  <NroLinRef>$l</NroLinRef>\n";
         if (!empty($ref['tipo'])) $xmlRef .= "  <TpoDocRef>" . $h($ref['tipo']) . "</TpoDocRef>\n";
         if (!empty($ref['folio'])) $xmlRef .= "  <FolioRef>" . $h($ref['folio']) . "</FolioRef>\n";
@@ -2596,6 +2602,11 @@ function buildDocumentoXML(
     $xmlRef = '';
     foreach (array_slice($referencias, 0, 40) as $idx => $ref) {
         $l = $idx + 1;
+        // Referencia SET de certificación: FolioRef = folio del propio documento
+        if (($ref['tipo'] ?? '') === 'SET' && empty($ref['folio'])) {
+            $ref['folio'] = $folio;
+            if (empty($ref['fecha'])) $ref['fecha'] = date('Y-m-d');
+        }
         $xmlRef .= "<Referencia>\n";
         $xmlRef .= "  <NroLinRef>$l</NroLinRef>\n";
         if (!empty($ref['tipo']))   $xmlRef .= "  <TpoDocRef>" . $h($ref['tipo']) . "</TpoDocRef>\n";
@@ -2745,6 +2756,11 @@ function buildLiquidacionXML(
     $xmlRef = '';
     foreach (array_slice($referencias, 0, 40) as $idx => $ref) {
         $l = $idx + 1;
+        // Referencia SET de certificación: FolioRef = folio del propio documento
+        if (($ref['tipo'] ?? '') === 'SET' && empty($ref['folio'])) {
+            $ref['folio'] = $folio;
+            if (empty($ref['fecha'])) $ref['fecha'] = date('Y-m-d');
+        }
         $xmlRef .= "<Referencia>\n  <NroLinRef>$l</NroLinRef>\n";
         if (!empty($ref['tipo']))   $xmlRef .= "  <TpoDocRef>" . $h($ref['tipo']) . "</TpoDocRef>\n";
         if (!empty($ref['folio']))  $xmlRef .= "  <FolioRef>" . $h($ref['folio']) . "</FolioRef>\n";
@@ -5094,6 +5110,10 @@ function generateLibro(array $data): array {
             $resumenXml .= "    <TotIVAUsoComun>{$tot['TotIVAUsoComun']}</TotIVAUsoComun>\n";
             if ($tot['FctProp'] !== null) {
                 $resumenXml .= "    <FctProp>{$tot['FctProp']}</FctProp>\n";
+                // Crédito uso común = factor de proporcionalidad x IVA uso común.
+                // Sin este campo el SII reparó "El Credito IVA Uso Comun No Cuadra".
+                $credUC = (int)round((float)$tot['FctProp'] * (int)$tot['TotIVAUsoComun']);
+                $resumenXml .= "    <TotCredIVAUsoComun>{$credUC}</TotCredIVAUsoComun>\n";
             }
         }
         

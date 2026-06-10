@@ -560,6 +560,15 @@ class CertificationManager
             'tipoDTE'  => $tipoDte,
             'receptor' => $this->certReceptor($tipoDte),
             'items'    => $items,
+            // Referencia al SET de pruebas: el revisor del SII identifica cada caso
+            // por <TpoDocRef>SET</TpoDocRef> + <RazonRef>CASO {AT}-{N}</RazonRef>.
+            // Sin ella el set completo se rechaza con "El Documento No Esta en el
+            // Envio" aunque los DTE estén aceptados. FolioRef (= folio del propio
+            // documento) se completa en el builder XML, donde el folio ya existe.
+            'referencias' => [[
+                'tipo'  => 'SET',
+                'razon' => 'CASO ' . (string)($caso['caso'] ?? ''),
+            ]],
         ];
 
         if (isset($caso['descuentoGlobal'])) {
@@ -594,7 +603,7 @@ class CertificationManager
 
         if (!empty($caso['referencia']) && in_array($tipoDte, [56, 61], true)) {
             $ref = $this->buildUploadedReference($caso, $casos, $state);
-            $data['referencias'] = [$ref];
+            $data['referencias'][] = $ref;
 
             if (empty($data['items']) || $this->itemsRequireReferencePrices($data['items'], $ref)) {
                 $data['items'] = $this->itemsForUploadedReference($ref, $caso, $casos);
@@ -1281,7 +1290,12 @@ XML;
                 $d['iva'] = 0;
             }
             if (strpos($obs, 'retencion') !== false || strpos($obs, 'retención') !== false) {
+                // Retención total: el IVA retenido va SOLO en IVARetTotal (no en
+                // MntIVA) y el total del documento = neto (reparos SII: "El Monto
+                // Total No Cuadra" / "No Informa Adecuadamente IVA Retenido Total").
                 $d['ivaRetTotal'] = $iva;
+                $d['iva']   = 0;
+                $d['total'] = $neto + $exe;
             }
 
             $detalles[] = $d;
