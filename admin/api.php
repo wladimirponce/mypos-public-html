@@ -2171,7 +2171,12 @@ function calcularMontos(array $items, int $tipo): array {
         $qty  = (float)($it['cantidad']  ?? 1);
         $prc  = (float)($it['precio']    ?? 0);
         $desc = (float)($it['descuento'] ?? 0);
-        $monto = round($qty * $prc * (1 - $desc / 100));
+        // Misma aritmética que la línea del XML (buildDocumentoXML): bruto
+        // redondeado, descuento redondeado y resta. Redondear el neto directo
+        // difiere en ±1 cuando el descuento cae en ,5 → el encabezado deja de
+        // cuadrar con la suma de MontoItem (reparo SII "Valores del Encabezado").
+        $bruto = round($qty * $prc);
+        $monto = $bruto - ($desc > 0 ? round($bruto * $desc / 100) : 0);
         if (!empty($it['exento'])) {
             $sumaExenta += $monto;
         } else {
@@ -2507,7 +2512,10 @@ function buildDocumentoXML(
         if ($esExento || ($it['exento'] ?? false)) $xmlDet .= "  <IndExe>1</IndExe>\n";
         $xmlDet .= "  <NmbItem>$nom</NmbItem>\n";
         if ($desc) $xmlDet .= "  <DscItem>$desc</DscItem>\n";
-        $xmlDet .= "  <QtyItem>" . number_format($qty, 6, '.', '') . "</QtyItem>\n";
+        // Líneas descriptivas sin valor (NC de texto del set de pruebas) van solo
+        // con NmbItem + MontoItem 0: emitir QtyItem en ellas hace que el revisor
+        // SII rechace "Los Valores de la Linea 1 No Cuadran".
+        if ($qty > 0) $xmlDet .= "  <QtyItem>" . number_format($qty, 6, '.', '') . "</QtyItem>\n";
         if ($uMed) $xmlDet .= "  <UnmdItem>$uMed</UnmdItem>\n";
         if ($prc > 0) $xmlDet .= "  <PrcItem>$prc</PrcItem>\n";
         if ($dp > 0) {
@@ -2716,7 +2724,10 @@ function buildLiquidacionXML(
         if ($it['exento'] ?? false) $xmlDet .= "  <IndExe>1</IndExe>\n";
         $xmlDet .= "  <NmbItem>$nom</NmbItem>\n";
         if ($desc) $xmlDet .= "  <DscItem>$desc</DscItem>\n";
-        $xmlDet .= "  <QtyItem>" . number_format($qty, 6, '.', '') . "</QtyItem>\n";
+        // Líneas descriptivas sin valor (NC de texto del set de pruebas) van solo
+        // con NmbItem + MontoItem 0: emitir QtyItem en ellas hace que el revisor
+        // SII rechace "Los Valores de la Linea 1 No Cuadran".
+        if ($qty > 0) $xmlDet .= "  <QtyItem>" . number_format($qty, 6, '.', '') . "</QtyItem>\n";
         if ($uMed) $xmlDet .= "  <UnmdItem>$uMed</UnmdItem>\n";
         if ($prc > 0) $xmlDet .= "  <PrcItem>$prc</PrcItem>\n";
         if ($dp > 0) $xmlDet .= "  <DescuentoPct>$dp</DescuentoPct>\n";

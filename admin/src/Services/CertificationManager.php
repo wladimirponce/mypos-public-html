@@ -766,7 +766,7 @@ class CertificationManager
         if ((int)($ref['codigo'] ?? 0) === 2) {
             return [[
                 'nombre'   => mb_substr((string)($ref['razon'] ?? 'CORRIGE TEXTO'), 0, 80, 'UTF-8'),
-                'cantidad' => 1,
+                'cantidad' => 0, // sin QtyItem: solo NmbItem + MontoItem 0
                 'precio'   => 0,
                 'exento'   => false,
             ]];
@@ -785,7 +785,7 @@ class CertificationManager
                     ?? ($ref['razon'] ?? 'REFERENCIA SET DE PRUEBAS'));
                 return [[
                     'nombre'   => mb_substr($razonCand, 0, 80, 'UTF-8'),
-                    'cantidad' => 1,
+                    'cantidad' => 0, // sin QtyItem: solo NmbItem + MontoItem 0
                     'precio'   => 0,
                     'exento'   => false,
                 ]];
@@ -815,7 +815,7 @@ class CertificationManager
 
         return [[
             'nombre'   => mb_substr((string)($ref['razon'] ?? 'AJUSTE REFERENCIA'), 0, 80, 'UTF-8'),
-            'cantidad' => 1,
+            'cantidad' => 0, // sin QtyItem: solo NmbItem + MontoItem 0
             'precio'   => 0,
             'exento'   => false,
         ]];
