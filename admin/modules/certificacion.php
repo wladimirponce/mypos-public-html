@@ -212,7 +212,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   <div class="paso-header" onclick="togglePaso(3)">
     <div class="paso-num" id="pnum-3">3</div>
     <div class="paso-title">Facturas, NC, ND y Guías (Set Básico)
-      <span class="paso-desc">T33 · T61 · T56 · T52 — cada documento en sobre individual</span>
+      <span class="paso-desc">T33 · T61 · T56 · T52 — todos los casos en UN sobre (un TrackID)</span>
     </div>
     <span id="pbadge-3" class="d-badge"></span>
     <i class="bi bi-chevron-down ms-2" id="pchev-3"></i>
@@ -224,6 +224,32 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
       </button>
       <button class="d-btn d-btn-outline" onclick="certMuestras()">
         <i class="bi bi-printer"></i> Muestras PDF
+      </button>
+    </div>
+    <!-- Reenvío selectivo por tipo: un solo sobre con folios nuevos -->
+    <div style="border:1px solid var(--c-border); border-radius:6px; padding:10px 12px; margin-bottom:10px; display:flex; gap:14px; align-items:center; flex-wrap:wrap">
+      <span style="font-size:.82rem; font-weight:600" title="Reenvía solo los tipos marcados, todos juntos en UN sobre con folios nuevos. Útil cuando el SII rechazó parte del set.">Reenviar por tipo:</span>
+      <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="33" checked> T33 Facturas</label>
+      <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="61" checked> T61 NC</label>
+      <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="56" checked> T56 ND</label>
+      <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="52"> T52 Guías</label>
+      <button class="d-btn d-btn-sm d-btn-primary" onclick="certRunTipos()">
+        <i class="bi bi-send"></i> Reenviar en un sobre
+      </button>
+    </div>
+    <!-- Folio quemado: avanza el high-water para no repetir folios que el SII ya recibió -->
+    <div style="border:1px dashed var(--c-border); border-radius:6px; padding:10px 12px; margin-bottom:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+      <span style="font-size:.82rem; font-weight:600" title="Si el SII rechaza con 'Folio ya fue recibido' (DTE-3-101), registre aquí el folio quemado más alto de ese tipo. La próxima corrida partirá del siguiente.">Folio quemado en SII:</span>
+      <select id="hw-tipo" style="padding:4px 8px; border:1px solid var(--c-border); border-radius:6px; font-size:.8rem">
+        <option value="33">T33</option>
+        <option value="61">T61</option>
+        <option value="56">T56</option>
+        <option value="52">T52</option>
+        <option value="39">T39</option>
+      </select>
+      <input type="number" id="hw-folio" min="1" placeholder="folio" style="width:90px; padding:4px 8px; border:1px solid var(--c-border); border-radius:6px; font-size:.8rem">
+      <button class="d-btn d-btn-sm d-btn-outline" onclick="certAdvanceHw()">
+        <i class="bi bi-fast-forward"></i> Marcar quemado
       </button>
     </div>
     <!-- Casos generales (dinámicos) -->
@@ -1018,6 +1044,42 @@ async function certRunAll() {
     status.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
     log('Error Paso 3: '+e.message, 'error');
   }
+}
+
+// ── Reenvío selectivo por tipos: un solo sobre, folios nuevos ─────────────────
+async function certRunTipos() {
+  const tipos = Array.from(document.querySelectorAll('.rt-tipo:checked')).map(c => c.value);
+  if (!tipos.length) { log('Seleccione al menos un tipo para reenviar.', 'warn'); return; }
+  const status = document.getElementById('cert-run-status');
+  status.innerHTML = `<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Reenviando tipos ${tipos.join(', ')} en un sobre…</div>`;
+  log(`Reenviando tipos ${tipos.join(', ')} (un sobre, folios nuevos)…`, 'info');
+  try {
+    const res = await api('cert_run_tipos', { tipos: tipos.join(',') });
+    if (!res.ok) throw new Error(res.error || 'Error desconocido');
+    applyState(res.estado);
+    Object.entries(res.resultados || {}).forEach(([cid, r]) => {
+      if (!r || typeof r !== 'object') return;
+      log(`${cid}: ${r.status||'?'} — folio ${r.folio||'-'} TRK ${r.trackId||'-'} ${r.error?'| '+r.error:''}`, r.status==='ok'?'ok':'error');
+    });
+    const trks = [...new Set(Object.values(res.resultados||{}).map(r=>r&&r.trackId).filter(Boolean))];
+    status.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> Reenvío completado. TrackID: ${trks.join(', ')||'—'}</div>`;
+  } catch(e) {
+    status.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
+    log('Error reenvío por tipos: ' + e.message, 'error');
+  }
+}
+
+// ── Folio quemado: avanza el high-water del tipo para no repetir folios ──────
+async function certAdvanceHw() {
+  const tipo  = document.getElementById('hw-tipo').value;
+  const folio = parseInt(document.getElementById('hw-folio').value, 10);
+  if (!folio || folio < 1) { log('Ingrese el número de folio quemado.', 'warn'); return; }
+  try {
+    const res = await api('cert_advance_hw', { tipo, folio });
+    log(res.ok ? res.mensaje : ('Error: ' + (res.error || '?')), res.ok ? 'ok' : 'error');
+    if (res.ok) document.getElementById('hw-folio').value = '';
+    await loadState();
+  } catch(e) { log('Error avanzando folio: ' + e.message, 'error'); }
 }
 
 async function certRunCase(cid) {
