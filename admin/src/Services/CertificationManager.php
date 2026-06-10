@@ -45,8 +45,10 @@ class CertificationManager
     }
 
     /** Tipos a simular y cantidad requerida */
-    private const SIM_TIPOS    = [33, 39];
-    private const SIM_CANTIDAD = 50;
+    private const SIM_TIPOS        = [33, 39];
+    private const SIM_CANTIDAD     = 50;   // Cantidad objetivo a intentar enviar
+    /** Mínimo para considerar la simulación completa (exigencia SII para bajo volumen) */
+    private const SIM_MIN_CANTIDAD = 10;
 
     public function __construct(Context $context)
     {
@@ -960,7 +962,9 @@ class CertificationManager
             }
         }
 
-        $allDone = count($foliosOk) >= $cantidad;
+        // Completo si se alcanzó el mínimo SII (10 docs). El sistema intenta
+        // hasta $cantidad (50) pero acepta menos si el CAF se agota antes.
+        $allDone = count($foliosOk) >= self::SIM_MIN_CANTIDAD;
         $state['simulacion'][$key] = [
             'status'       => $allDone ? 'ok' : 'partial',
             'tipo'         => $tipo,

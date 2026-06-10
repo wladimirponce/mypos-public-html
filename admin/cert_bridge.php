@@ -179,6 +179,15 @@ try {
             echo json_encode(['ok' => true, 'resultados' => $results, 'estado' => $mgr->loadState()]);
             break;
 
+        // ── Resetear SOLO el estado de simulación (pruebas y libros intactos) ────
+        case 'cert_reset_sim':
+            ob_clean();
+            $state = $mgr->loadState();
+            $state['simulacion'] = [];
+            $mgr->saveStatePublic($state);
+            echo json_encode(['ok' => true, 'mensaje' => 'Estado de simulación reiniciado. Set de Pruebas y libros intactos.']);
+            break;
+
         // ── Correr solo casos de tipos específicos (ej: T33+T52 sin tocar T61/T56) ──
         // Uso: ?action=cert_run_tipos&tipos=33,52
         case 'cert_run_tipos':

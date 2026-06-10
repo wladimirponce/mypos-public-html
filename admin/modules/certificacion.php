@@ -443,6 +443,11 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
     <button class="d-btn d-btn-primary" onclick="certSimulacionAll()">
       <i class="bi bi-rocket-takeoff-fill"></i> Ejecutar Simulación Completa (T33 + T39)
     </button>
+    <button class="d-btn d-btn-sm d-btn-outline" id="btn-sim-reset" onclick="certResetSim()"
+      style="display:none; color:#e74c3c; margin-left:8px"
+      title="Permite re-enviar si el SII no registró los documentos anteriores. NO borra Set de Pruebas ni libros.">
+      <i class="bi bi-arrow-counterclockwise"></i> Resetear simulación
+    </button>
     <div id="sim-status" style="margin-top:12px"></div>
   </div>
 </div>
@@ -684,13 +689,16 @@ function applyState(estado) {
       simPb.textContent='✓ Completada'; simPb.className='d-badge success'; setPasoNum(5,'done');
     } else if (s33.status || s39.status) {
       const n33=(s33.folios_ok||[]).length, n39=(s39.folios_ok||[]).length;
-      simPb.textContent=`T33: ${n33}/50 · T39: ${n39}/50`; simPb.className='d-badge warning'; setPasoNum(5,'');
+      simPb.textContent=`T33: ${n33} · T39: ${n39}`; simPb.className='d-badge warning'; setPasoNum(5,'');
     } else {
       simPb.textContent='Pendiente'; simPb.className='d-badge'; setPasoNum(5,'');
     }
   }
   _updSimCard('t33', s33);
   _updSimCard('t39', s39);
+  // Mostrar botón de reset solo cuando la simulación está completada
+  const btnSimReset = document.getElementById('btn-sim-reset');
+  if (btnSimReset) btnSimReset.style.display = simOk ? '' : 'none';
 
   // Paso 6 — Intercambio
   const ic  = estado.intercambio || {};
@@ -1235,6 +1243,31 @@ async function certSimulacionAll() {
   } catch(e) {
     if (statusEl) statusEl.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
     log('Error simulación: '+e.message, 'error');
+  }
+}
+
+// ── Resetear SOLO la simulación (Set de Pruebas y libros intactos) ────────────────
+async function certResetSim() {
+  if (!confirm('¿Resetear SOLO el estado de simulación?\n\nEl Set de Pruebas, libros y demás resultados NO se tocan.\nSolo se podrá re-ejecutar la simulación.')) return;
+  const statusEl = document.getElementById('sim-status');
+  if (statusEl) statusEl.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Reseteando estado de simulación…</div>';
+  log('Reseteando estado de simulación…', 'warn');
+  try {
+    const res = await api('cert_reset_sim');
+    if (res.ok) {
+      log('Simulación reseteada. Set de Pruebas y libros intactos. Presione Ejecutar para re-enviar.', 'ok');
+      if (statusEl) statusEl.innerHTML = '<div class="d-alert success"><i class="bi bi-check-circle"></i> '
+        + (res.mensaje || 'Simulación reseteada.')
+        + ' Presione <strong>Ejecutar Simulación Completa</strong> para re-enviar.</div>';
+      document.querySelectorAll('.btn-reset-sim').forEach(el => el.classList.add('d-none'));
+    } else {
+      if (statusEl) statusEl.innerHTML = `<div class="d-alert danger">${res.error || 'Error al resetear'}</div>`;
+      log('Error reseteando simulación: ' + (res.error || '?'), 'error');
+    }
+    await loadState();
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
+    log('Error: ' + e.message, 'error');
   }
 }
 
