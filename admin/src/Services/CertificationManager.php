@@ -374,6 +374,22 @@ class CertificationManager
                 }
             }
 
+            // Folios quemados por la simulación: en CERTIFICACION generateDTE no
+            // registra en sii_dte, así que solo el state los conoce. Los failed
+            // también cuentan — un corte de red al leer la respuesta no garantiza
+            // que el SII no haya recibido el DTE.
+            $sim = $state['simulacion']['t' . $tipoDte] ?? [];
+            $foliosSim = array_merge(
+                $sim['folios_ok'] ?? [],
+                array_column($sim['folios_failed'] ?? [], 'folio')
+            );
+            foreach ($foliosSim as $f) {
+                $f = (int)$f;
+                if ($f >= $desde && $f <= $hasta) {
+                    $hw = max($hw, $f);
+                }
+            }
+
             $base = max($desde, $hw + 1);
             if ($base <= $hasta) {
                 return $base;   // Este CAF tiene folios disponibles — usarlo
