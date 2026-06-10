@@ -19,7 +19,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_sucursales') {
         if ($empresaId <= 0) {
             throw new Exception('Empresa inválida.');
         }
-        $stmt = $db->prepare("SELECT id, nombre FROM sii_sucursal WHERE empresa_id = ? AND activa = 1 ORDER BY nombre");
+        $stmt = $db->prepare("SELECT id, nombre FROM sucursales WHERE empresa_id = ? AND activo = 1 ORDER BY nombre");
         $stmt->execute([$empresaId]);
         $sucursales = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         echo json_encode(['ok' => true, 'sucursales' => $sucursales]);
@@ -427,7 +427,6 @@ function isTrialSubscription(array $cliente): bool
                   <th>Email</th>
                   <th>Rol</th>
                   <th>Sucursal</th>
-                  <th>PIN</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
@@ -462,9 +461,9 @@ function isTrialSubscription(array $cliente): bool
               <div class="col-md-6">
                 <label for="usr-rol" class="form-label">Rol / Permiso</label>
                 <select class="form-select form-select-sm" id="usr-rol" required>
-                  <option value="cajero">Cajero</option>
-                  <option value="supervisor">Supervisor</option>
-                  <option value="admin">Administrador</option>
+                  <option value="CAJERO">Cajero</option>
+                  <option value="VENDEDOR">Vendedor</option>
+                  <option value="ADMIN_EMPRESA">Administrador de Empresa</option>
                 </select>
               </div>
               <div class="col-md-6">
@@ -472,10 +471,6 @@ function isTrialSubscription(array $cliente): bool
                 <select class="form-select form-select-sm" id="usr-sucursal">
                   <!-- AJAX -->
                 </select>
-              </div>
-              <div class="col-md-6">
-                <label for="usr-pin" class="form-label">PIN Caja (login rápido POS)</label>
-                <input type="text" class="form-control form-control-sm" id="usr-pin" placeholder="Ej: 1234">
               </div>
             </div>
 
@@ -535,9 +530,17 @@ async function cargarUsuarios(empresaId) {
         }
         
         tbody.innerHTML = usuarios.map(u => {
-            const rolLabel = u.rol === 'admin' ? '<span class="badge bg-primary">Admin</span>' : (u.rol === 'supervisor' ? '<span class="badge bg-warning text-dark">Supervisor</span>' : '<span class="badge bg-secondary">Cajero</span>');
+            let rolLabel = '';
+            if (u.rol === 'ADMIN_EMPRESA') {
+                rolLabel = '<span class="badge bg-primary">Admin Empresa</span>';
+            } else if (u.rol === 'VENDEDOR') {
+                rolLabel = '<span class="badge bg-warning text-dark">Vendedor</span>';
+            } else if (u.rol === 'SUPER_ADMIN') {
+                rolLabel = '<span class="badge bg-danger">Super Admin</span>';
+            } else {
+                rolLabel = '<span class="badge bg-secondary">Cajero</span>';
+            }
             const sucursalLabel = u.sucursal_nombre ? u.sucursal_nombre : '<em class="text-muted">Casa Matriz/Ninguna</em>';
-            const pinLabel = u.pin_caja ? `<code>${u.pin_caja}</code>` : '<span class="text-muted">-</span>';
             
             const uEscaped = JSON.stringify(u).replace(/"/g, '&quot;');
             
@@ -547,7 +550,6 @@ async function cargarUsuarios(empresaId) {
                     <td>${esc(u.email)}</td>
                     <td>${rolLabel}</td>
                     <td>${esc(sucursalLabel)}</td>
-                    <td>${pinLabel}</td>
                     <td>
                         <div class="btn-group btn-group-sm">
                             <button class="btn btn-outline-primary" onclick="editarUsuario(${uEscaped})" title="Editar usuario"><i class="bi bi-pencil"></i></button>
@@ -612,7 +614,6 @@ function editarUsuario(u) {
     document.getElementById('usr-email').value = u.email;
     document.getElementById('usr-rol').value = u.rol;
     document.getElementById('usr-sucursal').value = u.sucursal_id || '';
-    document.getElementById('usr-pin').value = u.pin_caja || '';
     
     document.getElementById('lbl-password-req').style.display = 'none';
     document.getElementById('help-password').style.display = 'block';
@@ -637,8 +638,7 @@ async function guardarUsuario(event) {
         email: document.getElementById('usr-email').value.trim(),
         password: document.getElementById('usr-password').value || undefined,
         rol: document.getElementById('usr-rol').value,
-        sucursal_id: document.getElementById('usr-sucursal').value ? parseInt(document.getElementById('usr-sucursal').value) : null,
-        pin_caja: document.getElementById('usr-pin').value.trim() || null
+        sucursal_id: document.getElementById('usr-sucursal').value ? parseInt(document.getElementById('usr-sucursal').value) : null
     };
     
     try {
