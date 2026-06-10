@@ -550,6 +550,32 @@ class CertificationManager
             $data['descuentoGlobal'] = $caso['descuentoGlobal'];
         }
 
+        // Guías de Despacho: IndTraslado y TipoDespacho según motivo del caso
+        if ($tipoDte === 52 && !empty($caso['motivo'])) {
+            $motivo      = strtolower($caso['motivo']);
+            $trasladoPor = strtolower($caso['trasladoPor'] ?? '');
+            if (strpos($motivo, 'interno') !== false || strpos($motivo, 'bodega') !== false) {
+                // Traslado interno: receptor = propio emisor (RUT igual al emisor)
+                $data['indTraslado'] = 5;
+                $data['receptor'] = [
+                    'rut'       => $this->context->getRut(),
+                    'nombre'    => 'EMPRESA DE PRUEBAS SII',
+                    'giro'      => 'GIRO DE PRUEBAS',
+                    'direccion' => 'CALLE PRUEBA 123',
+                    'comuna'    => 'SANTIAGO',
+                    'ciudad'    => 'SANTIAGO',
+                ];
+            } else {
+                // Venta
+                $data['indTraslado'] = 1;
+                if (strpos($trasladoPor, 'cliente') !== false) {
+                    $data['tipoDespacho'] = 3; // Despacho por cuenta del cliente
+                } else {
+                    $data['tipoDespacho'] = 2; // Despacho por cuenta del vendedor al local del cliente
+                }
+            }
+        }
+
         if (!empty($caso['referencia']) && in_array($tipoDte, [56, 61], true)) {
             $ref = $this->buildUploadedReference($caso, $casos, $state);
             $data['referencias'] = [$ref];
@@ -1199,8 +1225,11 @@ XML;
         $setMgr = new \App\Services\CertSetManager($this->context);
         $detalles = [];
         foreach ($setMgr->getLibroCompras() as $c) {
-            $neto  = $c['afecto'];
-            $exe   = $c['exento'];
+            // NC (T55 papel, T61 electrónica) y ND (T60, T56) reducen el total → negativos
+            $esCredito = in_array((int)$c['tipo'], [55, 61], true);
+            $signo = $esCredito ? -1 : 1;
+            $neto  = $signo * (int)$c['afecto'];
+            $exe   = $signo * (int)$c['exento'];
             $iva   = (int)round($neto * 0.19);
             $total = $neto + $iva + $exe;
 

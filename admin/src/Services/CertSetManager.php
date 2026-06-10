@@ -70,6 +70,19 @@ class CertSetManager
         return $s['facturas'] ?? [];
     }
 
+    /** Actualiza un campo de número de atención sin re-subir el TXT. */
+    public function actualizarAtencion(string $campo, string $valor): bool
+    {
+        $allowed = ['atencion_basico','atencion_ventas','atencion_compras','atencion_guias','atencion_libro_guias'];
+        if (!in_array($campo, $allowed, true) || !preg_match('/^\d{6,9}$/', $valor)) {
+            return false;
+        }
+        $set = $this->load() ?? [];
+        $set[$campo] = $valor;
+        $this->save($set);
+        return true;
+    }
+
     /** Devuelve las entradas del libro de compras del set vinculado (o []). */
     public function getLibroCompras(): array
     {
@@ -163,6 +176,9 @@ class CertSetManager
             throw new \RuntimeException('Gemini no reconoció casos en el archivo.');
         }
 
+        // Fallback nativo para AT numbers que Gemini no extrae (ej: atencion_libro_guias)
+        $txt = $this->normalizarTexto($rawContent);
+
         $actual = $this->load() ?? [];
         $set = [
             'rut'              => $this->context->getRut(),
@@ -170,11 +186,11 @@ class CertSetManager
             'origen'           => $origen,
             'origen_boletas'   => !empty($boletas) ? $origen : ($actual['origen_boletas'] ?? null),
             'origen_basico'    => !empty($casosGenerales) ? $origen : ($actual['origen_basico'] ?? null),
-            'atencion_basico'      => $parsed['atencion_basico']      ?? ($actual['atencion_basico']      ?? null),
-            'atencion_ventas'      => $parsed['atencion_ventas']      ?? ($actual['atencion_ventas']      ?? null),
-            'atencion_compras'     => $parsed['atencion_compras']     ?? ($actual['atencion_compras']     ?? null),
-            'atencion_guias'       => $parsed['atencion_guias']       ?? ($actual['atencion_guias']       ?? null),
-            'atencion_libro_guias' => $parsed['atencion_libro_guias'] ?? ($actual['atencion_libro_guias'] ?? null),
+            'atencion_basico'      => $parsed['atencion_basico']      ?? $this->extraerAtencion($txt, 'SET BASICO')           ?? ($actual['atencion_basico']      ?? null),
+            'atencion_ventas'      => $parsed['atencion_ventas']      ?? $this->extraerAtencion($txt, 'SET LIBRO DE VENTAS')   ?? ($actual['atencion_ventas']      ?? null),
+            'atencion_compras'     => $parsed['atencion_compras']     ?? $this->extraerAtencion($txt, 'SET LIBRO DE COMPRAS')  ?? ($actual['atencion_compras']     ?? null),
+            'atencion_guias'       => $parsed['atencion_guias']       ?? $this->extraerAtencion($txt, 'SET GUIA DE DESPACHO')  ?? ($actual['atencion_guias']       ?? null),
+            'atencion_libro_guias' => $parsed['atencion_libro_guias'] ?? $this->extraerAtencion($txt, 'SET LIBRO DE GUIAS')    ?? ($actual['atencion_libro_guias'] ?? null),
             'boletas'              => !empty($boletas) ? $boletas : ($actual['boletas'] ?? []),
             'facturas'             => !empty($casosGenerales) ? $casosGenerales : ($actual['facturas'] ?? []),
             'libroCompras'         => !empty($libroCompras) ? $libroCompras : ($actual['libroCompras'] ?? []),
@@ -445,15 +461,17 @@ class CertSetManager
                     $afecto = (int)$mmm[1];
                 }
 
-                $tipo = 33;
+                // Tipos electrónicos primero (tienen prioridad sobre los papel)
                 if (stripos($tipoDocStr, 'FACTURA DE COMPRA ELECTRONICA') !== false) $tipo = 46;
-                elseif (stripos($tipoDocStr, 'FACTURA DE COMPRA') !== false) $tipo = 46;
                 elseif (stripos($tipoDocStr, 'FACTURA ELECTRONICA') !== false) $tipo = 33;
                 elseif (stripos($tipoDocStr, 'FACTURA NO AFECTA') !== false) $tipo = 34;
-                elseif (stripos($tipoDocStr, 'FACTURA') !== false) $tipo = 33;
                 elseif (stripos($tipoDocStr, 'NOTA DE CREDITO ELECTRONICA') !== false) $tipo = 61;
-                elseif (stripos($tipoDocStr, 'NOTA DE CREDITO') !== false) $tipo = 61;
-                elseif (stripos($tipoDocStr, 'NOTA DE DEBITO') !== false) $tipo = 56;
+                elseif (stripos($tipoDocStr, 'NOTA DE DEBITO ELECTRONICA') !== false) $tipo = 56;
+                // Tipos papel (sin "ELECTRONICA")
+                elseif (stripos($tipoDocStr, 'FACTURA DE COMPRA') !== false) $tipo = 45;
+                elseif (stripos($tipoDocStr, 'NOTA DE CREDITO') !== false) $tipo = 55;
+                elseif (stripos($tipoDocStr, 'NOTA DE DEBITO') !== false) $tipo = 60;
+                else $tipo = 30; // Factura Papel (no electrónica)
 
                 $compras[] = [
                     'tipo'   => $tipo,

@@ -332,6 +332,23 @@ try {
         // ── Avanzar HW de folio para un tipo (folios quemados en SII) ───────────
         // Inserta una entrada phantom en state['pruebas'] para que certFolioBaseLibre
         // omita folios ya enviados al SII que el state no conoce (p.ej. tras reset).
+        // ── Corrige un número de atención en set.json sin re-subir el TXT ─────
+        // Uso: ?action=cert_fix_atencion&campo=atencion_libro_guias&valor=4884264
+        case 'cert_fix_atencion':
+            ob_clean();
+            $campoAt = $_GET['campo'] ?? $_POST['campo'] ?? '';
+            $valorAt = trim($_GET['valor'] ?? $_POST['valor'] ?? '');
+            $setMgrAt = new \App\Services\CertSetManager($globalContext);
+            $okAt = $setMgrAt->actualizarAtencion($campoAt, $valorAt);
+            echo json_encode([
+                'ok'    => $okAt,
+                'campo' => $campoAt,
+                'valor' => $valorAt,
+                'set'   => $okAt ? $setMgrAt->load() : null,
+                'error' => $okAt ? null : 'Campo inválido o valor no numérico (6-9 dígitos).',
+            ]);
+            break;
+
         case 'cert_advance_hw':
             ob_clean();
             $tipo  = (int)($_GET['tipo']  ?? $_POST['tipo']  ?? 0);

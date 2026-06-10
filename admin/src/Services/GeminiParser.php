@@ -113,13 +113,24 @@ GUÍAS DE DESPACHO
 LIBRO DE COMPRAS
 - Sección "SET LIBRO DE COMPRAS"
 - Cada registro: tipo (int DTE), folio (int), obs (string), exento (int, 0 si no aparece), afecto (int)
+- MAPEO DE TIPOS para el libro de compras (distinguir papel vs electrónico):
+  · "FACTURA ELECTRONICA" → 33
+  · "FACTURA NO AFECTA" → 34
+  · "FACTURA DE COMPRA ELECTRONICA" → 46
+  · "NOTA DE CREDITO ELECTRONICA" → 61
+  · "NOTA DE DEBITO ELECTRONICA" → 56
+  · "FACTURA" (sin "ELECTRONICA") → 30  ← papel
+  · "FACTURA DE COMPRA" (sin "ELECTRONICA") → 45  ← papel
+  · "NOTA DE CREDITO" (sin "ELECTRONICA") → 55  ← papel
+  · "NOTA DE DEBITO" (sin "ELECTRONICA") → 60  ← papel
 
 NÚMEROS DE ATENCIÓN
 - SET BASICO → atencion_basico
 - SET LIBRO DE VENTAS → atencion_ventas
 - SET LIBRO DE COMPRAS → atencion_compras
 - SET GUIA DE DESPACHO → atencion_guias
-- Extraer solo los dígitos
+- SET LIBRO DE GUIAS → atencion_libro_guias
+- Extraer solo los dígitos (null si la sección no existe en el archivo)
 
 ═══════════════════════ ESQUEMA JSON REQUERIDO ═══════════════════════
 
@@ -131,6 +142,7 @@ Retorna SOLO el JSON, sin markdown, sin explicaciones:
   "atencion_ventas": null,
   "atencion_compras": null,
   "atencion_guias": null,
+  "atencion_libro_guias": null,
   "boletas": [
     {
       "caso": "CASO-1",
@@ -172,11 +184,18 @@ Retorna SOLO el JSON, sin markdown, sin explicaciones:
   ],
   "libroCompras": [
     {
-      "tipo": 33,
+      "tipo": 30,
       "folio": 234,
       "obs": "FACTURA DEL GIRO CON DERECHO A CREDITO",
       "exento": 0,
       "afecto": 6814
+    },
+    {
+      "tipo": 55,
+      "folio": 451,
+      "obs": "NOTA DE CREDITO POR DESCUENTO A FACTURA 234",
+      "exento": 0,
+      "afecto": 2624
     }
   ]
 }
