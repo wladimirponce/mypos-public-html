@@ -44,27 +44,71 @@ class UsuarioRepository extends BaseRepository
             $rolId = (int)$this->db->query("SELECT id FROM roles ORDER BY id ASC LIMIT 1")->fetchColumn();
         }
 
+        // Buscar si el usuario ya existe por email a nivel global
+        $stmtCheck = $this->db->prepare("SELECT id, activo FROM usuarios WHERE email = ? LIMIT 1");
+        $stmtCheck->execute([$data['email']]);
+        $existingUser = $stmtCheck->fetch();
+
         $this->db->beginTransaction();
         try {
-            // 2. Insertar en usuarios
-            $sqlUser = "INSERT INTO usuarios (nombre, email, password_hash, activo) VALUES (?, ?, ?, 1)";
-            $stmtUser = $this->db->prepare($sqlUser);
-            $stmtUser->execute([
-                $data['nombre'],
-                $data['email'],
-                password_hash($data['password'], PASSWORD_DEFAULT)
-            ]);
-            $usuarioId = (int)$this->db->lastInsertId();
+            if ($existingUser) {
+                $usuarioId = (int)$existingUser['id'];
 
-            // 3. Insertar en empresa_usuarios
-            $sqlEmpUsr = "INSERT INTO empresa_usuarios (empresa_id, usuario_id, rol_id, sucursal_id, activo) VALUES (?, ?, ?, ?, 1)";
-            $stmtEmpUsr = $this->db->prepare($sqlEmpUsr);
-            $stmtEmpUsr->execute([
-                $data['empresa_id'],
-                $usuarioId,
-                $rolId,
-                $data['sucursal_id'] ?: null
-            ]);
+                // Reactivar cuenta de usuario global si estaba inactiva
+                if ((int)$existingUser['activo'] === 0) {
+                    $this->db->prepare("UPDATE usuarios SET activo = 1 WHERE id = ?")
+                             ->execute([$usuarioId]);
+                }
+
+                // Verificar si ya está asociado a esta empresa específica
+                $stmtCheckLink = $this->db->prepare("SELECT id, activo FROM empresa_usuarios WHERE empresa_id = ? AND usuario_id = ? LIMIT 1");
+                $stmtCheckLink->execute([$data['empresa_id'], $usuarioId]);
+                $existingLink = $stmtCheckLink->fetch();
+
+                if ($existingLink) {
+                    if ((int)$existingLink['activo'] === 1) {
+                        throw new \Exception("El usuario con el email '" . $data['email'] . "' ya se encuentra asociado y activo en esta empresa.");
+                    } else {
+                        // Reactivar la asociación existente y actualizar rol/sucursal
+                        $sqlEmpUsr = "UPDATE empresa_usuarios SET rol_id = ?, sucursal_id = ?, activo = 1 WHERE id = ?";
+                        $stmtEmpUsr = $this->db->prepare($sqlEmpUsr);
+                        $stmtEmpUsr->execute([
+                            $rolId,
+                            $data['sucursal_id'] ?: null,
+                            $existingLink['id']
+                        ]);
+                    }
+                } else {
+                    // Crear nueva asociación para esta empresa
+                    $sqlEmpUsr = "INSERT INTO empresa_usuarios (empresa_id, usuario_id, rol_id, sucursal_id, activo) VALUES (?, ?, ?, ?, 1)";
+                    $stmtEmpUsr = $this->db->prepare($sqlEmpUsr);
+                    $stmtEmpUsr->execute([
+                        $data['empresa_id'],
+                        $usuarioId,
+                        $rolId,
+                        $data['sucursal_id'] ?: null
+                    ]);
+                }
+            } else {
+                // Si no existe el usuario, crearlo en la tabla central y luego vincularlo
+                $sqlUser = "INSERT INTO usuarios (nombre, email, password_hash, activo) VALUES (?, ?, ?, 1)";
+                $stmtUser = $this->db->prepare($sqlUser);
+                $stmtUser->execute([
+                    $data['nombre'],
+                    $data['email'],
+                    password_hash($data['password'], PASSWORD_DEFAULT)
+                ]);
+                $usuarioId = (int)$this->db->lastInsertId();
+
+                $sqlEmpUsr = "INSERT INTO empresa_usuarios (empresa_id, usuario_id, rol_id, sucursal_id, activo) VALUES (?, ?, ?, ?, 1)";
+                $stmtEmpUsr = $this->db->prepare($sqlEmpUsr);
+                $stmtEmpUsr->execute([
+                    $data['empresa_id'],
+                    $usuarioId,
+                    $rolId,
+                    $data['sucursal_id'] ?: null
+                ]);
+            }
 
             $this->db->commit();
             return $usuarioId;
