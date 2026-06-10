@@ -1232,8 +1232,11 @@ XML;
      */
     public function runLibroCompras(?string $periodo = null): array
     {
-        $state  = $this->loadState();
-        $fecha  = date('Y-m-d');
+        $state   = $this->loadState();
+        $periodo = $periodo ?: date('Y-m');
+        // FchDoc debe caer DENTRO del período del libro: con período pasado y
+        // fecha de hoy el SII rechaza "[FchDoc] es fecha futura" (LBR-3).
+        $fecha = ($periodo === date('Y-m')) ? date('Y-m-d') : $periodo . '-15';
 
         // RUT del SII como proveedor de los docs en papel y FE de prueba
         $rutSII  = '60803000-K';
@@ -1290,7 +1293,7 @@ XML;
         $result = sendLibro([
             'tipoLibro'         => 'COMPRA',
             'tipoEnvio'         => 'TOTAL',
-            'periodo'           => $periodo ?: date('Y-m'),
+            'periodo'           => $periodo,
             'folioDsde'         => 1,
             'folioNotificacion' => $folioNotif,
             'detalles'          => $detalles,
