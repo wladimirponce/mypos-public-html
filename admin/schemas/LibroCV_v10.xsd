@@ -100,6 +100,11 @@
 															<xs:documentation>Indica que es un Envio con Informacion para Corregir un Libro Previamente Enviado</xs:documentation>
 														</xs:annotation>
 													</xs:enumeration>
+													<xs:enumeration value="ESPECIAL">
+														<xs:annotation>
+															<xs:documentation>Envio especial para certificacion SII</xs:documentation>
+														</xs:annotation>
+													</xs:enumeration>
 												</xs:restriction>
 											</xs:simpleType>
 										</xs:element>
@@ -125,7 +130,7 @@
 										</xs:element>
 										<xs:element name="CodAutRec" minOccurs="0">
 											<xs:annotation>
-												<xs:documentation>Codigo de Autorización de Rectificación</xs:documentation>
+												<xs:documentation>Codigo de Autorizaciï¿½n de Rectificaciï¿½n</xs:documentation>
 											</xs:annotation>
 											<xs:simpleType>
 												<xs:restriction base="xs:string">
@@ -883,7 +888,7 @@
 										</xs:element>
 										<xs:element name="Emisor" minOccurs="0">
 											<xs:annotation>
-												<xs:documentation>Indica si NDébito o NCrédito afecta a una Factura de Compra</xs:documentation>
+												<xs:documentation>Indica si NDï¿½bito o NCrï¿½dito afecta a una Factura de Compra</xs:documentation>
 											</xs:annotation>
 											<xs:simpleType>
 												<xs:restriction base="xs:positiveInteger">
@@ -898,7 +903,7 @@
 										</xs:element>
 										<xs:element name="IndFactCompra" minOccurs="0">
 											<xs:annotation>
-												<xs:documentation>Indica si NDébito o NCrédito afecta a una Factura de Compra</xs:documentation>
+												<xs:documentation>Indica si NDï¿½bito o NCrï¿½dito afecta a una Factura de Compra</xs:documentation>
 											</xs:annotation>
 											<xs:simpleType>
 												<xs:restriction base="xs:positiveInteger">
@@ -976,7 +981,7 @@
 										</xs:element>
 										<xs:element name="TasaImp" type="SiiDte:PctType" minOccurs="0">
 											<xs:annotation>
-												<xs:documentation>Tasa de impuesto usada en la operación</xs:documentation>
+												<xs:documentation>Tasa de impuesto usada en la operaciï¿½n</xs:documentation>
 											</xs:annotation>
 										</xs:element>
 										<xs:element name="NumInt" minOccurs="0">
@@ -1050,7 +1055,7 @@
 										</xs:element>
 										<xs:element name="RUTDoc" type="SiiDte:RUTType" minOccurs="0">
 											<xs:annotation>
-												<xs:documentation>RUT del Contraparte en la Operación Comercial</xs:documentation>
+												<xs:documentation>RUT del Contraparte en la Operaciï¿½n Comercial</xs:documentation>
 											</xs:annotation>
 										</xs:element>
 										<xs:element name="RznSoc" minOccurs="0">
@@ -1542,13 +1547,13 @@
 			<xs:enumeration value="52"/>
 			<xs:enumeration value="53">
 				<xs:annotation>
-					<xs:documentation>Impuesto retenido a los suplementeros Art. 74 N°5</xs:documentation>
+					<xs:documentation>Impuesto retenido a los suplementeros Art. 74 Nï¿½5</xs:documentation>
 				</xs:annotation>
 			</xs:enumeration>
 			<xs:enumeration value="60"/>
 			<xs:enumeration value="271">
 				<xs:annotation>
-					<xs:documentation>Bebidas analcohólicas y Minerales con elevado contenido de azúcares.</xs:documentation>
+					<xs:documentation>Bebidas analcohï¿½licas y Minerales con elevado contenido de azï¿½cares.</xs:documentation>
 				</xs:annotation>
 			</xs:enumeration>
 			<xs:enumeration value="301"/>

@@ -1060,7 +1060,7 @@ XML;
 
         $result = sendLibro([
             'tipoLibro'         => 'VENTA',
-            'tipoEnvio'         => 'TOTAL',
+            'tipoEnvio'         => 'ESPECIAL',
             'periodo'           => date('Y-m'),
             'folioDsde'         => 1,
             'folioNotificacion' => $folioNotif,
@@ -1234,7 +1234,7 @@ XML;
 
         $result = sendLibro([
             'tipoLibro'         => 'COMPRA',
-            'tipoEnvio'         => 'TOTAL',
+            'tipoEnvio'         => 'ESPECIAL',
             'periodo'           => date('Y-m'),
             'folioDsde'         => 1,
             'folioNotificacion' => $folioNotif,
