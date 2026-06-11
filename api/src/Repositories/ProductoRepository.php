@@ -17,6 +17,7 @@ final class ProductoRepository
         $sql = 'SELECT p.id, p.empresa_id, p.rubro_id, p.centro_costo_id, p.codigo, p.sku,
                        p.nombre, p.descripcion, p.unidad_medida, p.precio_costo,
                        p.costo_actual, p.precio_venta, p.controla_stock, p.stock_minimo,
+                       p.es_producto_peso, p.precio_por_kg,
                        p.permite_descuento, p.permite_comision, p.activo,
                        r.nombre AS rubro, cc.nombre AS centro_costo,
                        pi.id AS imagen_principal_id,
@@ -69,6 +70,7 @@ final class ProductoRepository
             'SELECT p.id, p.empresa_id, p.rubro_id, p.centro_costo_id, p.codigo, p.sku,
                     p.nombre, p.descripcion, p.unidad_medida, p.precio_costo,
                     p.costo_actual, p.precio_venta, p.controla_stock, p.stock_minimo,
+                    p.es_producto_peso, p.precio_por_kg,
                     p.permite_descuento, p.permite_comision, p.activo,
                     r.nombre AS rubro, cc.nombre AS centro_costo,
                     pi.id AS imagen_principal_id,
@@ -437,6 +439,7 @@ final class ProductoRepository
     {
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.codigo, p.nombre, p.precio_venta, p.controla_stock,
+                    p.es_producto_peso, p.precio_por_kg,
                     r.nombre AS rubro, cc.nombre AS centro_costo, pcb.codigo_barra AS codigo_barra_usado,
                     pi.imagen_url AS imagen_principal,
                     EXISTS(
