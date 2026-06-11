@@ -7,16 +7,33 @@ use App\Core\Database;
 $pdo = Database::getInstance();
 $empresaId = $globalContext->getEmpresaId();
 $ambienteCaf = strtolower($globalContext->getAmbiente());
-$stmt = $pdo->prepare(
-    "SELECT c.tipo_dte, c.folio_desde, c.folio_hasta, c.fecha_autorizacion,
-            c.activo, COALESCE(v.disponibles, 0) AS disponibles
-       FROM sii_caf c
-  LEFT JOIN v_sii_folios_disponibles v ON v.caf_id = c.id
-      WHERE c.empresa_id = ? AND c.ambiente_sii = ?
-      ORDER BY c.tipo_dte, c.folio_desde"
-);
-$stmt->execute([$empresaId, $ambienteCaf]);
-$cafs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$cafs = [];
+$cafError = null;
+try {
+    $stmt = $pdo->prepare(
+        "SELECT c.tipo_dte, c.folio_desde, c.folio_hasta, c.fecha_autorizacion,
+                c.activo,
+                GREATEST(
+                    (CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1)
+                        - COALESCE(fc.consumidos, 0),
+                    0
+                ) AS disponibles
+           FROM sii_caf c
+      LEFT JOIN (
+                    SELECT caf_id, COUNT(*) AS consumidos
+                      FROM sii_folio_consumo
+                     WHERE estado != 'rechazado_sii'
+                  GROUP BY caf_id
+                ) fc ON fc.caf_id = c.id
+          WHERE c.empresa_id = ? AND c.ambiente_sii = ?
+          ORDER BY c.tipo_dte, c.folio_desde"
+    );
+    $stmt->execute([$empresaId, $ambienteCaf]);
+    $cafs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (\Throwable $e) {
+    $cafError = 'No fue posible consultar los folios CAF. Revise las migraciones de tablas SII.';
+    error_log('Error consultando CAF en dashboard: ' . $e->getMessage());
+}
 $tipos = [
     33 => 'Factura', 34 => 'Factura Exenta', 39 => 'Boleta',
     41 => 'Boleta Exenta', 52 => 'Guia Despacho', 56 => 'Nota Debito', 61 => 'Nota Credito',
@@ -28,7 +45,11 @@ $tipos = [
         Folios CAF de <?= htmlspecialchars($razonSocial) ?> / <?= htmlspecialchars($globalContext->getAmbiente()) ?>
     </div>
     <div class="d-card-body" style="padding:0">
-        <?php if (!$cafs): ?>
+        <?php if ($cafError !== null): ?>
+            <div style="padding:32px" class="text-danger">
+                <?= htmlspecialchars($cafError) ?>
+            </div>
+        <?php elseif (!$cafs): ?>
             <div style="padding:32px" class="text-muted">
                 No hay CAF registrados para esta empresa y ambiente.
                 Carguelos desde Configuracion DTE.

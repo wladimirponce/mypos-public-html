@@ -599,11 +599,8 @@ final class StockService
                 throw new HttpException('Ubicacion no encontrada o inactiva', 404);
             }
         } else {
+            $repository->ensureDefaultLocationForSucursal($empresaId, $sucursalId);
             $location = $repository->defaultLocationForSucursal($empresaId, $sucursalId);
-            if ($location === null) {
-                $repository->ensureDefaultLocationForSucursal($empresaId, $sucursalId);
-                $location = $repository->defaultLocationForSucursal($empresaId, $sucursalId);
-            }
             if ($location === null) {
                 throw new HttpException(
                     'La sucursal no tiene una ubicacion de venta configurada; indique ubicacion_id',

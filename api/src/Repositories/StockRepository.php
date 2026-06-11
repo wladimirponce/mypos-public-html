@@ -386,12 +386,12 @@ final class StockRepository
         $update = $this->connection->prepare(
             'UPDATE ubicaciones_stock
              SET permite_venta = 1,
-                 principal = 1,
+                 activo = 1,
+                 deleted_at = NULL,
                  updated_at = CURRENT_TIMESTAMP
              WHERE empresa_id = :empresa_id
                AND sucursal_id = :sucursal_id
-               AND tipo = \'SUCURSAL_VENTA\'
-               AND activo = 1'
+               AND tipo = \'SUCURSAL_VENTA\''
         );
         $update->execute(['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId]);
 

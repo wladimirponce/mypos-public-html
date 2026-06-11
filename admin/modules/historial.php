@@ -229,14 +229,19 @@ function esc(s) {
 }
 
 async function leerJsonApi(resp) {
-    const contentType = resp.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) {
-        const text = await resp.text();
+    const text = await resp.text();
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch (_) {
         throw new Error(resp.redirected
             ? 'No hay una empresa activa para consultar.'
-            : 'El servidor no devolvio JSON' + (text ? ': ' + text.slice(0, 80) : '.'));
+            : 'El servidor no devolvio JSON valido' + (text ? ': ' + text.slice(0, 80) : '.'));
     }
-    return resp.json();
+    if (!resp.ok && data?.ok !== true) {
+        throw new Error(data?.error || `Error HTTP ${resp.status}`);
+    }
+    return data;
 }
 
 async function cargarHistorial() {

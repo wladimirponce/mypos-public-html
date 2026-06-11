@@ -180,9 +180,22 @@ class EmpresaRepository extends BaseRepository
     public function getCAFConEstado(int $empresaId, int $tipoDte, string $ambiente): ?array
     {
         if ($this->useSiiTables) {
-            $sql = "SELECT c.*, v.disponibles, v.nivel_alerta
+            $sql = "SELECT c.*,
+                           GREATEST((CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1) - COALESCE(fc.consumidos, 0), 0) AS disponibles,
+                           CASE
+                               WHEN ((CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1) - COALESCE(fc.consumidos, 0)) <= 50
+                                   THEN 'critico'
+                               WHEN ((CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1) - COALESCE(fc.consumidos, 0)) <= 200
+                                   THEN 'pre_critico'
+                               ELSE 'normal'
+                           END AS nivel_alerta
                     FROM sii_caf c
-                    JOIN v_sii_folios_disponibles v ON c.id = v.caf_id
+                    LEFT JOIN (
+                        SELECT caf_id, COUNT(*) AS consumidos
+                        FROM sii_folio_consumo
+                        WHERE estado != 'rechazado_sii'
+                        GROUP BY caf_id
+                    ) fc ON fc.caf_id = c.id
                     WHERE c.empresa_id = ? AND c.tipo_dte = ? AND c.ambiente_sii = ? AND c.activo = 1
                     ORDER BY c.folio_desde ASC
                     LIMIT 1";
@@ -203,9 +216,22 @@ class EmpresaRepository extends BaseRepository
     public function getCAFsActivos(int $empresaId, int $tipoDte, string $ambiente): array
     {
         if ($this->useSiiTables) {
-            $sql = "SELECT c.*, v.disponibles, v.nivel_alerta
+            $sql = "SELECT c.*,
+                           GREATEST((CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1) - COALESCE(fc.consumidos, 0), 0) AS disponibles,
+                           CASE
+                               WHEN ((CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1) - COALESCE(fc.consumidos, 0)) <= 50
+                                   THEN 'critico'
+                               WHEN ((CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1) - COALESCE(fc.consumidos, 0)) <= 200
+                                   THEN 'pre_critico'
+                               ELSE 'normal'
+                           END AS nivel_alerta
                     FROM sii_caf c
-                    JOIN v_sii_folios_disponibles v ON c.id = v.caf_id
+                    LEFT JOIN (
+                        SELECT caf_id, COUNT(*) AS consumidos
+                        FROM sii_folio_consumo
+                        WHERE estado != 'rechazado_sii'
+                        GROUP BY caf_id
+                    ) fc ON fc.caf_id = c.id
                     WHERE c.empresa_id = ? AND c.tipo_dte = ? AND c.ambiente_sii = ? AND c.activo = 1
                     ORDER BY c.folio_desde ASC";
 
@@ -241,9 +267,23 @@ class EmpresaRepository extends BaseRepository
     public function getCAFForFolio(int $empresaId, int $tipoDte, string $ambiente, int $folio): ?array
     {
         if ($this->useSiiTables) {
-            $sql = "SELECT c.*, v.disponibles, v.nivel_alerta, NULL AS xml_content
+            $sql = "SELECT c.*,
+                           GREATEST((CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1) - COALESCE(fc.consumidos, 0), 0) AS disponibles,
+                           CASE
+                               WHEN ((CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1) - COALESCE(fc.consumidos, 0)) <= 50
+                                   THEN 'critico'
+                               WHEN ((CAST(c.folio_hasta AS SIGNED) - CAST(c.folio_desde AS SIGNED) + 1) - COALESCE(fc.consumidos, 0)) <= 200
+                                   THEN 'pre_critico'
+                               ELSE 'normal'
+                           END AS nivel_alerta,
+                           NULL AS xml_content
                     FROM sii_caf c
-                    JOIN v_sii_folios_disponibles v ON c.id = v.caf_id
+                    LEFT JOIN (
+                        SELECT caf_id, COUNT(*) AS consumidos
+                        FROM sii_folio_consumo
+                        WHERE estado != 'rechazado_sii'
+                        GROUP BY caf_id
+                    ) fc ON fc.caf_id = c.id
                     WHERE c.empresa_id = ? AND c.tipo_dte = ? AND c.ambiente_sii = ? AND c.activo = 1
                       AND ? BETWEEN c.folio_desde AND c.folio_hasta
                     LIMIT 1";

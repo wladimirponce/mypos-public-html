@@ -1,7 +1,9 @@
 <?php
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+error_reporting(E_ALL);
 if (session_status() === PHP_SESSION_NONE) session_start();
 date_default_timezone_set('America/Santiago');
-ini_set('display_errors', '1'); error_reporting(E_ALL);
 if (file_exists(__DIR__ . '/openssl_legacy.cnf')) {
     putenv('OPENSSL_CONF=' . __DIR__ . '/openssl_legacy.cnf');
 }
@@ -567,6 +569,9 @@ if (!defined('DTE_API_BOOTSTRAP_ONLY')) {
     file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . ' | TOTAL funcs: ' . count($allFuncs['user']) . ' | generateDTE? ' . (in_array('generateDTE', $allFuncs['user']) ? 'YES' : 'NO') . ' | ALL: ' . implode(', ', $allFuncs['user']) . PHP_EOL, FILE_APPEND);
 
 if ($action) {
+    if (PHP_SAPI !== 'cli' && !headers_sent()) {
+        header('Content-Type: application/json; charset=UTF-8');
+    }
     try {
         $legacyPoolActions = [
             'caf_disponibles', 'caf_descargar', 'caf_solicitar', 'caf_consumir',
