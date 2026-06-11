@@ -54,6 +54,7 @@ final class VentaService
         }
 
         $config = (new ConfiguracionService())->efectiva($empresaId, $sucursalId);
+        $printContext = $this->buildPrintContext($empresaId, $sucursalId);
 
         if ((bool) $config['exigir_caja_abierta_para_vender'] && $cashOpening === null) {
             $this->auditConfigBlock($empresaId, $sucursalId, $userId, 'exigir_caja_abierta_para_vender', 'La empresa exige caja abierta para vender');
@@ -272,6 +273,7 @@ final class VentaService
                 'condicion_pago' => $paymentCondition,
                 'origen' => $origin,
                 'uuid_offline' => $uuidOffline,
+                'print_context' => $printContext,
             ];
 
             if ($creditId !== null) {
@@ -292,6 +294,25 @@ final class VentaService
     public function anularVenta(int $userId, int $saleId, array $payload): array
     {
         return (new AnulacionService())->anularVenta($userId, $saleId, $payload);
+    }
+
+    private function buildPrintContext(int $empresaId, int $sucursalId): array
+    {
+        $configuration = new ConfiguracionService();
+        $empresa = $configuration->empresa($empresaId);
+        $sucursal = $configuration->sucursal($empresaId, $sucursalId)['configuracion_sucursal'];
+
+        return [
+            'razon_social' => $empresa['razon_social'] ?? null,
+            'nombre_fantasia' => $empresa['nombre_fantasia'] ?? null,
+            'rut_emisor' => $empresa['rut_empresa'] ?? null,
+            'giro' => $empresa['giro'] ?? null,
+            'direccion' => $sucursal['direccion'] ?? $empresa['direccion'] ?? null,
+            'comuna' => $sucursal['comuna'] ?? $empresa['comuna'] ?? null,
+            'ciudad' => $sucursal['ciudad'] ?? $empresa['ciudad'] ?? null,
+            'telefono' => $sucursal['telefono'] ?? $empresa['telefono_contacto'] ?? null,
+            'sitio_web' => $empresa['sitio_web'] ?? null,
+        ];
     }
 
     private function prepareItems(int $empresaId, array $items): array

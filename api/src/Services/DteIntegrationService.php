@@ -285,6 +285,11 @@ final class DteIntegrationService
 
         $details = $this->repository->documentDetails($documentId);
         $taxes = $this->repository->documentTaxes($documentId);
+        $configuration = new ConfiguracionService();
+        $empresa = $configuration->empresa($empresaId);
+        $sucursal = $document['sucursal_id'] !== null
+            ? $configuration->sucursal($empresaId, (int) $document['sucursal_id'])['configuracion_sucursal']
+            : [];
 
         return [
             'documento' => [
@@ -299,6 +304,17 @@ final class DteIntegrationService
                 'exento' => (int) $document['exento'],
                 'impuestos' => (int) $document['impuestos'],
                 'total' => (int) $document['total'],
+            ],
+            'emisor' => [
+                'rut' => $empresa['rut_empresa'] ?? null,
+                'razon_social' => $empresa['razon_social'] ?? null,
+                'nombre_fantasia' => $empresa['nombre_fantasia'] ?? null,
+                'giro' => $empresa['giro'] ?? null,
+                'direccion' => $sucursal['direccion'] ?? $empresa['direccion'] ?? null,
+                'comuna' => $sucursal['comuna'] ?? $empresa['comuna'] ?? null,
+                'ciudad' => $sucursal['ciudad'] ?? $empresa['ciudad'] ?? null,
+                'telefono' => $sucursal['telefono'] ?? $empresa['telefono_contacto'] ?? null,
+                'sitio_web' => $empresa['sitio_web'] ?? null,
             ],
             'receptor' => [
                 'rut' => $document['rut_receptor'],
@@ -565,6 +581,7 @@ final class DteIntegrationService
         }
 
         $document = $payload['documento'];
+        $emisor = $this->emisorParaImpresion($payload);
         $items = array_map(static fn (array $item): array => [
             'nombre' => (string) ($item['nombre'] ?? 'Item'),
             'cantidad' => (float) ($item['cantidad'] ?? 1),
@@ -579,10 +596,49 @@ final class DteIntegrationService
             'fecha_dte' => (string) $document['fecha_emision'],
             'track_id' => isset($send['trackId']) ? (string) $send['trackId'] : null,
             'ted_xml' => $tedXml,
+            'razon_social' => $emisor['razon_social'] ?? null,
+            'nombre_fantasia' => $emisor['nombre_fantasia'] ?? null,
+            'rut_emisor' => $emisor['rut'] ?? null,
+            'giro' => $emisor['giro'] ?? null,
+            'direccion' => $emisor['direccion'] ?? null,
+            'comuna' => $emisor['comuna'] ?? null,
+            'ciudad' => $emisor['ciudad'] ?? null,
+            'telefono' => $emisor['telefono'] ?? null,
+            'sitio_web' => $emisor['sitio_web'] ?? null,
+            'nro_resol' => $generate['nro_resol'] ?? null,
+            'fch_resol' => $generate['fch_resol'] ?? null,
+            'verify_url' => $generate['verify_url'] ?? null,
             'total' => (int) $document['total'],
             'neto' => (int) $document['neto'],
             'iva' => (int) $document['impuestos'],
             'productos' => $items,
+        ];
+    }
+
+    private function emisorParaImpresion(array $payload): array
+    {
+        if (is_array($payload['emisor'] ?? null) && $payload['emisor'] !== []) {
+            return $payload['emisor'];
+        }
+
+        $document = $payload['documento'];
+        $empresaId = (int) $document['empresa_id'];
+        $configuration = new ConfiguracionService();
+        $empresa = $configuration->empresa($empresaId);
+        $sucursal = isset($document['sucursal_id']) && (int) $document['sucursal_id'] > 0
+            ? $configuration->sucursal($empresaId, (int) $document['sucursal_id'])['configuracion_sucursal']
+            : [];
+
+        return [
+            'rut' => $empresa['rut_empresa'] ?? null,
+            'razon_social' => $empresa['razon_social'] ?? null,
+            'nombre_fantasia' => $empresa['nombre_fantasia'] ?? null,
+            'giro' => $empresa['giro'] ?? null,
+            'direccion' => $sucursal['direccion'] ?? $empresa['direccion'] ?? null,
+            'comuna' => $sucursal['comuna'] ?? $empresa['comuna'] ?? null,
+            'ciudad' => $sucursal['ciudad'] ?? $empresa['ciudad'] ?? null,
+            'telefono' => $sucursal['telefono'] ?? $empresa['telefono_contacto'] ?? null,
+            'sitio_web' => $empresa['sitio_web'] ?? null,
         ];
     }
 
