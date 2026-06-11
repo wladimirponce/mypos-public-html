@@ -381,6 +381,44 @@ final class StockRepository
         return $statement->fetchAll();
     }
 
+    public function ensureDefaultLocationForSucursal(int $empresaId, int $sucursalId): void
+    {
+        $update = $this->connection->prepare(
+            'UPDATE ubicaciones_stock
+             SET permite_venta = 1,
+                 principal = 1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE empresa_id = :empresa_id
+               AND sucursal_id = :sucursal_id
+               AND tipo = \'SUCURSAL_VENTA\'
+               AND activo = 1'
+        );
+        $update->execute(['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId]);
+
+        $statement = $this->connection->prepare(
+            'INSERT INTO ubicaciones_stock (
+                empresa_id, sucursal_id, codigo, nombre, tipo, descripcion,
+                principal, permite_venta, activo
+             )
+             SELECT s.empresa_id, s.id, CONCAT(\'SUC-\', s.id), s.nombre,
+                    \'SUCURSAL_VENTA\', \'Ubicacion de venta creada automaticamente\',
+                    1, 1, 1
+             FROM sucursales s
+             WHERE s.id = :sucursal_id
+               AND s.empresa_id = :empresa_id
+               AND s.activo = 1
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM ubicaciones_stock u
+                   WHERE u.empresa_id = s.empresa_id
+                     AND u.sucursal_id = s.id
+                     AND u.tipo = \'SUCURSAL_VENTA\'
+                     AND u.activo = 1
+               )'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId]);
+    }
+
     public function findLocation(int $empresaId, int $id): ?array
     {
         $statement = $this->connection->prepare(
