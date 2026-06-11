@@ -192,6 +192,35 @@ final class EmpresaRepository
         return (int) $this->connection->lastInsertId();
     }
 
+    public function ensureSucursalVentaLocation(int $empresaId, int $sucursalId, string $nombre, int $activo): void
+    {
+        $statement = $this->connection->prepare(
+            'INSERT INTO ubicaciones_stock (
+                empresa_id, sucursal_id, codigo, nombre, tipo, descripcion,
+                principal, permite_venta, activo
+             )
+             SELECT :empresa_id, :sucursal_id, :codigo, :nombre, \'SUCURSAL_VENTA\',
+                    \'Ubicacion de venta creada desde sucursal\', 1, 1, :activo
+             WHERE NOT EXISTS (
+                SELECT 1
+                FROM ubicaciones_stock
+                WHERE empresa_id = :empresa_id_exists
+                  AND sucursal_id = :sucursal_id_exists
+                  AND tipo = \'SUCURSAL_VENTA\'
+                  AND activo = 1
+             )'
+        );
+        $statement->execute([
+            'empresa_id' => $empresaId,
+            'sucursal_id' => $sucursalId,
+            'codigo' => 'SUC-' . $sucursalId,
+            'nombre' => $nombre,
+            'activo' => $activo,
+            'empresa_id_exists' => $empresaId,
+            'sucursal_id_exists' => $sucursalId,
+        ]);
+    }
+
     public function updateSucursal(
         int $id,
         string $nombre,

@@ -170,6 +170,7 @@ final class EmpresaService
             $telefono,
             $activo
         );
+        $this->repository->ensureSucursalVentaLocation($empresaId, $id, $nombre, $activo);
 
         return $this->obtenerSucursal($id);
     }
