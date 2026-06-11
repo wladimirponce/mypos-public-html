@@ -12,7 +12,7 @@ final class ProductoRepository
     {
     }
 
-    public function list(int $empresaId, ?string $q = null): array
+    public function list(int $empresaId, ?string $q = null, int $limit = 200, int $offset = 0): array
     {
         $sql = 'SELECT p.id, p.empresa_id, p.rubro_id, p.centro_costo_id, p.codigo, p.sku,
                        p.nombre, p.descripcion, p.unidad_medida, p.precio_costo,
@@ -57,11 +57,30 @@ final class ProductoRepository
             $params['q_sku'] = $term;
         }
 
-        $sql .= ' ORDER BY p.nombre LIMIT 200';
+        $sql .= ' ORDER BY p.nombre LIMIT ' . max(1, min($limit, 500)) . ' OFFSET ' . max(0, $offset);
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
 
         return $statement->fetchAll();
+    }
+
+    public function countList(int $empresaId, ?string $q = null): int
+    {
+        $sql = 'SELECT COUNT(*) FROM productos p WHERE p.empresa_id = :empresa_id';
+        $params = ['empresa_id' => $empresaId];
+
+        if ($q !== null && trim($q) !== '') {
+            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
+            $term = '%' . trim($q) . '%';
+            $params['q_nombre'] = $term;
+            $params['q_codigo'] = $term;
+            $params['q_sku'] = $term;
+        }
+
+        $statement = $this->connection->prepare($sql);
+        $statement->execute($params);
+
+        return (int) $statement->fetchColumn();
     }
 
     public function find(int $id, int $empresaId): ?array

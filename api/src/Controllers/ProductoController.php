@@ -22,7 +22,13 @@ final class ProductoController
 
     public function index(): void
     {
-        $this->respond(fn (int $userId): array => $this->service->listProductos($userId, $this->queryEmpresaId(), $_GET['q'] ?? null));
+        $this->respond(fn (int $userId): array => $this->service->listProductos(
+            $userId,
+            $this->queryEmpresaId(),
+            $_GET['q'] ?? null,
+            (int) ($_GET['page'] ?? 1),
+            (int) ($_GET['per_page'] ?? 200)
+        ));
     }
 
     public function store(): void

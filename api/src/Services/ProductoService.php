@@ -96,11 +96,21 @@ final class ProductoService
         return ['id' => $id, 'activo' => 0];
     }
 
-    public function listProductos(int $userId, int $empresaId, ?string $q): array
+    public function listProductos(int $userId, int $empresaId, ?string $q, int $page = 1, int $perPage = 200): array
     {
         $this->tenant($userId, $empresaId);
 
-        return ['productos' => $this->productos->list($empresaId, $q)];
+        $page = max(1, $page);
+        $perPage = max(1, min($perPage, 500));
+        $total = $this->productos->countList($empresaId, $q);
+
+        return [
+            'productos' => $this->productos->list($empresaId, $q, $perPage, ($page - 1) * $perPage),
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => (int) ceil($total / $perPage),
+        ];
     }
 
     public function createProducto(int $userId, array $data): array
