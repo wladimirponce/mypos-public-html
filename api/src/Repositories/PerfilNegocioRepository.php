@@ -31,7 +31,7 @@ final class PerfilNegocioRepository
         $sql = '
             INSERT INTO empresa_capacidades (empresa_id, capacidad_id, activo, activado_por, activado_at)
             VALUES (:empresa_id, :capacidad_id, 1, :usuario_id, NOW())
-            ON DUPLICATE KEY UPDATE activo = 1, activado_por = :usuario_id, activado_at = NOW()
+            ON DUPLICATE KEY UPDATE activo = 1, activado_por = VALUES(activado_por), activado_at = NOW()
         ';
         $stmt = $this->db->prepare($sql);
         $stmt->execute([
@@ -102,7 +102,7 @@ final class PerfilNegocioRepository
         $sql = '
             INSERT INTO empresa_capacidades (empresa_id, capacidad_id, activo, activado_por, activado_at)
             VALUES (:empresa_id, :capacidad_id, :activo, :usuario_id, NOW())
-            ON DUPLICATE KEY UPDATE activo = :activo, activado_por = :usuario_id, activado_at = NOW()
+            ON DUPLICATE KEY UPDATE activo = VALUES(activo), activado_por = VALUES(activado_por), activado_at = NOW()
         ';
         $stmt = $this->db->prepare($sql);
         $stmt->execute([
