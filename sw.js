@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mypos-cache-v3';
+const CACHE_NAME = 'mypos-cache-v4';
 const STATIC_ASSETS = [
   '/manifest.webmanifest'
 ];
@@ -77,11 +77,7 @@ self.addEventListener('fetch', (event) => {
     event.request.destination === 'font'
   ) {
     event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-        return fetch(event.request).then((networkResponse) => {
+      fetch(event.request).then((networkResponse) => {
           // Guardar en cache para la próxima vez
           if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
             const responseToCache = networkResponse.clone();
@@ -90,8 +86,7 @@ self.addEventListener('fetch', (event) => {
             });
           }
           return networkResponse;
-        });
-      })
+        }).catch(() => caches.match(event.request))
     );
   }
 });
