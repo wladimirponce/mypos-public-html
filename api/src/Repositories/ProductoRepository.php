@@ -461,6 +461,7 @@ final class ProductoRepository
                     p.es_producto_peso, p.precio_por_kg,
                     r.nombre AS rubro, cc.nombre AS centro_costo, pcb.codigo_barra AS codigo_barra_usado,
                     pi.imagen_url AS imagen_principal,
+                    a.id AS imagen_principal_archivo_id,
                     EXISTS(
                         SELECT 1 FROM producto_variantes pv
                         WHERE pv.producto_padre_id = p.id AND pv.empresa_id = p.empresa_id AND pv.activo = 1
@@ -475,6 +476,7 @@ final class ProductoRepository
              LEFT JOIN rubros r ON r.id = p.rubro_id
              LEFT JOIN centros_costo cc ON cc.id = p.centro_costo_id
              LEFT JOIN productos_imagenes pi ON pi.producto_id = p.id AND pi.empresa_id = p.empresa_id AND pi.principal = 1
+             LEFT JOIN archivos_subidos a ON a.empresa_id = p.empresa_id AND a.ruta_relativa = pi.imagen_url AND a.estado = \'ACTIVO\'
              WHERE p.empresa_id = :empresa_id
                AND p.activo = 1
                AND (p.codigo = :codigo OR p.sku = :sku OR pcb.codigo_barra = :codigo_barra)
