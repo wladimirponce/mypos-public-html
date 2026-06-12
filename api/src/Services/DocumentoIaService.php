@@ -493,6 +493,18 @@ final class DocumentoIaService
     private function resolveProductId(int $empresaId, array $item): ?int
     {
         $code = trim((string) ($item['codigo_detectado'] ?? ''));
+        $barcode = trim((string) ($item['codigo_barra_detectado'] ?? $item['codigo_barra'] ?? ''));
+        if ($barcode === '' && preg_match('/^\d{8,14}$/', $code) === 1) {
+            $barcode = $code;
+        }
+
+        if ($barcode !== '') {
+            $product = $this->products->searchByCode($empresaId, $barcode);
+            if (is_array($product)) {
+                return (int) $product['id'];
+            }
+        }
+
         if ($code === '') {
             return null;
         }
@@ -509,13 +521,20 @@ final class DocumentoIaService
         $total = $this->nonNegativeIntValue($item['total_detectado'] ?? $item['total'] ?? round($quantity * $cost));
         $confirmed = (int) ($item['confirmado'] ?? ($productId !== null ? 1 : 0));
 
+        $detectedCode = $this->nullableString($item['codigo_detectado'] ?? null);
+        $detectedBarcode = $this->nullableString($item['codigo_barra_detectado'] ?? $item['codigo_barra'] ?? null);
+        if ($detectedBarcode === null && $detectedCode !== null && preg_match('/^\d{8,14}$/', $detectedCode) === 1) {
+            $detectedBarcode = $detectedCode;
+            $detectedCode = null;
+        }
+
         return [
             'empresa_id' => $empresaId,
             'documento_ia_id' => $documentId,
             'producto_id' => $productId,
             'linea' => $line,
-            'codigo_detectado' => $this->nullableString($item['codigo_detectado'] ?? null),
-            'codigo_barra_detectado' => $this->nullableString($item['codigo_barra_detectado'] ?? $item['codigo_barra'] ?? null),
+            'codigo_detectado' => $detectedCode,
+            'codigo_barra_detectado' => $detectedBarcode,
             'nombre_detectado' => (string) ($item['nombre_detectado'] ?? 'Producto detectado'),
             'cantidad_detectada' => $this->formatQuantity($quantity),
             'costo_unitario_detectado' => $cost,

@@ -16,7 +16,7 @@ Si un dato no esta disponible, usa null.
 No inventes productos, totales ni RUT.
 Estructura:
 {
-  "tipo_documento": "FACTURA_COMPRA|GUIA_DESPACHO|DESCONOCIDO",
+  "tipo_documento": "FACTURA_COMPRA|GUIA_DESPACHO_COMPRA|BOLETA_COMPRA|DESCONOCIDO",
   "proveedor_rut": null,
   "proveedor_nombre": null,
   "folio": null,
@@ -28,9 +28,10 @@ Estructura:
   "moneda": "CLP",
   "confianza_global": 0,
   "items": [
-    {
-      "codigo_detectado": null,
-      "nombre_detectado": null,
+      {
+        "codigo_detectado": null,
+        "codigo_barra_detectado": null,
+        "nombre_detectado": null,
       "cantidad_detectada": 0,
       "costo_unitario_detectado": 0,
       "total_detectado": 0,
@@ -44,6 +45,7 @@ Reglas:
 - Cantidades como decimal.
 - Fechas YYYY-MM-DD si es posible.
 - RUT chileno como string.
+- Codigos EAN/UPC numericos de 8 a 14 digitos van en codigo_barra_detectado, no en codigo_detectado.
 - Si no encuentra items, items = [].
 - confianza entre 0 y 1.
 PROMPT;
@@ -204,6 +206,7 @@ PROMPT;
 
         return [
             'codigo_detectado' => $this->nullableString($item['codigo_detectado'] ?? null),
+            'codigo_barra_detectado' => $this->nullableString($item['codigo_barra_detectado'] ?? null),
             'nombre_detectado' => $this->nullableString($item['nombre_detectado'] ?? null) ?? 'Producto detectado',
             'cantidad_detectada' => is_numeric($item['cantidad_detectada'] ?? null) ? round((float) $item['cantidad_detectada'], 3) : 0,
             'costo_unitario_detectado' => $this->intAtLeast($item['costo_unitario_detectado'] ?? 0),

@@ -53,6 +53,12 @@ final class DocumentoIaNormalizerService
             $calculatedLineTotal = (int) round(((float) $quantity) * $cost);
             $confidence = $this->normalizarConfianza($item['confianza'] ?? null);
             $itemAlerts = [];
+            $detectedCode = $this->textOrNull($item['codigo_detectado'] ?? null);
+            $detectedBarcode = $this->textOrNull($item['codigo_barra_detectado'] ?? $item['codigo_barra'] ?? null);
+            if ($detectedBarcode === null && $this->looksLikeBarcode($detectedCode)) {
+                $detectedBarcode = $detectedCode;
+                $detectedCode = null;
+            }
 
             if ((float) $quantity <= 0) {
                 $itemAlerts[] = $this->alert('CANTIDAD_INVALIDA', 'ERROR', 'Cantidad detectada invalida');
@@ -72,8 +78,8 @@ final class DocumentoIaNormalizerService
 
             $items[] = [
                 'linea' => $index + 1,
-                'codigo_detectado' => $this->textOrNull($item['codigo_detectado'] ?? null),
-                'codigo_barra_detectado' => $this->textOrNull($item['codigo_barra_detectado'] ?? $item['codigo_barra'] ?? null),
+                'codigo_detectado' => $detectedCode,
+                'codigo_barra_detectado' => $detectedBarcode,
                 'nombre_detectado' => $this->textOrNull($item['nombre_detectado'] ?? null) ?? 'Producto detectado',
                 'cantidad_detectada' => $quantity,
                 'costo_unitario_detectado' => $cost,
@@ -277,6 +283,11 @@ final class DocumentoIaNormalizerService
         }
 
         return trim((string) $value);
+    }
+
+    private function looksLikeBarcode(?string $value): bool
+    {
+        return $value !== null && preg_match('/^\d{8,14}$/', $value) === 1;
     }
 
     private function alert(string $type, string $severity, string $message, array $metadata = []): array
