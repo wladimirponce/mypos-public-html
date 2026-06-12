@@ -508,9 +508,9 @@ $router->get('/api/v1/cajas/{id}/movimientos', protectedRoute([$cajaController, 
 $router->post('/api/v1/cajas/aperturas/{id}/cerrar', protectedRoute([$cajaController, 'close'], 'cajas.cerrar'));
 
 $egresoController = new EgresoController();
-$router->get('/api/v1/egresos', protectedRoute([$egresoController, 'index'], 'egresos.ver'));
-$router->post('/api/v1/egresos', protectedRoute([$egresoController, 'store'], 'egresos.crear'));
-$router->post('/api/v1/egresos/{id}/anular', protectedRoute([$egresoController, 'cancel'], 'egresos.anular'));
+$router->get('/api/v1/egresos', protectedRoute([$egresoController, 'index'], 'cajas.ver'));
+$router->post('/api/v1/egresos', protectedRoute([$egresoController, 'store'], 'cajas.movimientos'));
+$router->post('/api/v1/egresos/{id}/anular', protectedRoute([$egresoController, 'cancel'], 'cajas.cerrar'));
 
 $ventaController = new VentaController();
 $router->post('/api/v1/ventas', protectedRoute([$ventaController, 'store'], 'ventas.crear'));
