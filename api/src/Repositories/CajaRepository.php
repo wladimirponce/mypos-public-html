@@ -131,21 +131,27 @@ final class CajaRepository
 
     public function openStatus(int $empresaId, int $sucursalId, ?int $boxId): ?array
     {
-        $sql = 'SELECT ca.id AS caja_apertura_id, ca.caja_id, c.codigo, c.nombre,
-                       ca.usuario_id, ca.estado, ca.monto_inicial, ca.fecha_apertura
-                FROM caja_aperturas ca
-                INNER JOIN cajas c ON c.id = ca.caja_id
-                WHERE ca.empresa_id = :empresa_id
-                  AND ca.sucursal_id = :sucursal_id
-                  AND ca.estado = \'ABIERTA\'';
+        $sql = 'SELECT ca.id AS caja_apertura_id, c.id AS caja_id, c.codigo, c.nombre,
+                       ca.usuario_id, u.nombre AS usuario_apertura, ca.estado,
+                       ca.monto_inicial, ca.fecha_apertura
+                FROM cajas c
+                LEFT JOIN caja_aperturas ca
+                       ON ca.caja_id = c.id
+                      AND ca.empresa_id = c.empresa_id
+                      AND ca.sucursal_id = c.sucursal_id
+                      AND ca.estado = \'ABIERTA\'
+                LEFT JOIN usuarios u ON u.id = ca.usuario_id
+                WHERE c.empresa_id = :empresa_id
+                  AND c.sucursal_id = :sucursal_id
+                  AND c.activo = 1';
         $params = ['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId];
 
         if ($boxId !== null) {
-            $sql .= ' AND ca.caja_id = :caja_id';
+            $sql .= ' AND c.id = :caja_id';
             $params['caja_id'] = $boxId;
         }
 
-        $sql .= ' ORDER BY ca.fecha_apertura DESC LIMIT 1';
+        $sql .= ' ORDER BY (ca.id IS NOT NULL) DESC, ca.fecha_apertura DESC, c.codigo LIMIT 1';
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
         $row = $statement->fetch();
@@ -234,7 +240,7 @@ final class CajaRepository
              FROM ventas v
              INNER JOIN venta_pagos vp ON vp.venta_id = v.id
              WHERE v.empresa_id = :empresa_id
-               AND v.estado = \'EMITIDA\'
+               AND v.estado <> \'ANULADA\'
                AND (v.caja_apertura_id = :caja_apertura_id OR v.apertura_id = :apertura_id)'
         );
         $statement->execute([
@@ -362,7 +368,7 @@ final class CajaRepository
              INNER JOIN venta_pagos vp ON vp.venta_id = v.id
              LEFT JOIN metodos_pago mp ON mp.id = vp.metodo_pago_id
              WHERE v.empresa_id = :empresa_id
-               AND v.estado = \'EMITIDA\'
+               AND v.estado <> \'ANULADA\'
                AND (v.caja_apertura_id = :caja_apertura_id OR v.apertura_id = :apertura_id)
              GROUP BY vp.metodo_pago_id, vp.metodo_pago_codigo, mp.nombre
              ORDER BY total DESC'

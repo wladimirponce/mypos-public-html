@@ -150,10 +150,38 @@ final class CajaService
         $status = $this->repository->openStatus($empresaId, $sucursalId, $boxId);
 
         if ($status === null) {
-            return ['tiene_caja_abierta' => false];
+            return ['tiene_caja_abierta' => false, 'tiene_caja_configurada' => false];
         }
 
-        return ['tiene_caja_abierta' => true] + $status;
+        $openingId = (int) ($status['caja_apertura_id'] ?? 0);
+        if ($openingId <= 0) {
+            return [
+                'tiene_caja_abierta' => false,
+                'tiene_caja_configurada' => true,
+                'caja_id' => (int) $status['caja_id'],
+                'codigo' => $status['codigo'],
+                'nombre' => $status['nombre'],
+                'caja_nombre' => $status['nombre'],
+                'estado' => 'CERRADA',
+            ];
+        }
+
+        $payments = $this->repository->paymentTotals($empresaId, $openingId);
+        $movements = $this->repository->movementTotals($empresaId, $openingId);
+        $initial = (int) $status['monto_inicial'];
+        $cash = (int) $payments['efectivo'];
+        $income = (int) $movements['ingresos'];
+        $withdrawals = (int) $movements['retiros'];
+
+        return ['tiene_caja_abierta' => true, 'tiene_caja_configurada' => true] + $status + [
+            'total_ventas_efectivo' => $cash,
+            'total_ventas_tarjeta' => (int) $payments['tarjeta'],
+            'total_ventas_transferencia' => (int) $payments['transferencia'],
+            'total_ventas_otros' => (int) $payments['otros'],
+            'total_ingresos' => $income,
+            'total_retiros' => $withdrawals,
+            'saldo_actual_estimado' => $initial + $cash + $income - $withdrawals,
+        ];
     }
 
     public function registrarMovimiento(int $userId, array $payload): array
