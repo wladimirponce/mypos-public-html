@@ -100,7 +100,58 @@ final class CompraService
             throw new HttpException('empresa_id obligatorio', 422);
         }
 
-        return ['compras' => $this->repository->list($empresaId, $filters)];
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = max(1, min((int) ($filters['per_page'] ?? 20), 500));
+        $total = $this->repository->countList($empresaId, $filters);
+
+        return [
+            'compras' => $this->repository->list($empresaId, $filters, $perPage, ($page - 1) * $perPage),
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => (int) ceil($total / $perPage),
+        ];
+    }
+
+    /**
+     * Eliminacion logica de una compra. Si $revertirStock es true y la compra
+     * esta CONFIRMADA, primero se reversa el stock con el flujo estandar de
+     * AnulacionService; si es false, el stock queda tal como esta.
+     */
+    public function eliminar(int $userId, int $id, int $empresaId, bool $revertirStock, ?string $motivo): array
+    {
+        $purchase = $this->repository->findForUpdate($empresaId, $id);
+
+        if ($purchase === null || $purchase['deleted_at'] !== null) {
+            throw new HttpException('Compra no encontrada', 404);
+        }
+
+        $stockReversed = false;
+        if ($revertirStock && (string) $purchase['estado'] === 'CONFIRMADA') {
+            $this->reversarCompra($userId, $id, [
+                'empresa_id' => $empresaId,
+                'motivo' => $motivo ?? 'Eliminacion de compra con reversa de stock',
+            ]);
+            $stockReversed = true;
+        }
+
+        $this->repository->markDeleted($empresaId, $id);
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'sucursal_id' => (int) $purchase['sucursal_id'],
+            'usuario_id' => $userId,
+            'modulo' => 'compras',
+            'accion' => 'eliminar',
+            'entidad' => 'compras',
+            'entidad_id' => $id,
+            'descripcion' => $stockReversed
+                ? 'Compra eliminada con reversa de stock'
+                : 'Compra eliminada conservando stock',
+            'datos_anteriores' => ['estado' => (string) $purchase['estado']],
+            'datos_nuevos' => ['deleted' => true, 'stock_reversado' => $stockReversed, 'motivo' => $motivo],
+        ], $this->repository->connection());
+
+        return ['compra_id' => $id, 'eliminada' => true, 'stock_reversado' => $stockReversed];
     }
 
     public function detalle(int $empresaId, int $id): array

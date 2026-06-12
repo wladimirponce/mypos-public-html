@@ -87,7 +87,7 @@ final class CompraRepository
     {
         $statement = $this->connection->prepare(
             'SELECT id, empresa_id, sucursal_id, proveedor_id, usuario_id, tipo_documento, folio,
-                    fecha_documento, fecha_ingreso, estado, subtotal, impuesto_total, total, observacion
+                    fecha_documento, fecha_ingreso, estado, subtotal, impuesto_total, total, observacion, deleted_at
              FROM compras
              WHERE id = :id AND empresa_id = :empresa_id
              LIMIT 1
@@ -153,12 +153,13 @@ final class CompraRepository
         $statement->execute(['id' => $id, 'empresa_id' => $empresaId, 'motivo' => $reason]);
     }
 
-    public function list(int $empresaId, array $filters): array
+    public function list(int $empresaId, array $filters, int $limit = 300, int $offset = 0): array
     {
         $sql = 'SELECT id, empresa_id, sucursal_id, proveedor_id, usuario_id, tipo_documento, folio,
                        fecha_documento, fecha_ingreso, estado, subtotal, impuesto_total, total, observacion, created_at
                 FROM compras
-                WHERE empresa_id = :empresa_id';
+                WHERE empresa_id = :empresa_id
+                  AND deleted_at IS NULL';
         $params = ['empresa_id' => $empresaId];
 
         foreach (['sucursal_id', 'proveedor_id'] as $field) {
@@ -185,10 +186,54 @@ final class CompraRepository
             $params['fecha_hasta'] = $filters['fecha_hasta'];
         }
 
-        $sql .= ' ORDER BY id DESC LIMIT 300';
+        $sql .= ' ORDER BY id DESC LIMIT ' . max(1, min($limit, 500)) . ' OFFSET ' . max(0, $offset);
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
 
         return $statement->fetchAll();
+    }
+
+    public function countList(int $empresaId, array $filters): int
+    {
+        $sql = 'SELECT COUNT(*) FROM compras WHERE empresa_id = :empresa_id AND deleted_at IS NULL';
+        $params = ['empresa_id' => $empresaId];
+
+        foreach (['sucursal_id', 'proveedor_id'] as $field) {
+            if (!empty($filters[$field])) {
+                $sql .= " AND {$field} = :{$field}";
+                $params[$field] = (int) $filters[$field];
+            }
+        }
+
+        foreach (['estado', 'tipo_documento'] as $field) {
+            if (!empty($filters[$field])) {
+                $sql .= " AND {$field} = :{$field}";
+                $params[$field] = $filters[$field];
+            }
+        }
+
+        if (!empty($filters['fecha_desde'])) {
+            $sql .= ' AND fecha_documento >= :fecha_desde';
+            $params['fecha_desde'] = $filters['fecha_desde'];
+        }
+
+        if (!empty($filters['fecha_hasta'])) {
+            $sql .= ' AND fecha_documento <= :fecha_hasta';
+            $params['fecha_hasta'] = $filters['fecha_hasta'];
+        }
+
+        $statement = $this->connection->prepare($sql);
+        $statement->execute($params);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    public function markDeleted(int $empresaId, int $id): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE compras SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id AND empresa_id = :empresa_id AND deleted_at IS NULL'
+        );
+        $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
     }
 }

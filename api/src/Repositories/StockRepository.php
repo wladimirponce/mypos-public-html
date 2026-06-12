@@ -282,8 +282,11 @@ final class StockRepository
         $params = ['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId];
 
         if ($q !== null && trim($q) !== '') {
-            $sql .= ' AND (p.nombre LIKE :q OR p.codigo LIKE :q OR p.sku LIKE :q)';
-            $params['q'] = '%' . trim($q) . '%';
+            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
+            $term = '%' . trim($q) . '%';
+            $params['q_nombre'] = $term;
+            $params['q_codigo'] = $term;
+            $params['q_sku'] = $term;
         }
 
         $sql .= ' ORDER BY p.nombre LIMIT 300';
@@ -315,8 +318,11 @@ final class StockRepository
         $params = ['empresa_id' => $empresaId, 'ubicacion_id' => $ubicacionId];
 
         if ($q !== null && trim($q) !== '') {
-            $sql .= ' AND (p.nombre LIKE :q OR p.codigo LIKE :q OR p.sku LIKE :q)';
-            $params['q'] = '%' . trim($q) . '%';
+            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
+            $term = '%' . trim($q) . '%';
+            $params['q_nombre'] = $term;
+            $params['q_codigo'] = $term;
+            $params['q_sku'] = $term;
         }
 
         $sql .= ' ORDER BY p.nombre LIMIT 300';

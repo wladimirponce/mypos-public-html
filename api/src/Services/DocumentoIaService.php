@@ -154,7 +154,14 @@ final class DocumentoIaService
             $result = $gemini['resultado'];
             $applied = $this->aplicarResultadoIa($empresaId, $id, $document, $result);
             $normalized = $this->conciliation->normalizarYConciliar($id, $empresaId, $userId);
-            $this->repository->updateProcessing($processingId, 'PROCESADO', $gemini['raw_response'] ?? $result, null);
+            $this->repository->updateProcessing(
+                $processingId,
+                'PROCESADO',
+                $gemini['raw_response'] ?? $result,
+                null,
+                isset($gemini['tokens_input']) ? (int) $gemini['tokens_input'] : null,
+                isset($gemini['tokens_output']) ? (int) $gemini['tokens_output'] : null,
+            );
             $this->auditGemini($empresaId, (int) $document['sucursal_id'], $userId, $id, (int) $file['id'], 'documentos_ia.procesar_gemini', 'OK');
 
             return array_merge($applied, [
@@ -498,6 +505,30 @@ final class DocumentoIaService
         }
 
         return $document;
+    }
+
+    public function eliminar(int $userId, int $empresaId, int $id): array
+    {
+        $document = $this->repository->find($empresaId, $id);
+        if ($document === null) {
+            throw new HttpException('Documento IA no encontrado', 404);
+        }
+
+        $this->repository->markDeleted($empresaId, $id);
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'sucursal_id' => (int) $document['sucursal_id'],
+            'usuario_id' => $userId,
+            'modulo' => 'documentos_ia',
+            'accion' => 'eliminar',
+            'entidad' => 'documentos_ia',
+            'entidad_id' => $id,
+            'descripcion' => 'Documento IA eliminado',
+            'datos_anteriores' => ['estado' => (string) ($document['estado'] ?? '')],
+            'datos_nuevos' => ['deleted' => true],
+        ]);
+
+        return ['documento_ia_id' => $id, 'eliminado' => true];
     }
 
     private function resolveProductId(int $empresaId, array $item): ?int

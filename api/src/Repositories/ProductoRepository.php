@@ -40,7 +40,13 @@ final class ProductoRepository
                              AND pcb.activo = 1
                            ORDER BY pcb.principal DESC, pcb.id
                            LIMIT 1
-                       ) AS codigo_barra_imagen_url
+                       ) AS codigo_barra_imagen_url,
+                       (
+                           SELECT COALESCE(SUM(ss.cantidad), 0.000)
+                           FROM stock_sucursal ss
+                           WHERE ss.producto_id = p.id
+                             AND ss.empresa_id = p.empresa_id
+                       ) AS stock_total
                 FROM productos p
                 LEFT JOIN rubros r ON r.id = p.rubro_id
                 LEFT JOIN centros_costo cc ON cc.id = p.centro_costo_id
@@ -50,11 +56,19 @@ final class ProductoRepository
         $params = ['empresa_id' => $empresaId];
 
         if ($q !== null && trim($q) !== '') {
-            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
+            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku
+                        OR EXISTS (
+                            SELECT 1 FROM productos_codigos_barra pcb_q
+                            WHERE pcb_q.producto_id = p.id
+                              AND pcb_q.empresa_id = p.empresa_id
+                              AND pcb_q.activo = 1
+                              AND pcb_q.codigo_barra LIKE :q_codigo_barra
+                        ))';
             $term = '%' . trim($q) . '%';
             $params['q_nombre'] = $term;
             $params['q_codigo'] = $term;
             $params['q_sku'] = $term;
+            $params['q_codigo_barra'] = $term;
         }
 
         $sql .= ' ORDER BY p.nombre LIMIT ' . max(1, min($limit, 500)) . ' OFFSET ' . max(0, $offset);
@@ -70,11 +84,19 @@ final class ProductoRepository
         $params = ['empresa_id' => $empresaId];
 
         if ($q !== null && trim($q) !== '') {
-            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
+            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku
+                        OR EXISTS (
+                            SELECT 1 FROM productos_codigos_barra pcb_q
+                            WHERE pcb_q.producto_id = p.id
+                              AND pcb_q.empresa_id = p.empresa_id
+                              AND pcb_q.activo = 1
+                              AND pcb_q.codigo_barra LIKE :q_codigo_barra
+                        ))';
             $term = '%' . trim($q) . '%';
             $params['q_nombre'] = $term;
             $params['q_codigo'] = $term;
             $params['q_sku'] = $term;
+            $params['q_codigo_barra'] = $term;
         }
 
         $statement = $this->connection->prepare($sql);

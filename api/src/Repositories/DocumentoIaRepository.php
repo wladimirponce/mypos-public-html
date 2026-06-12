@@ -85,7 +85,8 @@ final class DocumentoIaRepository
                        fecha_documento_detectada, total_detectado, total_calculado,
                        diferencia_total, estado_revision, archivo_url, estado, created_at
                 FROM documentos_ia
-                WHERE empresa_id = :empresa_id';
+                WHERE empresa_id = :empresa_id
+                  AND deleted_at IS NULL';
         $params = ['empresa_id' => $empresaId];
 
         foreach (['sucursal_id'] as $field) {
@@ -115,6 +116,15 @@ final class DocumentoIaRepository
         $statement->execute($params);
 
         return $statement->fetchAll();
+    }
+
+    public function markDeleted(int $empresaId, int $id): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE documentos_ia SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id AND empresa_id = :empresa_id AND deleted_at IS NULL'
+        );
+        $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
     }
 
     public function details(int $empresaId, int $documentId): array

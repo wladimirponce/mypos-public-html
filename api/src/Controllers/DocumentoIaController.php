@@ -143,6 +143,19 @@ final class DocumentoIaController
         }, 'Producto vinculado correctamente');
     }
 
+    public function destroy(array $params): void
+    {
+        $this->respond(function (int $userId) use ($params): array {
+            $payload = Request::json();
+
+            return $this->service->eliminar(
+                $userId,
+                (int) ($payload['empresa_id'] ?? $_GET['empresa_id'] ?? 0),
+                (int) $params['id']
+            );
+        }, 'Documento IA eliminado correctamente');
+    }
+
     private function respond(callable $callback, ?string $message = null, bool $dynamicPurchaseMessage = false): void
     {
         try {

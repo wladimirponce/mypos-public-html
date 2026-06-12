@@ -64,6 +64,21 @@ final class CompraController
         }, 'Compra anulada correctamente');
     }
 
+    public function destroy(array $params): void
+    {
+        $this->respond(function (int $userId) use ($params): array {
+            $payload = Request::json();
+
+            return $this->service->eliminar(
+                $userId,
+                (int) $params['id'],
+                (int) ($payload['empresa_id'] ?? $_GET['empresa_id'] ?? 0),
+                (bool) ($payload['revertir_stock'] ?? false),
+                isset($payload['motivo']) ? (string) $payload['motivo'] : null
+            );
+        }, 'Compra eliminada correctamente');
+    }
+
     private function respond(callable $callback, ?string $message = null): void
     {
         try {

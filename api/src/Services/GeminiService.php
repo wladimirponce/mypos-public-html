@@ -107,11 +107,18 @@ PROMPT;
 
         $response = $this->generateContent($request);
         $json = $this->extraerJsonRespuesta($response);
+        $usage = is_array($response['usageMetadata'] ?? null) ? $response['usageMetadata'] : [];
+        $tokensOutput = null;
+        if (isset($usage['candidatesTokenCount']) || isset($usage['thoughtsTokenCount'])) {
+            $tokensOutput = (int) ($usage['candidatesTokenCount'] ?? 0) + (int) ($usage['thoughtsTokenCount'] ?? 0);
+        }
 
         return [
             'resultado' => $this->normalizar($json),
             'raw_response' => $response,
             'modelo' => $this->model(),
+            'tokens_input' => isset($usage['promptTokenCount']) ? (int) $usage['promptTokenCount'] : null,
+            'tokens_output' => $tokensOutput,
         ];
     }
 

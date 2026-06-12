@@ -526,6 +526,7 @@ $router->post('/api/v1/compras', protectedRoute([$compraController, 'store'], 'c
 $router->get('/api/v1/compras/{id}', protectedRoute([$compraController, 'show'], 'compras.ver'));
 $router->post('/api/v1/compras/{id}/confirmar', protectedRoute([$compraController, 'confirm'], 'compras.confirmar'));
 $router->post('/api/v1/compras/{id}/anular', protectedRoute([$compraController, 'cancel'], 'compras.anular'));
+$router->delete('/api/v1/compras/{id}', protectedRoute([$compraController, 'destroy'], 'compras.anular'));
 
 $compraInteligenteController = new CompraInteligenteController();
 $router->get('/api/v1/compras-inteligentes/sugerencias', protectedRoute([$compraInteligenteController, 'sugerencias'], 'compras_inteligentes.ver'));
@@ -578,6 +579,7 @@ $router->post('/api/v1/documentos-ia/{id}/vincular-proveedor', protectedRoute([$
 $router->put('/api/v1/documentos-ia/{id}/editar', protectedRoute([$documentoIaController, 'edit'], 'documentos_ia.editar'));
 $router->post('/api/v1/documentos-ia/{id}/generar-compra', protectedRoute([$documentoIaController, 'generatePurchase'], 'documentos_ia.generar_compra'));
 $router->post('/api/v1/documentos-ia/{id}/vincular-producto', protectedRoute([$documentoIaController, 'linkProduct'], 'documentos_ia.vincular_producto'));
+$router->delete('/api/v1/documentos-ia/{id}', protectedRoute([$documentoIaController, 'destroy'], 'documentos_ia.editar'));
 
 $documentoTributarioController = new DocumentoTributarioController();
 $router->post('/api/v1/documentos-tributarios/desde-venta', protectedRoute([$documentoTributarioController, 'storeFromSale'], 'documentos_tributarios.crear'));
