@@ -133,7 +133,9 @@ try {
             $log = [
                 'pruebas' => $mgr->runPruebas($state, $caseIds),
                 'sim_33'  => $mgr->runSimulacion(33, 50, $state),
-                'sim_39'  => $mgr->runSimulacion(39, 50, $state),
+                'sim_52'  => $mgr->runSimulacion(52, 1, $state),
+                'sim_56'  => $mgr->runSimulacion(56, 1, $state),
+                'sim_61'  => $mgr->runSimulacion(61, 1, $state),
                 'boletas' => [
                     'skipped' => true,
                     'mensaje' => 'Las boletas del set SII se ejecutan solo con cert_boletas (sobre + RCOF).',
@@ -162,7 +164,8 @@ try {
         case 'cert_run_sim':
             set_time_limit(600);
             $tipo = (int)($_GET['tipo'] ?? $_POST['tipo'] ?? 33);
-            $cant = (int)($_GET['cantidad'] ?? $_POST['cantidad'] ?? 50);
+            $cantDefault = $tipo === 33 ? 50 : 1;
+            $cant = (int)($_GET['cantidad'] ?? $_POST['cantidad'] ?? $cantDefault);
             $state = [];
             ob_clean();
             echo json_encode($mgr->runSimulacion($tipo, $cant, $state));
@@ -174,7 +177,9 @@ try {
             $state = [];
             $results = [
                 'sim_33' => $mgr->runSimulacion(33, 50, $state),
-                'sim_39' => $mgr->runSimulacion(39, 50, $state),
+                'sim_52' => $mgr->runSimulacion(52, 1, $state),
+                'sim_56' => $mgr->runSimulacion(56, 1, $state),
+                'sim_61' => $mgr->runSimulacion(61, 1, $state),
             ];
             echo json_encode(['ok' => true, 'resultados' => $results, 'estado' => $mgr->loadState()]);
             break;

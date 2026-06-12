@@ -391,7 +391,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   <div class="paso-header" onclick="togglePaso(5)">
     <div class="paso-num" id="pnum-5">5</div>
     <div class="paso-title">Simulación
-      <span class="paso-desc">Etapa 2 SII — 1 sobre con 20-100 docs (T33 + T39) → 1 TrackID</span>
+      <span class="paso-desc">Etapa 2 SII — T33 más muestras T52, T56 y T61 exigidas por el portal</span>
     </div>
     <span id="pbadge-5" class="d-badge"></span>
     <i class="bi bi-chevron-down ms-2" id="pchev-5"></i>
@@ -399,7 +399,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   <div class="paso-body hidden" id="pbody-5">
     <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:14px">
       El SII exige <strong>1 único sobre</strong> con <strong>20 a 100 documentos</strong> de
-      <strong>todos los tipos certificados</strong> (T33 + T39). El número de envío (<em>TrackID</em>)
+      <strong>todos los tipos certificados</strong> (T33, T52, T56 y T61). El número de envío (<em>TrackID</em>)
       que arroja este sobre es el que debes ingresar en el portal SII para declarar la simulación.
       Se envía a <code>maullin.sii.cl</code> (ambiente de certificación).
     </p>
@@ -421,7 +421,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
       <div id="sim-sobre-meta" style="font-size:.72rem; color:var(--c-text-muted); margin-top:6px"></div>
     </div>
 
-    <!-- Cards T33 / T39 (estado individual) -->
+    <!-- Estado de documentos requeridos para las muestras de simulación -->
     <div class="row g-3 mb-3">
       <!-- T33 Facturas -->
       <div class="col-md-6">
@@ -441,22 +441,22 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
           <div id="sim-t33-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
         </div>
       </div>
-      <!-- T39 Boletas -->
+      <!-- Muestras adicionales -->
       <div class="col-md-6">
         <div class="libro-card h-100" style="border-left:3px solid #e67e22">
           <div style="font-weight:700; font-size:.82rem; margin-bottom:2px">
-            <i class="bi bi-receipt" style="color:#e67e22"></i> T39 — Boletas
+            <i class="bi bi-files" style="color:#e67e22"></i> T52 / T56 / T61
           </div>
           <div style="font-size:.72rem; color:var(--c-text-muted); margin-bottom:8px">
-            Boletas de prueba incluidas en el sobre de simulación.
+            Una guía, una nota de débito y una nota de crédito requeridas por el upload de muestras.
           </div>
           <div style="display:flex; align-items:center; gap:8px">
-            <button class="d-btn d-btn-sm d-btn-outline flex-fill" onclick="certSimulacion(39)">
-              <i class="bi bi-play-fill"></i> Ejecutar T39
+            <button class="d-btn d-btn-sm d-btn-outline flex-fill" onclick="certSimulacionAll()">
+              <i class="bi bi-play-fill"></i> Generar faltantes
             </button>
-            <span class="cert-badge cb-pending" id="sim-t39-badge">Pendiente</span>
+            <span class="cert-badge cb-pending" id="sim-extra-badge">Pendiente</span>
           </div>
-          <div id="sim-t39-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
+          <div id="sim-extra-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
         </div>
       </div>
     </div>
@@ -713,24 +713,38 @@ function applyState(estado) {
   // Paso 5 — Simulación
   const sim   = estado.simulacion || {};
   const s33   = sim.t33 || {};
-  const s39   = sim.t39 || {};
-  const simOk = s33.status==='ok' && s39.status==='ok';
+  const s52   = sim.t52 || {};
+  const s56   = sim.t56 || {};
+  const s61   = sim.t61 || {};
+  const simTipos = [[33, s33], [52, s52], [56, s56], [61, s61]];
+  const simOk = simTipos.every(([, item]) => item.status === 'ok');
   const simPb = document.getElementById('pbadge-5');
   if (simPb) {
     if (simOk) {
       simPb.textContent='✓ Completada'; simPb.className='d-badge success'; setPasoNum(5,'done');
-    } else if (s33.status || s39.status) {
-      const n33=(s33.folios_ok||[]).length, n39=(s39.folios_ok||[]).length;
-      simPb.textContent=`T33: ${n33} · T39: ${n39}`; simPb.className='d-badge warning'; setPasoNum(5,'');
+    } else if (simTipos.some(([, item]) => item.status)) {
+      simPb.textContent = simTipos.map(([tipo, item]) => `T${tipo}: ${(item.folios_ok || []).length}`).join(' · ');
+      simPb.className='d-badge warning'; setPasoNum(5,'');
     } else {
       simPb.textContent='Pendiente'; simPb.className='d-badge'; setPasoNum(5,'');
     }
   }
   _updSimCard('t33', s33);
-  _updSimCard('t39', s39);
+  const extraBadge = document.getElementById('sim-extra-badge');
+  const extraInfo = document.getElementById('sim-extra-info');
+  const extraTipos = [[52, s52], [56, s56], [61, s61]];
+  if (extraBadge) {
+    const extrasOk = extraTipos.every(([, item]) => item.status === 'ok');
+    const extrasConEstado = extraTipos.some(([, item]) => item.status);
+    extraBadge.className = `cert-badge ${extrasOk ? 'cb-ok' : extrasConEstado ? 'cb-running' : 'cb-pending'}`;
+    extraBadge.textContent = extrasOk ? '✓ OK' : extrasConEstado ? 'Parcial' : 'Pendiente';
+  }
+  if (extraInfo) {
+    extraInfo.textContent = extraTipos.map(([tipo, item]) => `T${tipo}: ${(item.folios_ok || []).length}`).join(' · ');
+  }
   // Mostrar botón de reset cuando hay cualquier estado de simulación (parcial u ok)
   const btnSimReset = document.getElementById('btn-sim-reset');
-  if (btnSimReset) btnSimReset.style.display = (s33.status || s39.status || sim.sobre) ? '' : 'none';
+  if (btnSimReset) btnSimReset.style.display = (simTipos.some(([, item]) => item.status) || sim.sobre) ? '' : 'none';
   // Mostrar panel TrackID del sobre si existe
   const sobre = sim.sobre || {};
   const sobrePanel = document.getElementById('sim-sobre-panel');
@@ -1309,18 +1323,24 @@ async function certSimulacion(tipo) {
 
 async function certSimulacionAll() {
   const statusEl = document.getElementById('sim-status');
-  if (statusEl) statusEl.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Ejecutando simulación completa T33 + T39 (100 docs total)…</div>';
-  log('Iniciando simulación completa T33 + T39…', 'info');
+  if (statusEl) statusEl.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Ejecutando simulación T33, T52, T56 y T61…</div>';
+  log('Iniciando simulación completa T33 + T52 + T56 + T61…', 'info');
   try {
     const res = await api('cert_sim_all');
-    const r33 = res.resultados?.sim_33 || {}, r39 = res.resultados?.sim_39 || {};
-    const ok33 = r33.ok || r33.skipped, ok39 = r39.ok || r39.skipped;
-    if (ok33 && ok39) {
-      if (statusEl) statusEl.innerHTML = '<div class="d-alert success"><i class="bi bi-check-circle"></i> Simulación completa: T33 OK · T39 OK.</div>';
+    const resultados = res.resultados || {};
+    const tipos = [33, 52, 56, 61];
+    const estados = tipos.map(tipo => {
+      const r = resultados['sim_' + tipo] || {};
+      return { tipo, ok: Boolean(r.ok || r.skipped), error: r.error || '' };
+    });
+    const allOk = estados.every(e => e.ok);
+    const resumen = estados.map(e => `T${e.tipo}: ${e.ok ? 'OK' : 'Error'}`).join(' · ');
+    if (allOk) {
+      if (statusEl) statusEl.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> Simulación completa: ${resumen}.</div>`;
       log('Simulación completa exitosa.', 'ok');
     } else {
-      if (statusEl) statusEl.innerHTML = `<div class="d-alert warning">T33: ${ok33?'OK':'Error'} · T39: ${ok39?'OK':'Error'}</div>`;
-      log(`Simulación: T33 ${ok33?'ok':'fail'}, T39 ${ok39?'ok':'fail'}`, ok33&&ok39?'ok':'warn');
+      if (statusEl) statusEl.innerHTML = `<div class="d-alert warning">${resumen}</div>`;
+      log(`Simulación: ${resumen}`, 'warn');
     }
     applyState(res.estado);
   } catch(e) {

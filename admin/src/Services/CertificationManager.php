@@ -46,7 +46,8 @@ class CertificationManager
     }
 
     /** Tipos a simular y cantidad requerida */
-    private const SIM_TIPOS        = [33, 39];
+    private const SIM_TIPOS        = [33, 52, 56, 61];
+    private const SIM_CANTIDADES   = [33 => 50, 52 => 1, 56 => 1, 61 => 1];
     private const SIM_CANTIDAD     = 50;   // Cantidad objetivo a intentar enviar
     /** Mínimo para considerar la simulación completa (exigencia SII para bajo volumen) */
     private const SIM_MIN_CANTIDAD = 10;
@@ -179,7 +180,7 @@ class CertificationManager
         $log['pruebas']    = $this->runPruebas($state);
 
         foreach (self::SIM_TIPOS as $tipo) {
-            $log["sim_$tipo"] = $this->runSimulacion($tipo, self::SIM_CANTIDAD, $state);
+            $log["sim_$tipo"] = $this->runSimulacion($tipo, self::SIM_CANTIDADES[$tipo], $state);
         }
 
         return ['ok' => true, 'resultados' => $log, 'estado' => $this->loadState()];
@@ -931,7 +932,7 @@ class CertificationManager
                     $recSimul['direccion'] = 'Direccion Simulacion 123';
                     $recSimul['comuna']    = 'Santiago';
                 }
-                $dte = generateDTE([
+                $payload = [
                     'tipoDTE' => $tipo,
                     'folio'   => $folioToUse,
                     'receptor' => $recSimul,
@@ -940,7 +941,25 @@ class CertificationManager
                         'cantidad' => 1,
                         'precio'   => 1000 + $i,
                     ]],
-                ]);
+                ];
+                if ($tipo === 52) {
+                    $payload['indTraslado'] = 1;
+                    $payload['tipoDespacho'] = 2;
+                }
+                if (in_array($tipo, [56, 61], true)) {
+                    $folioRef = $this->simulationFacturaReference($state);
+                    if ($folioRef <= 0) {
+                        throw new Exception("Para simular T{$tipo} primero debe existir una factura T33 de prueba o simulación.");
+                    }
+                    $payload['referencias'] = [[
+                        'tipo' => 33,
+                        'folio' => $folioRef,
+                        'fecha' => date('Y-m-d'),
+                        'codigo' => 3,
+                        'razon' => $tipo === 56 ? 'AUMENTA VALOR FACTURA SIMULACION' : 'DISMINUYE VALOR FACTURA SIMULACION',
+                    ]];
+                }
+                $dte = generateDTE($payload);
 
                 if (empty($dte['ok'])) throw new Exception($dte['error'] ?? 'Error DTE');
 
@@ -970,7 +989,8 @@ class CertificationManager
 
         // Completo si se alcanzó el mínimo SII (10 docs). El sistema intenta
         // hasta $cantidad (50) pero acepta menos si el CAF se agota antes.
-        $allDone = count($foliosOk) >= self::SIM_MIN_CANTIDAD;
+        $minimo = $tipo === 33 ? self::SIM_MIN_CANTIDAD : 1;
+        $allDone = count($foliosOk) >= $minimo;
         $state['simulacion'][$key] = [
             'status'       => $allDone ? 'ok' : 'partial',
             'tipo'         => $tipo,
@@ -1242,7 +1262,7 @@ class CertificationManager
             $key = "t$tipo";
             $st  = $state['simulacion'][$key]['status'] ?? 'pending';
             if (in_array($st, ['partial', 'failed'])) {
-                $results["sim_$tipo"] = $this->runSimulacion($tipo, self::SIM_CANTIDAD, $state);
+                $results["sim_$tipo"] = $this->runSimulacion($tipo, self::SIM_CANTIDADES[$tipo], $state);
             }
         }
 
@@ -1886,6 +1906,21 @@ class CertificationManager
             'archivos' => $files,
             'errores' => $errors,
         ];
+    }
+
+    private function simulationFacturaReference(array $state): int
+    {
+        $foliosSim = $state['simulacion']['t33']['folios_ok'] ?? [];
+        if (!empty($foliosSim)) {
+            return (int)end($foliosSim);
+        }
+        foreach (array_reverse($state['pruebas'] ?? []) as $prueba) {
+            if ((int)($prueba['tipo'] ?? 0) === 33 && (int)($prueba['folio'] ?? 0) > 0) {
+                return (int)$prueba['folio'];
+            }
+        }
+
+        return 0;
     }
 
     private function detectTipo(string $caseId): int
