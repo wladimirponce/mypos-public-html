@@ -10,6 +10,7 @@ use Mypos\Core\HttpException;
 use Mypos\Repositories\DocumentoIaRepository;
 use Mypos\Repositories\DocumentoIaRevisionRepository;
 use Mypos\Repositories\ProductoRepository;
+use Mypos\Support\SafeLogger;
 
 final class DocumentoIaService
 {
@@ -168,6 +169,15 @@ final class DocumentoIaService
             $this->auditGemini($empresaId, (int) $document['sucursal_id'], $userId, $id, (int) $file['id'], 'documentos_ia.gemini_error', 'ERROR', $exception->getMessage());
             throw $exception;
         } catch (\Throwable $exception) {
+            SafeLogger::error('Unexpected Gemini document processing error', [
+                'type' => $exception::class,
+                'message' => $exception->getMessage(),
+                'file' => basename($exception->getFile()),
+                'line' => $exception->getLine(),
+                'empresa_id' => $empresaId,
+                'documento_ia_id' => $id,
+                'paginas' => count($files),
+            ]);
             $this->repository->updateProcessing($processingId, 'ERROR', null, 'Error controlado al procesar con Gemini');
             $this->repository->markError($empresaId, $id, 'Error controlado al procesar con Gemini');
             $this->auditGemini($empresaId, (int) $document['sucursal_id'], $userId, $id, (int) $file['id'], 'documentos_ia.gemini_error', 'ERROR', 'Error controlado al procesar con Gemini');

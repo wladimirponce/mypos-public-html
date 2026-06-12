@@ -8,6 +8,8 @@ use Mypos\Core\HttpException;
 
 final class GeminiService
 {
+    private const MAX_TOTAL_INPUT_BYTES = 18874368;
+
     private const PROMPT = <<<'PROMPT'
 Eres un extractor de documentos de compra para un sistema POS chileno llamado MyPOS.
 Analiza la imagen/PDF de una factura o guia de despacho de compra.
@@ -61,12 +63,28 @@ PROMPT;
             throw new HttpException('El documento debe incluir entre 1 y 10 paginas', 422);
         }
 
-        $parts = [['text' => self::PROMPT . "\nLas imagenes o PDF adjuntos pertenecen al mismo documento y estan ordenados por pagina."]];
+        $totalBytes = 0;
         foreach ($files as $file) {
             $absolutePath = (string) ($file['absolute_path'] ?? '');
             if (!is_file($absolutePath)) {
                 throw new HttpException('Archivo para IA no encontrado', 404);
             }
+            $size = filesize($absolutePath);
+            if ($size === false) {
+                throw new HttpException('No fue posible determinar el tamano del archivo para IA', 500);
+            }
+            $totalBytes += $size;
+        }
+        if ($totalBytes > self::MAX_TOTAL_INPUT_BYTES) {
+            throw new HttpException(
+                'Las imagenes seleccionadas pesan demasiado para procesarlas juntas. Reduce su resolucion o envia menos paginas.',
+                422
+            );
+        }
+
+        $parts = [['text' => self::PROMPT . "\nLas imagenes o PDF adjuntos pertenecen al mismo documento y estan ordenados por pagina."]];
+        foreach ($files as $file) {
+            $absolutePath = (string) ($file['absolute_path'] ?? '');
             $content = file_get_contents($absolutePath);
             if ($content === false) {
                 throw new HttpException('No fue posible leer archivo para IA', 500);
@@ -117,7 +135,7 @@ PROMPT;
         $url = rtrim($this->apiBase(), '/') . '/models/' . rawurlencode($this->model()) . ':generateContent';
         $payload = json_encode($request, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($payload === false) {
-            throw new HttpException('No fue posible preparar solicitud Gemini', 500);
+            throw new HttpException('No fue posible preparar solicitud Gemini: ' . json_last_error_msg(), 500);
         }
 
         $context = stream_context_create([
@@ -145,7 +163,7 @@ PROMPT;
         }
 
         if ($status >= 400) {
-            throw new HttpException('Gemini rechazo la solicitud de procesamiento', 502);
+            throw new HttpException($this->geminiErrorMessage($status), $status === 429 ? 429 : 502);
         }
 
         return $decoded;
@@ -261,5 +279,16 @@ PROMPT;
         }
 
         return 200;
+    }
+
+    private function geminiErrorMessage(int $status): string
+    {
+        return match ($status) {
+            400 => 'Gemini rechazo el formato o tamano de las imagenes enviadas.',
+            401, 403 => 'Gemini rechazo las credenciales o permisos configurados.',
+            404 => 'El modelo Gemini configurado no existe o no esta disponible.',
+            429 => 'Gemini alcanzo temporalmente su limite de solicitudes o cuota.',
+            default => 'Gemini no esta disponible temporalmente.',
+        };
     }
 }
