@@ -5831,6 +5831,80 @@ XML;
     }
 }
 
+/**
+ * Genera un EnvioRecibos (recibo de mercaderías, Ley 19.983) firmado para los
+ * DTE recibidos de otro contribuyente. Cada Recibo se firma individualmente y
+ * luego se firma el SetRecibos completo (mismo patrón sobre+docs del EnvioDTE).
+ *
+ * @param array $data  rutRecibe (emisor de los DTE) + documentos[] con
+ *                     tipoDTE, folio, fecha, rutEmisor, rutReceptor, montoTotal.
+ */
+function generateEnvioRecibos(array $data): array {
+    try {
+        global $globalContext;
+        [$cert, $privKey] = loadCertificate();
+        $h = fn($v) => htmlspecialchars((string)$v, ENT_XML1, 'UTF-8');
+        $rutResponde = $data['rutResponde'] ?? ($globalContext ? $globalContext->getRut() : RUT_EMISOR);
+        $rutRecibe   = $data['rutRecibe'] ?? '';
+        if (!$rutRecibe) throw new InvalidArgumentException('Debe indicar rutRecibe (emisor de los DTE recibidos).');
+        $docs = array_values($data['documentos'] ?? []);
+        if (empty($docs)) throw new InvalidArgumentException('Debe incluir documentos para el recibo.');
+        $rutFirma = getRutCertificadoSeguro($cert);
+        $recinto  = $data['recinto'] ?? 'Oficina del receptor';
+        $ts = date('Y-m-d\TH:i:s');
+        // Texto de la declaración exigido por el schema EnvioRecibos_v10 (Ley 19.983).
+        $declaracion = 'El acuse de recibo que se declara en este acto, de acuerdo a lo dispuesto en la letra b) del Art. 4, y la letra c) del Art. 5 de la Ley 19.983, acredita que la entrega de mercaderias o servicio(s) prestado(s) ha(n) sido recibido(s).';
+
+        $recibosXml = '';
+        foreach ($docs as $i => $d) {
+            $id    = 'Rcbo' . ($i + 1);
+            $tipo  = (int)($d['tipoDTE'] ?? $d['tipo'] ?? 33);
+            $folio = (int)($d['folio'] ?? 0);
+            $fch   = $h($d['fecha'] ?? $d['fchEmis'] ?? date('Y-m-d'));
+            $rutE  = $h($d['rutEmisor'] ?? $rutRecibe);
+            $rutR  = $h($d['rutReceptor'] ?? $rutResponde);
+            $mnt   = (int)($d['montoTotal'] ?? $d['mntTotal'] ?? 0);
+            if ($folio <= 0) throw new InvalidArgumentException('Cada documento del recibo debe incluir folio.');
+
+            $reciboRaw = <<<XML
+<Recibo version="1.0" xmlns="http://www.sii.cl/SiiDte">
+<DocumentoRecibo ID="$id">
+  <TipoDoc>$tipo</TipoDoc>
+  <Folio>$folio</Folio>
+  <FchEmis>$fch</FchEmis>
+  <RUTEmisor>$rutE</RUTEmisor>
+  <RUTRecep>$rutR</RUTRecep>
+  <MntTotal>$mnt</MntTotal>
+  <Recinto>{$h($recinto)}</Recinto>
+  <RutFirma>{$h($rutFirma)}</RutFirma>
+  <Declaracion>$declaracion</Declaracion>
+  <TmstFirmaRecibo>$ts</TmstFirmaRecibo>
+</DocumentoRecibo>
+</Recibo>
+XML;
+            $recibosXml .= cleanXmlForEmbedding(signDTE($reciboRaw, $cert, $privKey, $id)) . "\n";
+        }
+
+        $idSet = 'SetDteRecibidos';
+        $xmlRaw = <<<XML
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<EnvioRecibos version="1.0" xmlns="http://www.sii.cl/SiiDte" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sii.cl/SiiDte EnvioRecibos_v10.xsd">
+<SetRecibos ID="$idSet">
+<Caratula version="1.0">
+  <RutResponde>{$h($rutResponde)}</RutResponde>
+  <RutRecibe>{$h($rutRecibe)}</RutRecibe>
+  <TmstFirmaEnv>$ts</TmstFirmaEnv>
+</Caratula>
+$recibosXml</SetRecibos>
+</EnvioRecibos>
+XML;
+        $xmlFirmado = signDTE($xmlRaw, $cert, $privKey, $idSet);
+        return ['ok' => true, 'xml' => $xmlFirmado, 'recibos' => count($docs), 'mensaje' => 'EnvioRecibos generado y firmado.'];
+    } catch (Throwable $e) {
+        return ['ok' => false, 'error' => $e->getMessage()];
+    }
+}
+
 function cleanXmlForEmbedding(string $xml): string {
     return trim(preg_replace('/<\?xml.*?\?>\s*/i', '', $xml));
 }

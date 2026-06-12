@@ -491,8 +491,10 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   </div>
   <div class="paso-body hidden" id="pbody-6">
     <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:10px">
-      Pegue o suba el XML de intercambio que el SII le envió en el ambiente de certificación.
-      El sistema generará y enviará la respuesta automáticamente.
+      Pegue o suba el XML de intercambio que el SII le envió en el ambiente de certificación. El sistema evalúa cada DTE
+      (acepta los dirigidos a esta empresa y rechaza los ajenos) y genera los 3 archivos firmados de respuesta:
+      Acuse de Recibo, Recibo de Mercaderías y Resultado de Validación. Descárguelos y súbalos en
+      <strong>maullin → menú postulantes → Verificación de respuestas de intercambio</strong>.
     </p>
     <textarea id="intercambio-xml" class="d-input"
       style="width:100%; height:90px; font-size:.7rem; font-family:monospace; resize:vertical"
@@ -505,7 +507,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
         <i class="bi bi-upload"></i> Subir XML
       </button>
       <button class="d-btn d-btn-sm d-btn-primary flex-fill" onclick="certIntercambio()">
-        <i class="bi bi-send-check"></i> Responder al SII
+        <i class="bi bi-send-check"></i> Generar Respuestas
       </button>
     </div>
     <div id="intercambio-status" class="mt-2"></div>
@@ -1193,12 +1195,20 @@ async function certIntercambio() {
   try {
     const fd = new FormData();
     fd.append('action', 'cert_intercambio');
-    fd.append('xml', xml);
+    // base64: mod_security bloquea POSTs con XML firmado crudo
+    fd.append('xml_b64', btoa(unescape(encodeURIComponent(xml))));
     const r = await fetch('cert_bridge.php', { method:'POST', body:fd });
     const res = await r.json();
     if (res.ok) {
-      status.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> Respuesta enviada. TrackID: ${res.trackId||'—'}</div>`;
-      log(`Intercambio respondido OK. TrackID: ${res.trackId||'-'}`, 'ok');
+      const docsHtml = (res.docs||[]).map(d => `<li style="font-size:.75rem">${d}</li>`).join('');
+      const dl = (f, label) =>
+        `<a class="d-btn d-btn-sm d-btn-outline" style="margin:4px 6px 0 0" href="cert_bridge.php?action=cert_intercambio_file&f=${f}" download><i class="bi bi-download"></i> ${label}</a>`;
+      let links = dl('acuse', '1. Acuse de Recibo');
+      if (res.archivos && res.archivos.recibo) links += dl('recibo', '2. Recibo Mercaderías');
+      links += dl('resultado', '3. Resultado Validación');
+      status.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> ${res.mensaje||'Respuestas generadas.'}`
+        + `<ul style="margin:6px 0 4px 18px; padding:0">${docsHtml}</ul>${links}</div>`;
+      log(`Intercambio: respuestas generadas (${(res.docs||[]).length} docs). Suba los archivos en maullin → Verificación de respuestas.`, 'ok');
     } else {
       status.innerHTML = `<div class="d-alert danger">${res.error||'Error'}</div>`;
       log('Error intercambio: '+(res.error||'?'), 'error');

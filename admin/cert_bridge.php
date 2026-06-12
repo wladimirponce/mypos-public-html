@@ -495,9 +495,13 @@ try {
             break;
 
         // ── Intercambio ──────────────────────────────────────────
+        // El XML viaja en base64 (xml_b64): mod_security del hosting bloquea
+        // POSTs con XML firmado crudo y devuelve HTML en vez de JSON.
         case 'cert_intercambio':
             $xml = '';
-            if (!empty($_POST['xml'])) {
+            if (!empty($_POST['xml_b64'])) {
+                $xml = base64_decode($_POST['xml_b64'], true) ?: '';
+            } elseif (!empty($_POST['xml'])) {
                 $xml = $_POST['xml'];
             } elseif (isset($_FILES['archivo']) && $_FILES['archivo']['error'] === UPLOAD_ERR_OK) {
                 $xml = file_get_contents($_FILES['archivo']['tmp_name']);
@@ -508,6 +512,28 @@ try {
             ob_clean();
             echo json_encode($mgr->responderIntercambio($xml));
             break;
+
+        // ── Descarga de las respuestas de intercambio generadas ──
+        // Uso: ?action=cert_intercambio_file&f=acuse|recibo|resultado
+        case 'cert_intercambio_file':
+            $map = [
+                'acuse'     => '1_acuse_recibo.xml',
+                'recibo'    => '2_recibo_mercaderias.xml',
+                'resultado' => '3_resultado_validacion.xml',
+                'recibido'  => 'intercambio_recibido.xml',
+            ];
+            $fKey = $_GET['f'] ?? '';
+            $file = $map[$fKey] ?? null;
+            $path = $file ? $globalContext->getTmpPath() . 'intercambio/' . $file : null;
+            if (!$path || !is_file($path)) {
+                throw new \Exception('Archivo de intercambio no encontrado. Genere primero las respuestas.');
+            }
+            ob_clean();
+            header('Content-Type: application/xml; charset=ISO-8859-1');
+            header('Content-Disposition: attachment; filename="' . $file . '"');
+            header('Content-Length: ' . filesize($path));
+            readfile($path);
+            exit;
 
         // ── Diagnóstico: genera XML del caso 1 sin enviar al SII ────
         case 'cert_diag_xml':

@@ -1248,89 +1248,144 @@ class CertificationManager
     // =========================================================
 
     /**
-     * Recibe el XML de intercambio del SII, genera y envía la RespuestaDTE.
-     * El XML puede pegarse en el formulario o subirse como archivo.
+     * Recibe el XML de intercambio del SII y genera las TRES respuestas que el
+     * examen de intercambio exige, evaluando CADA DTE del sobre (el set trae
+     * documentos con problemas a propósito — p.ej. receptor ajeno — que deben
+     * marcarse como no recibidos/rechazados):
+     *   1. Acuse de Recibo del envío   (RespuestaDTE/RecepcionEnvio)
+     *   2. Recibo de mercaderías       (EnvioRecibos, Ley 19.983) — solo DTEs propios
+     *   3. Resultado de validación     (RespuestaDTE/ResultadoDTE)
+     * Los archivos firmados quedan en tmp/{RUT}/intercambio/ y se verifican en
+     * la página "Verificación de respuestas" del menú postulantes en maullin.
      */
     public function responderIntercambio(string $xmlIntercambio): array
     {
         $state = $this->loadState();
 
-        // Guardar XML recibido para auditoría
-        file_put_contents($this->context->getTmpPath() . 'intercambio_recibido.xml', $xmlIntercambio);
+        // El XML llega del navegador como UTF-8 aunque declare ISO-8859-1:
+        // reconvertir para que el parser respete los bytes declarados.
+        if (stripos($xmlIntercambio, 'ISO-8859-1') !== false
+            && preg_match('//u', $xmlIntercambio)
+            && strlen($xmlIntercambio) !== mb_strlen($xmlIntercambio, 'UTF-8')) {
+            $xmlIntercambio = mb_convert_encoding($xmlIntercambio, 'ISO-8859-1', 'UTF-8');
+        }
 
-        // Parsear DTE recibido
+        $tmpDir = $this->context->getTmpPath() . 'intercambio/';
+        if (!is_dir($tmpDir)) @mkdir($tmpDir, 0755, true);
+        file_put_contents($tmpDir . 'intercambio_recibido.xml', $xmlIntercambio);
+
         $dom = new DOMDocument();
+        libxml_use_internal_errors(true);
         if (!@$dom->loadXML($xmlIntercambio)) {
             throw new Exception('XML de intercambio inválido o malformado.');
         }
+        $xp = new DOMXPath($dom);
+        $xp->registerNamespace('s', 'http://www.sii.cl/SiiDte');
+        $txt = fn(\DOMNode $ctx, string $q) => trim((string)$xp->evaluate("string($q)", $ctx));
 
-        $get = fn(string $tag) => $dom->getElementsByTagName($tag)->item(0)?->textContent ?? '';
+        $rutEmisorEnv = $txt($dom->documentElement, './/s:Caratula/s:RutEmisor');
+        $setNode      = $xp->query('//s:SetDTE')->item(0);
+        $envioId      = $setNode instanceof \DOMElement ? ($setNode->getAttribute('ID') ?: 'SetDoc') : 'SetDoc';
+        $miRut        = $this->context->getRut();
 
-        $tipoDte  = (int)$get('TipoDTE');
-        $folio    = (int)$get('Folio');
-        $fchEmis  = $get('FchEmis');
-        $rutEmis  = $get('RUTEmisor');
-        $rutRecep = $get('RUTRecep');
-        $mntTotal = (int)$get('MntTotal');
-
-        if (!$tipoDte || !$folio) {
-            throw new Exception('No se pudo leer TipoDTE o Folio del XML de intercambio.');
+        $docNodes = $xp->query('//s:DTE/s:Documento | //s:DTE/s:Exportaciones | //s:DTE/s:Liquidacion');
+        if (!$docNodes->length) {
+            throw new Exception('El XML de intercambio no contiene documentos DTE.');
         }
 
-        [$cert, $privKey] = loadCertificate();
-        $rutResponde = $this->context->getRut();
-        $idResp      = 'Reslt1';
-        $ts          = date('Y-m-d\TH:i:s');
+        $docsRecep = $docsResult = $docsRecibo = $resumen = [];
+        foreach ($docNodes as $i => $doc) {
+            $tipo  = (int)$txt($doc, './/s:IdDoc/s:TipoDTE');
+            $folio = (int)$txt($doc, './/s:IdDoc/s:Folio');
+            $fch   = $txt($doc, './/s:IdDoc/s:FchEmis');
+            $rutE  = $txt($doc, './/s:Emisor/s:RUTEmisor');
+            $rutR  = $txt($doc, './/s:Receptor/s:RUTRecep');
+            $mnt   = (int)$txt($doc, './/s:Totales/s:MntTotal');
+            if (!$tipo || !$folio) {
+                throw new Exception('No se pudo leer TipoDTE/Folio de un documento del intercambio.');
+            }
 
-        $xmlResp = <<<XML
-<?xml version="1.0" encoding="ISO-8859-1"?>
-<RespuestaDTE version="1.0" xmlns="http://www.sii.cl/SiiDte">
-<Resultado ID="$idResp">
-  <Caratula>
-    <RutResponde>$rutResponde</RutResponde>
-    <RutRecibe>$rutEmis</RutRecibe>
-    <IdRespuesta>1</IdRespuesta>
-    <NroDtesRecibidos>1</NroDtesRecibidos>
-    <NmbEnvio>Respuesta Intercambio Certificacion</NmbEnvio>
-    <FchRecepEnv>$ts</FchRecepEnv>
-  </Caratula>
-  <ResultadoDTE>
-    <TipoDTE>$tipoDte</TipoDTE>
-    <Folio>$folio</Folio>
-    <FchEmis>$fchEmis</FchEmis>
-    <RUTEmisor>$rutEmis</RUTEmisor>
-    <RUTRecep>$rutRecep</RUTRecep>
-    <MntTotal>$mntTotal</MntTotal>
-    <CodEnvio>1</CodEnvio>
-    <EstadoRecepDTE>0</EstadoRecepDTE>
-    <RecepDTEGlosa>DTE Recibido OK</RecepDTEGlosa>
-    <EstadoDTE>0</EstadoDTE>
-    <GlosaDTE>Documento Aceptado</GlosaDTE>
-  </ResultadoDTE>
-</Resultado>
-</RespuestaDTE>
-XML;
+            $esMio = strcasecmp($rutR, $miRut) === 0;
+            $base  = [
+                'tipoDTE'     => $tipo,
+                'folio'       => $folio,
+                'fecha'       => $fch,
+                'rutEmisor'   => $rutE,
+                'rutReceptor' => $rutR,
+                'montoTotal'  => $mnt,
+            ];
+            // Acuse: 0 = recibido OK · 3 = no recibido, error RUT receptor
+            $docsRecep[]  = $base + ['estadoRecepDTE' => $esMio ? 0 : 3];
+            // Resultado comercial: 0 = aceptado · 2 = rechazado
+            $docsResult[] = $base + [
+                'estadoDTE' => $esMio ? 0 : 2,
+                'glosa'     => $esMio ? '' : 'RUT receptor no corresponde a este contribuyente.',
+                'codEnvio'  => $i + 1,
+            ];
+            if ($esMio) $docsRecibo[] = $base;
+            $resumen[] = "T{$tipo} F{$folio} → " . ($esMio ? 'ACEPTADO' : "RECHAZADO (receptor $rutR no es $miRut)");
+        }
 
-        $xmlFirmado = signDTE($xmlResp, $cert, $privKey, $idResp);
-        file_put_contents($this->context->getTmpPath() . 'intercambio_respuesta.xml', $xmlFirmado);
+        // 1) Acuse de Recibo del envío (RecepcionEnvio + RecepcionDTE por doc)
+        $acuse = generateRespuestaEnvioDTE([
+            'rutRecibe'      => $rutEmisorEnv,
+            'id'             => 'AcuseEnv1',
+            'idRespuesta'    => 1,
+            'recepcionEnvio' => [
+                'estadoRecepEnv' => 0,
+                'envioDTEId'     => $envioId,
+                'nombreArchivo'  => 'intercambio_recibido.xml',
+                'rutEmisor'      => $rutEmisorEnv,
+                'rutReceptor'    => $miRut,
+            ],
+            'recepcionDTE'   => $docsRecep,
+        ]);
+        if (empty($acuse['ok'])) {
+            throw new Exception('Error generando el acuse de recibo: ' . ($acuse['error'] ?? '?'));
+        }
 
-        $semilla = getSemilla();
-        $token   = getToken($semilla, $cert, $privKey);
-        $upload  = uploadDTE($xmlFirmado, $token, $cert);
+        // 2) Recibo de mercaderías (solo DTEs dirigidos a esta empresa)
+        $recibos = null;
+        if (!empty($docsRecibo)) {
+            $recibos = generateEnvioRecibos(['rutRecibe' => $rutEmisorEnv, 'documentos' => $docsRecibo]);
+            if (empty($recibos['ok'])) {
+                throw new Exception('Error generando el recibo de mercaderías: ' . ($recibos['error'] ?? '?'));
+            }
+        }
 
+        // 3) Resultado de validación comercial (todos los docs)
+        $resultado = generateRespuestaEnvioDTE([
+            'rutRecibe'    => $rutEmisorEnv,
+            'id'           => 'ResultEnv1',
+            'idRespuesta'  => 2,
+            'resultadoDTE' => $docsResult,
+        ]);
+        if (empty($resultado['ok'])) {
+            throw new Exception('Error generando el resultado de validación: ' . ($resultado['error'] ?? '?'));
+        }
+
+        file_put_contents($tmpDir . '1_acuse_recibo.xml', $acuse['xml']);
+        if ($recibos) file_put_contents($tmpDir . '2_recibo_mercaderias.xml', $recibos['xml']);
+        file_put_contents($tmpDir . '3_resultado_validacion.xml', $resultado['xml']);
+
+        $ts = date('Y-m-d\TH:i:s');
         $state['intercambio'] = [
-            'status'   => $upload['ok'] ? 'responded' : 'failed',
-            'trackId'  => $upload['trackId'] ?? null,
-            'dteInfo'  => "T{$tipoDte}F{$folio} de RUT $rutEmis",
-            'error'    => $upload['ok'] ? null : ($upload['error'] ?? ''),
-            'ts'       => $ts,
+            'status' => 'responded',
+            'docs'   => $resumen,
+            'ts'     => $ts,
         ];
         $this->saveState($state);
 
+        $archivos = ['acuse' => '1_acuse_recibo.xml'];
+        if ($recibos) $archivos['recibo'] = '2_recibo_mercaderias.xml';
+        $archivos['resultado'] = '3_resultado_validacion.xml';
+
         return [
-            'ok'      => $upload['ok'],
-            'trackId' => $upload['trackId'] ?? null,
-            'mensaje' => $upload['mensaje'] ?? ($upload['ok'] ? 'Respuesta enviada al SII.' : 'Error enviando respuesta.'),
+            'ok'       => true,
+            'docs'     => $resumen,
+            'archivos' => $archivos,
+            'mensaje'  => 'Respuestas de intercambio generadas y firmadas. Descárguelas y súbalas en '
+                        . '"Verificación de respuestas de intercambio" del menú postulantes (maullin).',
         ];
     }
 
