@@ -243,6 +243,8 @@ final class CompraService
             $prepared[] = [
                 'producto_id' => $productId,
                 'codigo_producto' => $product['codigo'] ?? $product['sku'] ?? null,
+                'codigo_barra_usado' => isset($item['codigo_barra_usado']) && trim((string) $item['codigo_barra_usado']) !== ''
+                    ? trim((string) $item['codigo_barra_usado']) : null,
                 'nombre_producto' => $product['nombre'],
                 'controla_stock' => (int) $product['controla_stock'],
                 'cantidad' => $this->formatQuantity($quantity),
@@ -329,7 +331,7 @@ final class CompraService
             'producto_id' => $item['producto_id'],
             'linea' => $line,
             'codigo_producto' => $item['codigo_producto'],
-            'codigo_barra_usado' => null,
+            'codigo_barra_usado' => $item['codigo_barra_usado'],
             'nombre_producto' => $item['nombre_producto'],
             'cantidad' => $item['cantidad'],
             'costo_unitario' => $item['costo_unitario'],
