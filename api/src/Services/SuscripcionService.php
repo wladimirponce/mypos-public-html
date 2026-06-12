@@ -13,6 +13,7 @@ use Mypos\Core\Payment\PayPalException;
 use Mypos\Repositories\AuthRepository;
 use Mypos\Repositories\SuscripcionRepository;
 use Mypos\Support\AppConfig;
+use Mypos\Support\PlanCatalog;
 
 class SuscripcionService
 {
@@ -32,47 +33,12 @@ class SuscripcionService
 
     private function getPlanDetails(string $planId): array
     {
-        $plans = [
-            'pos' => ['price_clp' => 11888, 'price_usd' => 12.50, 'name' => 'Plan Emprendedor ($9.990 + IVA)'],
-            'multisucursal' => ['price_clp' => 35688, 'price_usd' => 38.00, 'name' => 'Plan Crecimiento MultiSucursal (desde $29.990 + IVA)'],
-        ];
-
-        if (!isset($plans[$planId])) {
+        if (!PlanCatalog::isValid($planId)) {
             throw new HttpException('Plan no valido', 422);
         }
 
-        return $plans[$planId];
-    }
-
-    private function growthBasePriceByBranches(int $branches, string $gateway): float
-    {
-        $branches = max(2, min(10, $branches));
-
-        $pricesClp = [
-            2 => 35688,
-            3 => 47588,
-            4 => 59488,
-            5 => 71388,
-            6 => 85668,
-            7 => 99948,
-            8 => 114228,
-            9 => 128508,
-            10 => 142788,
-        ];
-
-        $pricesUsd = [
-            2 => 38.00,
-            3 => 50.00,
-            4 => 63.00,
-            5 => 76.00,
-            6 => 91.00,
-            7 => 106.00,
-            8 => 121.00,
-            9 => 136.00,
-            10 => 151.00,
-        ];
-
-        return $gateway === 'flow' ? (float) $pricesClp[$branches] : (float) $pricesUsd[$branches];
+        $plan = PlanCatalog::get($planId);
+        return ['price_clp' => $plan['price_clp'], 'price_usd' => $plan['price_usd'], 'name' => $plan['nombre']];
     }
 
     public function createPaymentOrder(array $payload, int $empresaId, int $usuarioId): array
@@ -86,28 +52,33 @@ class SuscripcionService
         }
 
         $gateway = strtolower((string) ($payload['gateway'] ?? 'flow'));
-        $planId = (string) ($payload['plan_id'] ?? 'pos');
+        $planId = PlanCatalog::normalize((string) ($payload['plan_id'] ?? 'mypos-start'));
         
         $setupFee = filter_var($payload['setup_fee'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $extraUsers = (int) ($payload['extra_users_count'] ?? 0);
-        $branchCount = (int) ($payload['branch_count'] ?? 2);
 
         if (!in_array($gateway, ['flow', 'paypal'], true)) {
             throw new HttpException('Gateway de pago invalido', 422);
         }
 
         $plan = $this->getPlanDetails($planId);
+        $targetPlan = PlanCatalog::get($planId);
+        $currentUsage = (new PlanLimitService())->status($empresaId)['uso'];
+        if ($currentUsage['sucursales'] > $targetPlan['max_sucursales'] || $currentUsage['usuarios'] > $targetPlan['max_usuarios']) {
+            throw new HttpException(
+                'No puedes contratar un plan con límites inferiores al uso actual. Desactiva locales o usuarios antes de cambiar de plan.',
+                422,
+                ['plan_limit' => ['uso_actual_supera_plan']]
+            );
+        }
         $ordenNumero = 'MP_' . time() . '_' . bin2hex(random_bytes(3));
         $correo = $this->userEmail($usuarioId);
         
         $baseMonto = $gateway === 'flow' ? $plan['price_clp'] : $plan['price_usd'];
-        if ($planId === 'multisucursal') {
-            $baseMonto = $this->growthBasePriceByBranches($branchCount, $gateway);
-        }
         $moneda = $gateway === 'flow' ? 'CLP' : 'USD';
         
         $montoExtraUsers = 0;
-        if ($planId === 'multisucursal' && $extraUsers > 0) {
+        if ($planId === 'mypos-escala' && $extraUsers > 0) {
             $montoExtraUsers = $gateway === 'flow' ? ($extraUsers * 5938) : ($extraUsers * 6.25);
         }
         
@@ -199,15 +170,21 @@ class SuscripcionService
 
         $status = $this->repository->getSubscriptionStatus($empresaId);
         if (!$status) {
+            $limits = (new PlanLimitService())->status($empresaId);
             return [
                 'has_subscription' => false,
                 'estado' => 'inactiva',
+                'plan_id' => $limits['plan']['id'],
+                'plan_nombre' => $limits['plan']['nombre'],
+                'limites' => $limits,
             ];
         }
 
         return [
             'has_subscription' => true,
-            'plan_id' => $status['plan_id'],
+            'plan_id' => PlanCatalog::normalize((string) $status['plan_id']),
+            'plan_nombre' => PlanCatalog::get((string) $status['plan_id'])['nombre'],
+            'limites' => (new PlanLimitService())->status($empresaId),
             'fecha_inicio' => $status['fecha_inicio'],
             'fecha_fin' => $status['fecha_fin'],
             'estado' => $status['estado'],

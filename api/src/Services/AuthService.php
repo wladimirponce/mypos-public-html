@@ -9,6 +9,7 @@ use Mypos\Core\Auth;
 use Mypos\Core\HttpException;
 use Mypos\Repositories\AuthRepository;
 use Mypos\Repositories\PermissionRepository;
+use Mypos\Support\PlanCatalog;
 
 final class AuthService
 {
@@ -29,9 +30,7 @@ final class AuthService
         $nombreUsuario = trim($data['nombre_usuario'] ?? '');
         $email = trim(strtolower($data['email'] ?? ''));
         $password = trim($data['password'] ?? '');
-        $planId = in_array((string) ($data['plan_id'] ?? 'pos'), ['pos', 'multisucursal'], true)
-            ? (string) ($data['plan_id'] ?? 'pos')
-            : 'pos';
+        $planId = PlanCatalog::normalize((string) ($data['plan_id'] ?? 'mypos-start'));
 
         // Validaciones básicas
         if ($rutEmpresa === '' || $razonSocial === '' || $nombreUsuario === '' || $email === '' || $password === '') {

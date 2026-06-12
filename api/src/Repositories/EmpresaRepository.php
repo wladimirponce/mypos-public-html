@@ -12,6 +12,11 @@ final class EmpresaRepository
     {
     }
 
+    public function connection(): PDO
+    {
+        return $this->connection;
+    }
+
     public function listEmpresas(): array
     {
         $statement = $this->connection->query(
@@ -385,6 +390,16 @@ final class EmpresaRepository
     {
         $statement = $this->connection->prepare(
             'SELECT COUNT(*) FROM sucursales WHERE empresa_id = :empresa_id AND activo = 1'
+        );
+        $statement->execute(['empresa_id' => $empresaId]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    public function countUsuariosActivos(int $empresaId): int
+    {
+        $statement = $this->connection->prepare(
+            'SELECT COUNT(*) FROM empresa_usuarios WHERE empresa_id = :empresa_id AND activo = 1'
         );
         $statement->execute(['empresa_id' => $empresaId]);
 

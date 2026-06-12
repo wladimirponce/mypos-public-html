@@ -11,10 +11,12 @@ use Mypos\Repositories\EmpresaRepository;
 final class EmpresaService
 {
     private EmpresaRepository $repository;
+    private PlanLimitService $planLimits;
 
     public function __construct(?EmpresaRepository $repository = null)
     {
         $this->repository = $repository ?? new EmpresaRepository(Database::connection());
+        $this->planLimits = new PlanLimitService($this->repository->connection());
     }
 
     public function listarEmpresas(): array
@@ -159,6 +161,9 @@ final class EmpresaService
         $ciudad = $this->nullable($data['ciudad'] ?? null);
         $telefono = $this->nullable($data['telefono'] ?? null);
         $activo = isset($data['activo']) ? ((bool) $data['activo'] ? 1 : 0) : 1;
+        if ($activo === 1) {
+            $this->planLimits->assertCanAddSucursal($empresaId);
+        }
 
         $id = $this->repository->createSucursal(
             $empresaId,
@@ -200,6 +205,9 @@ final class EmpresaService
         $ciudad = $this->nullable($data['ciudad'] ?? $sucursal['ciudad']);
         $telefono = $this->nullable($data['telefono'] ?? $sucursal['telefono']);
         $activo = isset($data['activo']) ? ((bool) $data['activo'] ? 1 : 0) : (int) $sucursal['activo'];
+        if ($activo === 1 && (int) $sucursal['activo'] === 0) {
+            $this->planLimits->assertCanAddSucursal($empresaId);
+        }
 
         // Si desactivamos la sucursal, validar que no sea la única activa de la empresa
         if ($activo === 0 && (int) $sucursal['activo'] === 1) {
@@ -276,7 +284,6 @@ final class EmpresaService
         }
 
         $activo = isset($data['activo']) ? ((bool) $data['activo'] ? 1 : 0) : 1;
-
         $id = $this->repository->createCaja($empresaId, $sucursalId, $nombre, $codigo, $activo);
 
         return $this->obtenerCaja($id);
@@ -356,6 +363,9 @@ final class EmpresaService
         }
 
         $activo = isset($data['activo']) ? ((bool) $data['activo'] ? 1 : 0) : 1;
+        if ($activo === 1) {
+            $this->planLimits->assertCanAddUsuario($empresaId);
+        }
 
         $this->repository->asociarUsuarioEmpresa($empresaId, $usuarioId, $rolId, $sucursalId, $activo);
 
@@ -385,6 +395,9 @@ final class EmpresaService
 
         // Auto-protección del último administrador
         if ($activo === 0) {
+            if ($this->repository->countUsuariosActivos($empresaId) <= 1) {
+                throw new HttpException('No se puede desactivar al ultimo usuario activo de la empresa', 422);
+            }
             if ($this->repository->countEmpresaAdministradores($empresaId) <= 1) {
                 // Verificar si el usuario que estamos desactivando es administrador de la empresa
                 $usuarios = $this->repository->listUsuariosEmpresa($empresaId);
@@ -401,6 +414,14 @@ final class EmpresaService
             }
         }
 
+        $usuariosActuales = $this->repository->listUsuariosEmpresa($empresaId);
+        foreach ($usuariosActuales as $usuarioActual) {
+            if ((int) $usuarioActual['usuario_id'] === $usuarioId && $activo === 1 && (int) $usuarioActual['activo'] === 0) {
+                $this->planLimits->assertCanAddUsuario($empresaId);
+                break;
+            }
+        }
+
         $this->repository->updateUsuarioEmpresa($empresaId, $usuarioId, $rolId, $sucursalId, $activo);
 
         return ['success' => true];
@@ -412,6 +433,10 @@ final class EmpresaService
 
         if (!$this->repository->checkUsuarioPertenencia($empresaId, $usuarioId)) {
             throw new HttpException('El usuario no pertenece a esta empresa', 404);
+        }
+
+        if ($this->repository->countUsuariosActivos($empresaId) <= 1) {
+            throw new HttpException('No se puede quitar al ultimo usuario activo de la empresa', 422);
         }
 
         // Auto-protección del último administrador de la empresa
