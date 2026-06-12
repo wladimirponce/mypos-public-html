@@ -463,7 +463,7 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
 
     <!-- Botón principal: sobre único (flujo correcto SII) -->
     <button class="d-btn d-btn-primary" onclick="certSimulacionSobre()" style="margin-right:8px">
-      <i class="bi bi-envelope-arrow-up-fill"></i> Enviar Sobre de Simulación (15 T33 + 15 T39)
+      <i class="bi bi-envelope-arrow-up-fill"></i> Enviar Sobre de Simulación (30 T33)
     </button>
     <!-- Botón heredado: envio individual (modo avanzado / re-intento) -->
     <button class="d-btn d-btn-sm d-btn-outline" onclick="certSimulacionAll()"
@@ -1242,17 +1242,18 @@ async function certLibro(tipo) {
 async function certSimulacionSobre() {
   const statusEl = document.getElementById('sim-status');
   if (statusEl) statusEl.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span>'
-    + ' Generando y enviando sobre único (15 T33 + 15 T39 = 30 docs)… puede tardar 1-2 minutos.</div>';
-  log('Enviando sobre de simulación (15 T33 + 15 T39 = 30 docs)…', 'info');
+    + ' Generando y enviando sobre único (30 T33)… puede tardar 1-2 minutos.</div>';
+  log('Enviando sobre de simulación (30 T33)…', 'info');
   try {
-    const res = await api('cert_sim_sobre');
+    const res = await api('cert_sim_sobre', { tipos: '33', cant: 30 });
     if (res.ok) {
       const trk = res.trackId || '(sin trackId)';
+      const trkBol = res.trackId_boletas ? ` · Boletas (REST): ${res.trackId_boletas}` : '';
       if (statusEl) statusEl.innerHTML = `<div class="d-alert success">`
         + `<i class="bi bi-check-circle"></i> Sobre enviado OK. `
-        + `<strong>N° de Envío: ${trk}</strong> `
+        + `<strong>N° de Envío: ${trk}</strong>${trkBol} `
         + `— ${res.total_docs||0} documentos. Copia este número e ingrésalo en el portal SII.</div>`;
-      log(`Sobre simulación OK. TrackID: ${trk} (${res.total_docs||0} docs)`, 'ok');
+      log(`Sobre simulación OK. TrackID: ${trk}${trkBol} (${res.total_docs||0} docs)`, 'ok');
     } else {
       if (statusEl) statusEl.innerHTML = `<div class="d-alert danger"><i class="bi bi-x-circle"></i> ${res.error||'Error desconocido'}</div>`;
       log('Error sobre simulación: ' + (res.error||'?'), 'error');

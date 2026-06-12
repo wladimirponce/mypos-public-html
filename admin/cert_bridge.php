@@ -189,14 +189,15 @@ try {
             break;
 
         // ── Simulación en sobre único (requisito SII: 20-100 docs, 1 TrackID) ─
-        // Uso: ?action=cert_sim_sobre[&cant=15][&tipos=33,39]
+        // Uso: ?action=cert_sim_sobre[&cant=30][&tipos=33]
+        // Boletas (39/41) van en sobre EnvioBOLETA separado vía REST (propio TrackID).
         case 'cert_sim_sobre':
             set_time_limit(600);
             ob_clean();
-            $cantSobre  = max(1, (int)($_GET['cant'] ?? $_POST['cant'] ?? 15));
-            $tiposParam = trim($_GET['tipos'] ?? $_POST['tipos'] ?? '33,39');
+            $cantSobre  = max(1, (int)($_GET['cant'] ?? $_POST['cant'] ?? 30));
+            $tiposParam = trim($_GET['tipos'] ?? $_POST['tipos'] ?? '33');
             $tiposSobre = array_values(array_filter(array_map('intval', explode(',', $tiposParam))));
-            if (empty($tiposSobre)) $tiposSobre = [33, 39];
+            if (empty($tiposSobre)) $tiposSobre = [33];
             echo json_encode($mgr->runSimulacionSobre($tiposSobre, $cantSobre));
             break;
 

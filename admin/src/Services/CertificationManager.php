@@ -1005,12 +1005,15 @@ class CertificationManager
             return ['ok' => false, 'error' => 'Parámetros inválidos: tipos vacíos o cantidad < 1.'];
         }
 
-        $totalDocs = count($tipos) * $cantPorTipo;
-        if ($totalDocs < 20 || $totalDocs > 100) {
+        // El requisito 20-100 docs aplica al sobre EnvioDTE (facturas/NC/ND/guías).
+        // Las boletas (39/41) van por canal REST separado y no cuentan para ese rango.
+        $tiposFactura = array_values(array_filter($tipos, fn($t) => !in_array((int)$t, [39, 41], true)));
+        $docsFactura  = count($tiposFactura) * $cantPorTipo;
+        if ($docsFactura > 0 && ($docsFactura < 20 || $docsFactura > 100)) {
             return [
                 'ok'    => false,
-                'error' => "Total de documentos ($totalDocs) fuera del rango SII (20-100). "
-                         . "Ajuste cantPorTipo (actual: $cantPorTipo) o los tipos (actual: "
+                'error' => "El sobre EnvioDTE llevaría $docsFactura documento(s); el SII exige entre 20 y 100 "
+                         . "en el envío de simulación. Ajuste cantPorTipo (actual: $cantPorTipo) o los tipos (actual: "
                          . implode(',', $tipos) . ').',
             ];
         }
@@ -1090,58 +1093,124 @@ class CertificationManager
                     return ['ok' => false, 'error' => "Error generando DTE T{$tipo} folio $folioToUse: " . ($dte['error'] ?? '?')];
                 }
 
-                $xmlDtes[]            = $dte['xml'];
+                $xmlDtes[] = ['xml' => $dte['xml'], 'tipo' => (int)$dte['tipo'], 'folio' => (int)$dte['folio']];
                 $foliosPorTipo[$tipo][] = $folioToUse;
             }
         }
 
-        // ── Armar y enviar el sobre único ────────────────────────────────────
+        // ── Armar y enviar sobres ────────────────────────────────────────────
+        // Las boletas (39/41) NO pueden ir dentro de un EnvioDTE vía SOAP: usan
+        // su propio sobre EnvioBOLETA y el canal REST. Se separan los canales y
+        // cada uno entrega su propio TrackID (mismo patrón que runSetBasico y
+        // certificarSetBoletas).
         if (empty($xmlDtes)) {
             return ['ok' => false, 'error' => 'No se generaron DTEs para el sobre.'];
         }
 
-        // buildEnvioDTE acepta un array de XMLs de DTE individuales y
-        // los empaqueta en un único EnvioDTE firmado listo para uploadDTE.
-        $sobre = buildEnvioDTE($xmlDtes);
-        if (empty($sobre['ok'])) {
-            return ['ok' => false, 'error' => 'Error armando el sobre: ' . ($sobre['error'] ?? '?')];
-        }
+        $dtesFact = array_values(array_filter($xmlDtes, fn($d) => !in_array($d['tipo'], [39, 41], true)));
+        $dtesBol  = array_values(array_filter($xmlDtes, fn($d) => in_array($d['tipo'], [39, 41], true)));
 
-        $upload = uploadDTE($sobre['xml']);
-        if (empty($upload['ok'])) {
-            return ['ok' => false, 'error' => 'Error enviando el sobre al SII: ' . ($upload['error'] ?? '?')];
-        }
+        $tmpDir = $this->context->getTmpPath() . 'cert_simulacion/';
+        if (!is_dir($tmpDir)) @mkdir($tmpDir, 0755, true);
 
-        $trackId = $upload['trackId'] ?? null;
+        $trackIdFact   = null;
+        $trackIdBol    = null;
+        $tiposEnviados = []; // tipos cuyos folios YA llegaron al SII (persistir aunque falle el resto)
+
+        // Merge de folios: nunca pisar el historial de folios_ok previos (los
+        // folios aceptados por el SII quedan quemados y no deben reutilizarse).
+        $persistFolios = function (int $tipo) use (&$state, $foliosPorTipo) {
+            $prev = $state['simulacion']["t$tipo"]['folios_ok'] ?? [];
+            $state['simulacion']["t$tipo"] = [
+                'status'        => 'ok',
+                'tipo'          => $tipo,
+                'folios_ok'     => array_values(array_unique(array_merge($prev, $foliosPorTipo[$tipo] ?? []))),
+                'folios_failed' => $state['simulacion']["t$tipo"]['folios_failed'] ?? [],
+                'ts'            => date('Y-m-d\TH:i:s'),
+            ];
+        };
+
+        try {
+            if (!empty($dtesFact)) {
+                $tipoFirma = (int)$dtesFact[0]['tipo'];
+                $GLOBALS['SII_CERT_TIPO'] = $tipoFirma;
+                [$cert, $privKey] = loadCertificate($tipoFirma);
+
+                $sobre        = buildEnvioDTESet($dtesFact, $cert);
+                $sobreFirmado = signDTE($sobre, $cert, $privKey, 'FENV010');
+                file_put_contents($tmpDir . 'envio_simulacion.xml', $sobreFirmado);
+
+                $val = validateXmlAgainstXSD($sobreFirmado);
+                if (empty($val['valid']) && empty($val['skipped'])) {
+                    throw new Exception('El sobre EnvioDTE no pasó XSD local: ' . implode('; ', array_slice($val['errors'] ?? [], 0, 5)));
+                }
+
+                $semilla = getSemilla();
+                $token   = getToken($semilla, $cert, $privKey);
+                $send    = uploadDTE($sobreFirmado, $token, $cert);
+                if (empty($send['ok'])) {
+                    throw new Exception('Error enviando el sobre al SII: ' . ($send['error'] ?? $send['mensaje'] ?? '?'));
+                }
+                $trackIdFact = $send['trackId'] ?? null;
+                foreach ($dtesFact as $d) $tiposEnviados[(int)$d['tipo']] = true;
+            }
+
+            if (!empty($dtesBol)) {
+                $GLOBALS['SII_CERT_TIPO'] = 39;
+                [$certB, $privKeyB] = loadCertificate(39);
+
+                $sobreBol    = buildEnvioBoletaSet(array_column($dtesBol, 'xml'), $certB);
+                $sobreBolFdo = signDTE($sobreBol, $certB, $privKeyB, 'SetDoc');
+                file_put_contents($tmpDir . 'envio_simulacion_boletas.xml', $sobreBolFdo);
+
+                $val = validateXmlAgainstXSD($sobreBolFdo);
+                if (empty($val['valid']) && empty($val['skipped'])) {
+                    throw new Exception('El sobre EnvioBOLETA no pasó XSD local: ' . implode('; ', array_slice($val['errors'] ?? [], 0, 5)));
+                }
+
+                $envioBol = sendBoletaREST($sobreBolFdo, (int)$dtesBol[0]['tipo'], (int)$dtesBol[0]['folio'], '');
+                if (empty($envioBol['ok'])) {
+                    throw new Exception('Error enviando el sobre de boletas al SII: ' . ($envioBol['error'] ?? '?'));
+                }
+                $trackIdBol = $envioBol['trackId'] ?? null;
+                foreach ($dtesBol as $d) $tiposEnviados[(int)$d['tipo']] = true;
+            }
+        } catch (\Throwable $e) {
+            foreach (array_keys($tiposEnviados) as $tipo) {
+                $persistFolios($tipo);
+            }
+            if (!empty($tiposEnviados)) $this->saveState($state);
+            return [
+                'ok'              => false,
+                'error'           => $e->getMessage(),
+                'trackId'         => $trackIdFact,
+                'trackId_boletas' => $trackIdBol,
+            ];
+        }
 
         // ── Persistir resultado en el estado ─────────────────────────────────
         $state['simulacion']['sobre'] = [
-            'status'     => 'ok',
-            'trackId'    => $trackId,
-            'total_docs' => count($xmlDtes),
-            'tipos'      => $tipos,
-            'cant_por_tipo' => $cantPorTipo,
-            'ts'         => date('Y-m-d\TH:i:s'),
+            'status'          => 'ok',
+            'trackId'         => $trackIdFact ?? $trackIdBol,
+            'trackId_boletas' => $trackIdBol,
+            'total_docs'      => count($xmlDtes),
+            'tipos'           => $tipos,
+            'cant_por_tipo'   => $cantPorTipo,
+            'ts'              => date('Y-m-d\TH:i:s'),
         ];
         foreach ($tipos as $tipo) {
-            $tipo = (int)$tipo;
-            $state['simulacion']["t$tipo"] = [
-                'status'    => 'ok',
-                'tipo'      => $tipo,
-                'folios_ok' => $foliosPorTipo[$tipo],
-                'folios_failed' => [],
-                'ts'        => date('Y-m-d\TH:i:s'),
-            ];
+            $persistFolios((int)$tipo);
         }
         $this->saveState($state);
 
         return [
-            'ok'          => true,
-            'trackId'     => $trackId,
-            'total_docs'  => count($xmlDtes),
-            'tipos'       => $tipos,
-            'folios'      => $foliosPorTipo,
-            'cant_por_tipo' => $cantPorTipo,
+            'ok'              => true,
+            'trackId'         => $trackIdFact ?? $trackIdBol,
+            'trackId_boletas' => $trackIdBol,
+            'total_docs'      => count($xmlDtes),
+            'tipos'           => $tipos,
+            'folios'          => $foliosPorTipo,
+            'cant_por_tipo'   => $cantPorTipo,
         ];
     }
 

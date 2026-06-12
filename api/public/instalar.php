@@ -155,12 +155,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $soloActualizar = $_POST['solo_actualizar'] ?? '0';
 
-            // Ejecutar datos semilla (seeds) si existen y no es solo actualización
+            // Solo el seed maestro global puede ejecutarse desde el instalador.
+            // Los seeds demo o de empresas deben ejecutarse manualmente en ambientes controlados.
             if ($soloActualizar !== '1') {
                 $seed_dir = realpath($database_dir . '/seeds');
                 if ($seed_dir && is_dir($seed_dir)) {
-                    $seeds = glob($seed_dir . '/*.sql');
-                    sort($seeds);
+                    $seedBase = mypos_resolve_file([$seed_dir . '/001_seed_base.sql']);
+                    $seeds = $seedBase !== null ? [$seedBase] : [];
                     foreach ($seeds as $seed) {
                         $sql = file_get_contents($seed);
                         if (!empty(trim($sql))) {
@@ -174,6 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                         }
                     }
+                    $log .= "<li class='list-group-item list-group-item-primary'>ℹ️ Los seeds demo y de empresas fueron omitidos por seguridad.</li>";
                 }
             } else {
                 $log .= "<li class='list-group-item list-group-item-primary'>ℹ️ Modo de actualización: se omitió la ejecución de seeds.</li>";
@@ -263,7 +265,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="mb-4 form-check bg-light p-3 border rounded">
                     <input type="checkbox" name="solo_actualizar" class="form-check-input ms-1" id="soloActualizar" value="1">
                     <label class="form-check-label fw-bold text-primary ms-2" for="soloActualizar">
-                        Solo actualizar sistema (Ejecuta nuevas tablas y omite datos iniciales / seeds)
+                        Solo actualizar sistema (Ejecuta nuevas tablas y omite el seed maestro)
                     </label>
                 </div>
 
