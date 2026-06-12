@@ -97,6 +97,9 @@ final class UploadService
 
         $existingDocument = null;
         if ($existingDocumentId > 0) {
+            if (!$this->documentosIa->supportsMultipleFiles()) {
+                throw new HttpException('La base de datos debe actualizarse antes de cargar varias paginas.', 422);
+            }
             $existingDocument = $this->documentosIa->find($empresaId, $existingDocumentId);
             if ($existingDocument === null || (int) $existingDocument['sucursal_id'] !== $sucursalId) {
                 throw new HttpException('Documento IA no encontrado para la sucursal activa', 404);
@@ -134,7 +137,9 @@ final class UploadService
             ]);
         }
 
-        $this->documentosIa->attachUploadedFile($empresaId, $documentId, $archivoId);
+        if ($this->documentosIa->supportsMultipleFiles()) {
+            $this->documentosIa->attachUploadedFile($empresaId, $documentId, $archivoId);
+        }
 
         $this->audit($empresaId, $sucursalId, $userId, 'upload.crear', 'archivos_subidos', $archivoId, [
             'modulo' => 'DOCUMENTOS_IA',

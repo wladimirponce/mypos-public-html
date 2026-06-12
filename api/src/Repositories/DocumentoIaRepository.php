@@ -347,8 +347,24 @@ final class DocumentoIaRepository
         ]);
     }
 
+    public function supportsMultipleFiles(): bool
+    {
+        $statement = $this->connection->prepare(
+            'SELECT COUNT(*)
+             FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = \'documentos_ia_archivos\''
+        );
+        $statement->execute();
+
+        return (int) $statement->fetchColumn() > 0;
+    }
+
     public function uploadedFiles(int $empresaId, int $documentId): array
     {
+        if (!$this->supportsMultipleFiles()) {
+            return [];
+        }
+
         $statement = $this->connection->prepare(
             'SELECT a.id, a.nombre_original, a.ruta_relativa, a.mime_type, a.size_bytes, a.estado, da.orden
              FROM documentos_ia_archivos da

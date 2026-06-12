@@ -85,6 +85,7 @@ if (is_file($vendorAutoload)) {
 }
 
 $envDir = dirname(__DIR__);
+Env::loadFile(dirname($envDir) . '/.env');
 Env::loadFile($envDir . '/.env');
 
 set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
