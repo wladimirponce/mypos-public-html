@@ -26,11 +26,13 @@ final class EgresoService
     public function list(int $empresaId, array $filters): array
     {
         if ($empresaId <= 0) throw new HttpException('empresa_id obligatorio', 422);
+        $this->assertSchemaReady();
         return ['egresos' => $this->repository->list($empresaId, $filters)];
     }
 
     public function create(int $userId, array $payload): array
     {
+        $this->assertSchemaReady();
         $empresaId = $this->positive($payload, 'empresa_id');
         $sucursalId = $this->positive($payload, 'sucursal_id');
         $monto = $this->positive($payload, 'monto');
@@ -72,6 +74,7 @@ final class EgresoService
 
     public function cancel(int $userId, int $id, array $payload): array
     {
+        $this->assertSchemaReady();
         $empresaId = $this->positive($payload, 'empresa_id');
         $reason = trim((string) ($payload['motivo'] ?? ''));
         if ($reason === '') throw new HttpException('El motivo de anulacion es obligatorio', 422);
@@ -105,5 +108,12 @@ final class EgresoService
         $value = (int) ($data[$field] ?? 0);
         if ($value <= 0) throw new HttpException("El campo {$field} es obligatorio", 422);
         return $value;
+    }
+
+    private function assertSchemaReady(): void
+    {
+        if (!$this->repository->schemaReady()) {
+            throw new HttpException('El modulo Egresos requiere aplicar las migraciones 046_egresos_caja y 047_egresos_solo_efectivo.', 503);
+        }
     }
 }

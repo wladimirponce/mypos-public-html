@@ -137,7 +137,7 @@ final class CajaService
         }
     }
 
-    public function estadoCaja(int $empresaId, int $sucursalId, ?int $boxId): array
+    public function estadoCaja(int $empresaId, int $sucursalId, ?int $boxId, ?int $userId = null): array
     {
         if ($empresaId <= 0 || $sucursalId <= 0) {
             throw new HttpException('empresa_id y sucursal_id son obligatorios', 422);
@@ -147,7 +147,7 @@ final class CajaService
             throw new HttpException('Sucursal no encontrada', 422);
         }
 
-        $status = $this->repository->openStatus($empresaId, $sucursalId, $boxId);
+        $status = $this->repository->openStatus($empresaId, $sucursalId, $boxId, $userId);
 
         if ($status === null) {
             return ['tiene_caja_abierta' => false, 'tiene_caja_configurada' => false];

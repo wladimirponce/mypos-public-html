@@ -12,6 +12,17 @@ final class EgresoRepository
 
     public function connection(): PDO { return $this->connection; }
 
+    public function schemaReady(): bool
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = \'egresos\'
+               AND COLUMN_NAME IN (\'quien_recibe\', \'motivo\')'
+        );
+        $stmt->execute();
+        return (int) $stmt->fetchColumn() === 2;
+    }
+
     public function insert(array $data): int
     {
         $stmt = $this->connection->prepare(

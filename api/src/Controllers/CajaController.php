@@ -23,14 +23,14 @@ final class CajaController
 
     public function store(): void
     {
-        $this->respond(function (): array {
+        $this->respond(function (int $userId): array {
             return $this->service->crearCaja(Request::json());
         }, 'Caja creada correctamente');
     }
 
     public function index(): void
     {
-        $this->respond(function (): array {
+        $this->respond(function (int $userId): array {
             return $this->service->listarCajas((int) ($_GET['empresa_id'] ?? 0), $_GET);
         });
     }
@@ -44,13 +44,14 @@ final class CajaController
 
     public function status(): void
     {
-        $this->respond(function (): array {
+        $this->respond(function (int $userId): array {
             $boxId = isset($_GET['caja_id']) && $_GET['caja_id'] !== '' ? (int) $_GET['caja_id'] : null;
 
             return $this->service->estadoCaja(
                 (int) ($_GET['empresa_id'] ?? 0),
                 (int) ($_GET['sucursal_id'] ?? 0),
-                $boxId
+                $boxId,
+                $userId
             );
         });
     }

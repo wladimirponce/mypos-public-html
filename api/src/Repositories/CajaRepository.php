@@ -8,6 +8,8 @@ use PDO;
 
 final class CajaRepository
 {
+    private array $columnCache = [];
+
     public function __construct(private readonly PDO $connection)
     {
     }
@@ -129,7 +131,7 @@ final class CajaRepository
         return (int) $this->connection->lastInsertId();
     }
 
-    public function openStatus(int $empresaId, int $sucursalId, ?int $boxId): ?array
+    public function openStatus(int $empresaId, int $sucursalId, ?int $boxId, ?int $userId = null): ?array
     {
         $sql = 'SELECT ca.id AS caja_apertura_id, c.id AS caja_id, c.codigo, c.nombre,
                        ca.usuario_id, u.nombre AS usuario_apertura, ca.estado,
@@ -139,12 +141,17 @@ final class CajaRepository
                        ON ca.caja_id = c.id
                       AND ca.empresa_id = c.empresa_id
                       AND ca.sucursal_id = c.sucursal_id
-                      AND ca.estado = \'ABIERTA\'
+                      AND ca.estado = \'ABIERTA\'';
+        $params = ['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId];
+        if ($userId !== null) {
+            $sql .= ' AND ca.usuario_id = :usuario_id';
+            $params['usuario_id'] = $userId;
+        }
+        $sql .= '
                 LEFT JOIN usuarios u ON u.id = ca.usuario_id
                 WHERE c.empresa_id = :empresa_id
                   AND c.sucursal_id = :sucursal_id
                   AND c.activo = 1';
-        $params = ['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId];
 
         if ($boxId !== null) {
             $sql .= ' AND c.id = :caja_id';
@@ -194,9 +201,12 @@ final class CajaRepository
 
     public function listMovements(int $empresaId, int $boxId, ?int $openingId = null): array
     {
+        $referenceSelect = $this->hasColumn('caja_movimientos', 'referencia_tipo')
+            ? 'cm.referencia_tipo, cm.referencia_id'
+            : 'NULL AS referencia_tipo, NULL AS referencia_id';
         $sql = 'SELECT cm.id, cm.empresa_id, cm.sucursal_id, cm.caja_apertura_id,
                        ca.caja_id, cm.usuario_id, cm.tipo, cm.concepto, cm.monto,
-                       cm.observacion, cm.referencia_tipo, cm.referencia_id, cm.created_at
+                       cm.observacion, ' . $referenceSelect . ', cm.created_at
                 FROM caja_movimientos cm
                 INNER JOIN caja_aperturas ca ON ca.id = cm.caja_apertura_id
                 WHERE cm.empresa_id = :empresa_id AND ca.caja_id = :caja_id';
@@ -256,12 +266,14 @@ final class CajaRepository
 
     public function movementTotals(int $empresaId, int $openingId): array
     {
+        $expenseColumns = $this->hasColumn('caja_movimientos', 'referencia_tipo')
+            ? ', COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' AND referencia_tipo = \'EGRESO\' THEN monto ELSE 0 END), 0) AS egresos_efectivo,
+                COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' AND (referencia_tipo IS NULL OR referencia_tipo <> \'EGRESO\') THEN monto ELSE 0 END), 0) AS retiros_operativos'
+            : ', 0 AS egresos_efectivo, COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' THEN monto ELSE 0 END), 0) AS retiros_operativos';
         $statement = $this->connection->prepare(
             'SELECT
                 COALESCE(SUM(CASE WHEN tipo = \'INGRESO\' THEN monto ELSE 0 END), 0) AS ingresos,
-                COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' THEN monto ELSE 0 END), 0) AS retiros,
-                COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' AND referencia_tipo = \'EGRESO\' THEN monto ELSE 0 END), 0) AS egresos_efectivo,
-                COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' AND (referencia_tipo IS NULL OR referencia_tipo <> \'EGRESO\') THEN monto ELSE 0 END), 0) AS retiros_operativos
+                COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' THEN monto ELSE 0 END), 0) AS retiros' . $expenseColumns . '
              FROM caja_movimientos
              WHERE empresa_id = :empresa_id AND caja_apertura_id = :caja_apertura_id'
         );
@@ -302,11 +314,12 @@ final class CajaRepository
 
     public function listClosures(int $empresaId, array $filters): array
     {
+        $expenseSelect = $this->closureExpenseSelect();
         $sql = 'SELECT cc.id, cc.empresa_id, cc.sucursal_id, cc.caja_id, c.codigo, c.nombre,
                        cc.caja_apertura_id, cc.apertura_id, cc.usuario_id, u.nombre AS usuario,
                        cc.fecha_cierre, cc.monto_inicial, cc.total_ventas_efectivo,
                        cc.total_ventas_tarjeta, cc.total_ventas_transferencia,
-                       cc.total_ventas_otros, cc.total_ingresos, cc.total_retiros, cc.total_retiros_operativos, cc.total_egresos_efectivo,
+                       cc.total_ventas_otros, cc.total_ingresos, cc.total_retiros, ' . $expenseSelect . ',
                        cc.monto_esperado, cc.monto_contado, cc.diferencia, cc.observacion_cierre
                 FROM caja_cierres cc
                 INNER JOIN cajas c ON c.id = cc.caja_id
@@ -340,12 +353,13 @@ final class CajaRepository
 
     public function closureDetail(int $empresaId, int $closureId): ?array
     {
+        $expenseSelect = $this->closureExpenseSelect();
         $statement = $this->connection->prepare(
             'SELECT cc.id, cc.empresa_id, cc.sucursal_id, cc.caja_id, c.codigo, c.nombre,
                     cc.caja_apertura_id, cc.apertura_id, cc.usuario_id, u.nombre AS usuario,
                     cc.fecha_cierre, cc.monto_inicial, cc.total_ventas_efectivo,
                     cc.total_ventas_tarjeta, cc.total_ventas_transferencia,
-                    cc.total_ventas_otros, cc.total_ingresos, cc.total_retiros, cc.total_retiros_operativos, cc.total_egresos_efectivo,
+                    cc.total_ventas_otros, cc.total_ingresos, cc.total_retiros, ' . $expenseSelect . ',
                     cc.monto_esperado, cc.monto_contado, cc.diferencia,
                     cc.observacion_cierre, ca.fecha_apertura, ca.observacion_apertura
              FROM caja_cierres cc
@@ -384,5 +398,27 @@ final class CajaRepository
         ]);
 
         return $statement->fetchAll();
+    }
+
+    private function closureExpenseSelect(): string
+    {
+        return $this->hasColumn('caja_cierres', 'total_egresos_efectivo')
+            ? 'cc.total_retiros_operativos, cc.total_egresos_efectivo'
+            : 'cc.total_retiros AS total_retiros_operativos, 0 AS total_egresos_efectivo';
+    }
+
+    private function hasColumn(string $table, string $column): bool
+    {
+        $key = $table . '.' . $column;
+        if (!array_key_exists($key, $this->columnCache)) {
+            $statement = $this->connection->prepare(
+                'SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name LIMIT 1'
+            );
+            $statement->execute(['table_name' => $table, 'column_name' => $column]);
+            $this->columnCache[$key] = (bool) $statement->fetchColumn();
+        }
+
+        return $this->columnCache[$key];
     }
 }

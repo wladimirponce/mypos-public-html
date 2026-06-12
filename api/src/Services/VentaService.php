@@ -36,7 +36,7 @@ final class VentaService
         $tipoVenta = (string) ($payload['tipo_venta'] ?? 'BOLETA');
         $items = $payload['items'] ?? [];
         $payments = $payload['pagos'] ?? [];
-        $cashOpening = $this->cashOpening($empresaId, $sucursalId, $payload);
+        $cashOpening = $this->cashOpening($empresaId, $sucursalId, $userId);
         $paymentCondition = strtoupper(trim((string) ($payload['condicion_pago'] ?? 'CONTADO')));
         $clientId = isset($payload['cliente_id']) && (int) $payload['cliente_id'] > 0 ? (int) $payload['cliente_id'] : null;
         $deviceId = isset($payload['dispositivo_id']) && (int) $payload['dispositivo_id'] > 0 ? (int) $payload['dispositivo_id'] : null;
@@ -55,11 +55,6 @@ final class VentaService
 
         $config = (new ConfiguracionService())->efectiva($empresaId, $sucursalId);
         $printContext = $this->buildPrintContext($empresaId, $sucursalId);
-
-        if ((bool) $config['exigir_caja_abierta_para_vender'] && $cashOpening === null) {
-            $this->auditConfigBlock($empresaId, $sucursalId, $userId, 'exigir_caja_abierta_para_vender', 'La empresa exige caja abierta para vender');
-            throw new HttpException('La empresa exige caja abierta para vender', 422);
-        }
 
         if (!(bool) $config['permitir_venta_sin_cliente'] && $clientId === null) {
             $this->auditConfigBlock($empresaId, $sucursalId, $userId, 'permitir_venta_sin_cliente', 'La empresa exige cliente para registrar ventas');
@@ -109,13 +104,17 @@ final class VentaService
 
         try {
             $connection->beginTransaction();
+            $cashOpening = $this->repository->openCashOpeningForUser($empresaId, $sucursalId, $userId, true);
+            if ($cashOpening === null) {
+                throw new HttpException('Debes abrir tu caja antes de realizar una venta', 422);
+            }
 
             $saleId = $this->repository->insertSale([
                 'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursalId,
-                'caja_id' => $cashOpening['caja_id'] ?? ($payload['caja_id'] ?? null),
-                'apertura_id' => $cashOpening['id'] ?? ($payload['apertura_id'] ?? null),
-                'caja_apertura_id' => $cashOpening['id'] ?? null,
+                'caja_id' => $cashOpening['caja_id'],
+                'apertura_id' => $cashOpening['id'],
+                'caja_apertura_id' => $cashOpening['id'],
                 'usuario_id' => $userId,
                 'cliente_id' => $clientId,
                 'tipo_venta' => $tipoVenta,
@@ -410,18 +409,13 @@ final class VentaService
         return $chain;
     }
 
-    private function cashOpening(int $empresaId, int $sucursalId, array $payload): ?array
+    private function cashOpening(int $empresaId, int $sucursalId, int $userId): array
     {
-        $openingId = (int) ($payload['caja_apertura_id'] ?? 0);
-
-        if ($openingId <= 0) {
-            return null;
-        }
-
-        $opening = $this->repository->openCashOpening($empresaId, $sucursalId, $openingId);
+        $opening = $this->repository->openCashOpeningForUser($empresaId, $sucursalId, $userId);
 
         if ($opening === null) {
-            throw new HttpException('Caja apertura no existe o no esta abierta', 422);
+            $this->auditConfigBlock($empresaId, $sucursalId, $userId, 'caja_abierta_usuario', 'El usuario intento vender sin una caja abierta propia');
+            throw new HttpException('Debes abrir tu caja antes de realizar una venta', 422);
         }
 
         return $opening;

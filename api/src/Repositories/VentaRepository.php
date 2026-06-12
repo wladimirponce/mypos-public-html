@@ -179,6 +179,30 @@ final class VentaRepository
         return is_array($row) ? $row : null;
     }
 
+    public function openCashOpeningForUser(int $empresaId, int $sucursalId, int $userId, bool $forUpdate = false): ?array
+    {
+        $sql = 'SELECT ca.id, ca.caja_id, ca.estado, ca.usuario_id
+                FROM caja_aperturas ca
+                WHERE ca.empresa_id = :empresa_id
+                  AND ca.sucursal_id = :sucursal_id
+                  AND ca.usuario_id = :usuario_id
+                  AND ca.estado = \'ABIERTA\'
+                ORDER BY ca.fecha_apertura DESC
+                LIMIT 1';
+        if ($forUpdate) {
+            $sql .= ' FOR UPDATE';
+        }
+        $statement = $this->connection->prepare($sql);
+        $statement->execute([
+            'empresa_id' => $empresaId,
+            'sucursal_id' => $sucursalId,
+            'usuario_id' => $userId,
+        ]);
+        $row = $statement->fetch();
+
+        return is_array($row) ? $row : null;
+    }
+
     public function insertSale(array $data): int
     {
         $data['uuid'] = $data['uuid'] ?? $data['uuid_offline'] ?? null;
