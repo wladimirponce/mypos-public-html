@@ -7,6 +7,7 @@ use App\Core\Context;
 use App\Repositories\EmpresaRepository;
 use Exception;
 use DOMDocument;
+use DOMXPath;
 
 /**
  * Gestiona el proceso completo de certificación SII.
