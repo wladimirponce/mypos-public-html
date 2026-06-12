@@ -494,6 +494,36 @@ try {
             ]);
             break;
 
+        // ── Muestras impresas en PDF: un archivo por documento/copia ──
+        // El SII exige subir las muestras de a un PDF; se generan server-side
+        // con TCPDF (texto real + PDF417 con los bytes ISO-8859-1 del TED).
+        case 'cert_muestras_pdfgen':
+            set_time_limit(300);
+            ob_clean();
+            $empM   = $globalContext->getEmpresa();
+            $esCert = $globalContext->getAmbiente() === 'CERTIFICACION';
+            echo json_encode($mgr->generarMuestrasPdf([
+                'unidadSII'  => $empM['unidad_sii'] ?? 'S.I.I.',
+                'resolNum'   => $esCert ? 0 : (int)($empM['numero_resolucion'] ?? 0),
+                'resolFch'   => $esCert ? '2021-01-04' : ($empM['fecha_resolucion'] ?? ''),
+                'certBanner' => $esCert,
+            ]));
+            break;
+
+        // ── Descarga individual de una muestra PDF generada ──
+        case 'cert_muestras_pdfdl':
+            $f    = basename((string)($_GET['file'] ?? ''));
+            $path = $globalContext->getTmpPath() . 'muestras_pdf/' . $f;
+            if ($f === '' || !preg_match('/\.pdf$/i', $f) || !is_file($path)) {
+                throw new \Exception('PDF de muestra no encontrado. Genere primero las muestras.');
+            }
+            ob_clean();
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: attachment; filename="' . $f . '"');
+            header('Content-Length: ' . filesize($path));
+            readfile($path);
+            exit;
+
         // ── Intercambio ──────────────────────────────────────────
         // El XML viaja en base64 (xml_b64): mod_security del hosting bloquea
         // POSTs con XML firmado crudo y devuelve HTML en vez de JSON.

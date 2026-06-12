@@ -526,19 +526,22 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   </div>
   <div class="paso-body hidden" id="pbody-7">
     <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:12px">
-      Genera todos los DTEs del Set de Pruebas con timbre PDF417.
-      Use <strong>Ctrl+P → Guardar como PDF</strong> en el navegador para obtener el archivo.
-      Luego súbalo en
-      <a href="https://www4.sii.cl/pdfdteInternet/" target="_blank">www4.sii.cl/pdfdteInternet</a>
-      como evidencia impresa.
+      Genera <strong>un PDF por documento</strong> (con copia CEDIBLE donde aplica), con texto real
+      y timbre PDF417 nativo — listos para subir de a uno en
+      "Upload de muestras impresas" del menú de postulantes (maullin).
     </p>
-    <button class="d-btn d-btn-info" onclick="certMuestras()">
-      <i class="bi bi-printer-fill"></i> Generar e Imprimir Muestras
+    <button class="d-btn d-btn-info" onclick="certMuestrasPdf()">
+      <i class="bi bi-file-earmark-pdf-fill"></i> Generar PDFs de Muestras (1 por doc)
+    </button>
+    <button class="d-btn d-btn-outline ms-2" onclick="certMuestras()"
+      title="Render HTML en el navegador (vista previa / impresión manual)">
+      <i class="bi bi-printer-fill"></i> Vista previa HTML
     </button>
     <a href="https://www4.sii.cl/pdfdteInternet/" target="_blank"
        class="d-btn d-btn-outline d-btn-sm ms-2">
       <i class="bi bi-box-arrow-up-right"></i> Portal SII — Subir PDF
     </a>
+    <div id="muestras-pdf-status" class="mt-2"></div>
   </div>
 </div>
 
@@ -1369,6 +1372,55 @@ async function certMuestras() {
     setPasoNum(7, 'done');
     log(`Muestras generadas: ${res.dtes.length} documento(s).`, 'ok');
   } catch(e) { alert('Error generando muestras: ' + e.message); }
+}
+
+// ── Muestras PDF server-side (un archivo por documento/copia) ─────────────────
+async function certMuestrasPdf() {
+  const st = document.getElementById('muestras-pdf-status');
+  st.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Generando PDFs de muestras…</div>';
+  log('Generando PDFs de muestras (uno por documento)…', 'info');
+  try {
+    const res = await api('cert_muestras_pdfgen');
+    if (!res.ok || !(res.archivos||[]).length) {
+      st.innerHTML = `<div class="d-alert danger">${(res.errores||[]).join('<br>') || res.error || 'No se generaron PDFs. Ejecute primero el Set de Pruebas.'}</div>`;
+      log('Error generando PDFs de muestras', 'error');
+      return;
+    }
+    const rows = res.archivos.map(a =>
+      `<tr><td style="padding:2px 8px">${a.label}</td>`
+      + `<td style="padding:2px 8px">T${a.tipo} F${a.folio}</td>`
+      + `<td style="padding:2px 8px">${a.copia}</td>`
+      + `<td style="padding:2px 8px">${a.kb} KB</td>`
+      + `<td style="padding:2px 8px"><a href="cert_bridge.php?action=cert_muestras_pdfdl&file=${encodeURIComponent(a.file)}" download>`
+      + `<i class="bi bi-download"></i> ${a.file}</a></td></tr>`).join('');
+    const errs = (res.errores||[]).length
+      ? `<div class="d-alert warning mt-1">${res.errores.join('<br>')}</div>` : '';
+    st.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> `
+      + `${res.archivos.length} PDF(s) generados. Súbalos de a uno en el portal SII. `
+      + `<button class="d-btn d-btn-sm d-btn-primary ms-2" onclick="certMuestrasPdfDlAll()">`
+      + `<i class="bi bi-download"></i> Descargar todos</button></div>`
+      + `<div style="max-height:260px; overflow-y:auto"><table style="font-size:.72rem; width:100%">${rows}</table></div>${errs}`;
+    window._muestrasPdfFiles = res.archivos.map(a => a.file);
+    setBadge('pbadge-7', '✓ Generado', 'success');
+    setPasoNum(7, 'done');
+    log(`PDFs de muestras generados: ${res.archivos.length}.`, 'ok');
+  } catch(e) {
+    st.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
+    log('Error: ' + e.message, 'error');
+  }
+}
+
+function certMuestrasPdfDlAll() {
+  const files = window._muestrasPdfFiles || [];
+  files.forEach((f, i) => {
+    setTimeout(() => {
+      const a = document.createElement('a');
+      a.href = 'cert_bridge.php?action=cert_muestras_pdfdl&file=' + encodeURIComponent(f);
+      a.download = f;
+      document.body.appendChild(a); a.click(); a.remove();
+    }, i * 400);
+  });
+  log(`Descargando ${files.length} PDFs…`, 'info');
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

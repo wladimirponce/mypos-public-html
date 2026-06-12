@@ -1716,11 +1716,24 @@ class CertificationManager
      * verdad que la impresión real.
      * @return array<int,array{label:string,tipo:int,folio:int,xml:string}>
      */
-    public function getMuestrasXmls(): array
+    public function getMuestrasXmls(bool $withRaw = false): array
     {
         $state  = $this->loadState();
         $tmpDir = $this->context->getTmpPath();
         $dtes   = [];
+        // 'raw' = bytes ISO-8859-1 originales del archivo: el PDF417 de las
+        // muestras PDF debe contener el TED EXACTO firmado (re-codificarlo a
+        // UTF-8 invalida la firma). NO incluir en respuestas JSON.
+        $add = function (string $label, int $tipo, int $folio, string $xmlContent) use (&$dtes, $withRaw) {
+            $row = [
+                'label' => $label,
+                'tipo'  => $tipo,
+                'folio' => $folio,
+                'xml'   => mb_convert_encoding($xmlContent, 'UTF-8', 'ISO-8859-1'),
+            ];
+            if ($withRaw) $row['raw'] = $xmlContent;
+            $dtes[] = $row;
+        };
 
         // Set de Pruebas
         foreach ($this->getPruebasCases() as $caseId) {
@@ -1729,9 +1742,7 @@ class CertificationManager
             $tipo    = (int)($info['tipo'] ?? $this->detectTipo($caseId));
             $xmlFile = $tmpDir . "dte_T{$tipo}F{$info['folio']}.xml";
             if (file_exists($xmlFile)) {
-                $xmlContent = file_get_contents($xmlFile);
-                $xmlUtf8 = mb_convert_encoding($xmlContent, 'UTF-8', 'ISO-8859-1');
-                $dtes[] = ['label' => $caseId, 'tipo' => $tipo, 'folio' => $info['folio'], 'xml' => $xmlUtf8];
+                $add($caseId, $tipo, (int)$info['folio'], file_get_contents($xmlFile));
             }
         }
 
@@ -1744,9 +1755,7 @@ class CertificationManager
                 if ($simCount >= 10) break;
                 $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
                 if (file_exists($xmlFile)) {
-                    $xmlContent = file_get_contents($xmlFile);
-                    $xmlUtf8 = mb_convert_encoding($xmlContent, 'UTF-8', 'ISO-8859-1');
-                    $dtes[] = ['label' => "SIM-T{$tipo}", 'tipo' => $tipo, 'folio' => $folio, 'xml' => $xmlUtf8];
+                    $add("SIM-T{$tipo}", (int)$tipo, (int)$folio, file_get_contents($xmlFile));
                     $simCount++;
                 }
             }
@@ -1757,19 +1766,68 @@ class CertificationManager
         if (is_dir($boletasDir)) {
             foreach (glob($boletasDir . 'dte_T*F*.xml') ?: [] as $bxml) {
                 if (preg_match('/dte_T(\d+)F(\d+)\.xml$/', $bxml, $mm)) {
-                    $xmlContent = file_get_contents($bxml);
-                    $xmlUtf8 = mb_convert_encoding($xmlContent, 'UTF-8', 'ISO-8859-1');
-                    $dtes[] = [
-                        'label' => 'BOLETA SET',
-                        'tipo'  => (int)$mm[1],
-                        'folio' => (int)$mm[2],
-                        'xml'   => $xmlUtf8,
-                    ];
+                    $add('BOLETA SET', (int)$mm[1], (int)$mm[2], file_get_contents($bxml));
                 }
             }
         }
 
         return $dtes;
+    }
+
+    /**
+     * Genera un PDF individual por cada muestra (y copia CEDIBLE donde aplica)
+     * en tmp/{RUT}/muestras_pdf/. Devuelve la lista de archivos generados,
+     * listos para subirse uno a uno en "Upload de muestras impresas" del SII.
+     */
+    public function generarMuestrasPdf(array $opts): array
+    {
+        $gen    = new MuestraPdfGenerator();
+        $outDir = $this->context->getTmpPath() . 'muestras_pdf/';
+        if (!is_dir($outDir)) @mkdir($outDir, 0755, true);
+        foreach (glob($outDir . '*.pdf') ?: [] as $old) @unlink($old);
+
+        $files  = [];
+        $errors = [];
+        foreach ($this->getMuestrasXmls(true) as $dte) {
+            $copias = ['TRIBUTARIA'];
+            // Guía de traslado interno (sin venta) no requiere cedible
+            $esGuiaInterna = false;
+            if ((int)$dte['tipo'] === 52 && preg_match('/<IndTraslado>\s*5\s*<\/IndTraslado>/', $dte['raw'])) {
+                $esGuiaInterna = true;
+            }
+            if (in_array((int)$dte['tipo'], MuestraPdfGenerator::TIPOS_CEDIBLE, true) && !$esGuiaInterna) {
+                $copias[] = 'CEDIBLE';
+            }
+            foreach ($copias as $copia) {
+                try {
+                    $pdfBytes = $gen->render($dte, $opts, $copia);
+                    $slug = preg_replace('/[^A-Za-z0-9_-]+/', '_', $dte['label']);
+                    $name = sprintf('T%d_F%d_%s_%s.pdf', $dte['tipo'], $dte['folio'],
+                        $copia === 'CEDIBLE' ? 'CED' : 'TRIB', $slug);
+                    file_put_contents($outDir . $name, $pdfBytes);
+                    $files[] = [
+                        'file'  => $name,
+                        'label' => $dte['label'],
+                        'tipo'  => $dte['tipo'],
+                        'folio' => $dte['folio'],
+                        'copia' => $copia,
+                        'kb'    => (int)round(strlen($pdfBytes) / 1024),
+                    ];
+                } catch (\Throwable $e) {
+                    $errors[] = "T{$dte['tipo']}F{$dte['folio']} $copia: " . $e->getMessage();
+                }
+            }
+        }
+
+        $state = $this->loadState();
+        $state['muestras'] = [
+            'status' => empty($errors) ? 'generated' : 'partial',
+            'total'  => count($files),
+            'ts'     => date('Y-m-d\TH:i:s'),
+        ];
+        $this->saveState($state);
+
+        return ['ok' => !empty($files), 'archivos' => $files, 'errores' => $errors];
     }
 
     private function detectTipo(string $caseId): int
