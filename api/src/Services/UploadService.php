@@ -84,6 +84,7 @@ final class UploadService
     {
         $empresaId = $this->positiveInt($post, 'empresa_id');
         $sucursalId = $this->positiveInt($post, 'sucursal_id');
+        $existingDocumentId = isset($post['documento_ia_id']) ? (int) $post['documento_ia_id'] : 0;
         $this->requireEmpresa($empresaId);
         if (!$this->repository->sucursalExists($empresaId, $sucursalId)) {
             throw new HttpException('Sucursal no encontrada', 422);
@@ -92,6 +93,17 @@ final class UploadService
         $type = strtoupper(trim((string) ($post['tipo_documento_detectado'] ?? '')));
         if ($type !== '' && !in_array($type, ['FACTURA_COMPRA', 'GUIA_DESPACHO_COMPRA', 'BOLETA_COMPRA'], true)) {
             throw new HttpException('Tipo de documento invalido', 422);
+        }
+
+        $existingDocument = null;
+        if ($existingDocumentId > 0) {
+            $existingDocument = $this->documentosIa->find($empresaId, $existingDocumentId);
+            if ($existingDocument === null || (int) $existingDocument['sucursal_id'] !== $sucursalId) {
+                throw new HttpException('Documento IA no encontrado para la sucursal activa', 404);
+            }
+            if (!in_array((string) $existingDocument['estado'], ['SUBIDO', 'ERROR'], true)) {
+                throw new HttpException('No se pueden agregar paginas a un documento ya procesado', 422);
+            }
         }
 
         $stored = $this->storeFile($empresaId, $userId, 'documentos_ia', $file, self::DOCUMENT_MIMES, self::MAX_DOCUMENT_BYTES);
@@ -106,17 +118,23 @@ final class UploadService
             'metadata_json' => $this->jsonOrNull(['tipo_documento_detectado' => $type ?: null]),
         ]));
 
-        $documentId = $this->documentosIa->create([
-            'empresa_id' => $empresaId,
-            'sucursal_id' => $sucursalId,
-            'usuario_id' => $userId,
-            'archivo_subido_id' => $archivoId,
-            'tipo_documento' => $type ?: null,
-            'tipo_documento_detectado' => $type ?: null,
-            'archivo_ruta' => $stored['ruta_relativa'],
-            'archivo_url' => $stored['ruta_relativa'],
-            'estado' => 'SUBIDO',
-        ]);
+        if ($existingDocumentId > 0) {
+            $documentId = $existingDocumentId;
+        } else {
+            $documentId = $this->documentosIa->create([
+                'empresa_id' => $empresaId,
+                'sucursal_id' => $sucursalId,
+                'usuario_id' => $userId,
+                'archivo_subido_id' => $archivoId,
+                'tipo_documento' => $type ?: null,
+                'tipo_documento_detectado' => $type ?: null,
+                'archivo_ruta' => $stored['ruta_relativa'],
+                'archivo_url' => $stored['ruta_relativa'],
+                'estado' => 'SUBIDO',
+            ]);
+        }
+
+        $this->documentosIa->attachUploadedFile($empresaId, $documentId, $archivoId);
 
         $this->audit($empresaId, $sucursalId, $userId, 'upload.crear', 'archivos_subidos', $archivoId, [
             'modulo' => 'DOCUMENTOS_IA',
@@ -128,6 +146,7 @@ final class UploadService
         return [
             'archivo_id' => $archivoId,
             'documento_ia_id' => $documentId,
+            'pagina_agregada' => $existingDocumentId > 0,
             'estado' => 'SUBIDO',
         ];
     }

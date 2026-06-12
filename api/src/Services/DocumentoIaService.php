@@ -117,10 +117,15 @@ final class DocumentoIaService
             throw new HttpException('El documento ya fue confirmado', 422);
         }
 
-        $file = $this->repository->uploadedFile($empresaId, $id);
-        if ($file === null || ($file['estado'] ?? '') !== 'ACTIVO') {
+        $files = $this->repository->uploadedFiles($empresaId, $id);
+        if ($files === []) {
+            $legacyFile = $this->repository->uploadedFile($empresaId, $id);
+            $files = $legacyFile === null ? [] : [$legacyFile];
+        }
+        if ($files === []) {
             throw new HttpException('Documento IA no tiene archivo subido asociado', 422);
         }
+        $file = $files[0];
 
         $processingId = $this->repository->createProcessing([
             'empresa_id' => $empresaId,
@@ -130,16 +135,21 @@ final class DocumentoIaService
             'modelo' => (string) ($_ENV['GEMINI_MODEL'] ?? getenv('GEMINI_MODEL') ?: 'gemini-3.5-flash'),
             'estado' => 'PROCESANDO',
             'request_json' => $this->encodeJson([
-                'archivo_id' => (int) $file['id'],
-                'mime_type' => $file['mime_type'],
-                'size_bytes' => (int) $file['size_bytes'],
+                'archivos' => array_map(static fn (array $item): array => [
+                    'archivo_id' => (int) $item['id'],
+                    'mime_type' => $item['mime_type'],
+                    'size_bytes' => (int) $item['size_bytes'],
+                ], $files),
             ]),
             'created_by_usuario_id' => $userId,
         ]);
 
         try {
-            $absolutePath = $this->uploads->absolutePath((string) $file['ruta_relativa']);
-            $gemini = $this->gemini->procesarDocumentoCompra($absolutePath, (string) $file['mime_type']);
+            $geminiFiles = array_map(fn (array $item): array => [
+                'absolute_path' => $this->uploads->absolutePath((string) $item['ruta_relativa']),
+                'mime_type' => (string) $item['mime_type'],
+            ], $files);
+            $gemini = $this->gemini->procesarDocumentoCompraMultipagina($geminiFiles);
             $result = $gemini['resultado'];
             $applied = $this->aplicarResultadoIa($empresaId, $id, $document, $result);
             $normalized = $this->conciliation->normalizarYConciliar($id, $empresaId, $userId);
@@ -150,6 +160,7 @@ final class DocumentoIaService
                 'estado_revision' => $normalized['estado_revision'],
                 'requiere_revision' => $normalized['requiere_revision'],
                 'alertas' => $normalized['alertas'],
+                'paginas_procesadas' => count($files),
             ]);
         } catch (HttpException $exception) {
             $this->repository->updateProcessing($processingId, 'ERROR', null, $exception->getMessage());

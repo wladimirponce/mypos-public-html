@@ -50,26 +50,34 @@ PROMPT;
 
     public function procesarDocumentoCompra(string $absolutePath, string $mimeType, array $contexto = []): array
     {
-        if (!is_file($absolutePath)) {
-            throw new HttpException('Archivo para IA no encontrado', 404);
+        return $this->procesarDocumentoCompraMultipagina([['absolute_path' => $absolutePath, 'mime_type' => $mimeType]], $contexto);
+    }
+
+    public function procesarDocumentoCompraMultipagina(array $files, array $contexto = []): array
+    {
+        if ($files === [] || count($files) > 10) {
+            throw new HttpException('El documento debe incluir entre 1 y 10 paginas', 422);
         }
 
-        $content = file_get_contents($absolutePath);
-        if ($content === false) {
-            throw new HttpException('No fue posible leer archivo para IA', 500);
+        $parts = [['text' => self::PROMPT . "\nLas imagenes o PDF adjuntos pertenecen al mismo documento y estan ordenados por pagina."]];
+        foreach ($files as $file) {
+            $absolutePath = (string) ($file['absolute_path'] ?? '');
+            if (!is_file($absolutePath)) {
+                throw new HttpException('Archivo para IA no encontrado', 404);
+            }
+            $content = file_get_contents($absolutePath);
+            if ($content === false) {
+                throw new HttpException('No fue posible leer archivo para IA', 500);
+            }
+            $parts[] = ['inline_data' => [
+                'mime_type' => (string) ($file['mime_type'] ?? 'application/octet-stream'),
+                'data' => base64_encode($content),
+            ]];
         }
 
         $request = [
             'contents' => [[
-                'parts' => [
-                    ['text' => self::PROMPT],
-                    [
-                        'inline_data' => [
-                            'mime_type' => $mimeType,
-                            'data' => base64_encode($content),
-                        ],
-                    ],
-                ],
+                'parts' => $parts,
             ]],
             'generationConfig' => [
                 'responseMimeType' => 'application/json',
@@ -166,8 +174,13 @@ PROMPT;
             $items = [];
         }
 
+        $documentType = strtoupper((string) ($json['tipo_documento'] ?? 'DESCONOCIDO'));
+        if ($documentType === 'GUIA_DESPACHO') {
+            $documentType = 'GUIA_DESPACHO_COMPRA';
+        }
+
         return [
-            'tipo_documento' => strtoupper((string) ($json['tipo_documento'] ?? 'DESCONOCIDO')),
+            'tipo_documento' => $documentType,
             'proveedor_rut' => $this->nullableString($json['proveedor_rut'] ?? null),
             'proveedor_nombre' => $this->nullableString($json['proveedor_nombre'] ?? null),
             'folio' => $this->nullableString($json['folio'] ?? null),

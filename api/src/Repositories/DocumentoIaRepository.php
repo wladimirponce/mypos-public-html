@@ -329,4 +329,36 @@ final class DocumentoIaRepository
 
         return is_array($row) ? $row : null;
     }
+
+    public function attachUploadedFile(int $empresaId, int $documentId, int $fileId): void
+    {
+        $statement = $this->connection->prepare(
+            'INSERT INTO documentos_ia_archivos (empresa_id, documento_ia_id, archivo_subido_id, orden)
+             SELECT :empresa_id, :documento_ia_id, :archivo_subido_id, COALESCE(MAX(orden), 0) + 1
+             FROM documentos_ia_archivos
+             WHERE empresa_id = :empresa_id_order AND documento_ia_id = :documento_ia_id_order'
+        );
+        $statement->execute([
+            'empresa_id' => $empresaId,
+            'documento_ia_id' => $documentId,
+            'archivo_subido_id' => $fileId,
+            'empresa_id_order' => $empresaId,
+            'documento_ia_id_order' => $documentId,
+        ]);
+    }
+
+    public function uploadedFiles(int $empresaId, int $documentId): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT a.id, a.nombre_original, a.ruta_relativa, a.mime_type, a.size_bytes, a.estado, da.orden
+             FROM documentos_ia_archivos da
+             INNER JOIN archivos_subidos a ON a.id = da.archivo_subido_id AND a.empresa_id = da.empresa_id
+             WHERE da.empresa_id = :empresa_id AND da.documento_ia_id = :documento_ia_id
+               AND da.estado = \'ACTIVO\' AND a.estado = \'ACTIVO\'
+             ORDER BY da.orden, da.id'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'documento_ia_id' => $documentId]);
+
+        return $statement->fetchAll();
+    }
 }
