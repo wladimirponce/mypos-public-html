@@ -55,7 +55,7 @@ final class CierreDiarioRepository
              WHERE empresa_id = :empresa_id
                AND sucursal_id = :sucursal_id
                AND DATE(fecha_venta) = :fecha_cierre
-               AND estado = \'EMITIDA\''
+               AND estado <> \'ANULADA\''
         );
         $statement->execute(['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId, 'fecha_cierre' => $date]);
 
@@ -118,7 +118,7 @@ final class CierreDiarioRepository
              WHERE v.empresa_id = :empresa_id_filter
                AND v.sucursal_id = :sucursal_id
                AND DATE(v.fecha_venta) = :fecha_cierre
-               AND v.estado = \'EMITIDA\'
+               AND v.estado <> \'ANULADA\'
              GROUP BY vp.metodo_pago_id, vp.metodo_pago_codigo'
         );
         $statement->execute([
@@ -142,7 +142,7 @@ final class CierreDiarioRepository
              WHERE v.empresa_id = :empresa_id_filter
                AND v.sucursal_id = :sucursal_id
                AND DATE(v.fecha_venta) = :fecha_cierre
-               AND v.estado = \'EMITIDA\'
+               AND v.estado <> \'ANULADA\'
              GROUP BY vd.producto_id, vd.codigo_producto, vd.nombre_producto'
         );
         $statement->execute([
@@ -168,7 +168,7 @@ final class CierreDiarioRepository
              WHERE v.empresa_id = :empresa_id_filter
                AND v.sucursal_id = :sucursal_id
                AND DATE(v.fecha_venta) = :fecha_cierre
-               AND v.estado = \'EMITIDA\'
+               AND v.estado <> \'ANULADA\'
              GROUP BY p.rubro_id, r.nombre'
         );
         $statement->execute([
@@ -192,7 +192,7 @@ final class CierreDiarioRepository
              WHERE v.empresa_id = :empresa_id_filter
                AND v.sucursal_id = :sucursal_id
                AND DATE(v.fecha_venta) = :fecha_cierre
-               AND v.estado = \'EMITIDA\'
+               AND v.estado <> \'ANULADA\'
              GROUP BY v.usuario_id, u.nombre'
         );
         $statement->execute([

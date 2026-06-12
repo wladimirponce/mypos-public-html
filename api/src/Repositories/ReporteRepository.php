@@ -22,166 +22,207 @@ final class ReporteRepository
         return (bool) $statement->fetchColumn();
     }
 
+    /** @return array<string, mixed> */
     public function resumenVentas(int $empresaId, ?int $sucursalId, string $from, string $to): array
     {
-        $where = $this->closureWhere($sucursalId);
         $statement = $this->connection->prepare(
-            "SELECT COALESCE(SUM(total_ventas), 0) AS total_ventas,
-                    COALESCE(SUM(total_impuestos), 0) AS total_impuestos,
-                    COALESCE(SUM(total_descuentos), 0) AS total_descuentos,
-                    COALESCE(SUM(total_margen), 0) AS total_margen_estimado,
-                    COALESCE(SUM(cantidad_ventas), 0) AS cantidad_ventas,
-                    COUNT(DISTINCT fecha_cierre) AS dias_cerrados
-             FROM cierres_diarios
-             WHERE {$where}"
+            'SELECT COALESCE(SUM(v.total), 0) AS total_ventas,
+                    COALESCE(SUM(v.impuesto_total), 0) AS total_impuestos,
+                    COALESCE(SUM(v.descuento_total), 0) AS total_descuentos,
+                    COALESCE(SUM(v.margen_total), 0) AS total_margen_estimado,
+                    COUNT(v.id) AS cantidad_ventas
+             FROM ventas v
+             WHERE ' . $this->salesWhere($sucursalId, 'v')
         );
-        $statement->execute($this->closureParams($empresaId, $sucursalId, $from, $to));
-        $summary = $statement->fetch() ?: [];
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
+        $fetched = $statement->fetch();
+        $summary = is_array($fetched) ? $fetched : [];
         $summary['cantidad_productos'] = $this->cantidadProductos($empresaId, $sucursalId, $from, $to);
+        $summary['dias_cerrados'] = $this->closedDays($empresaId, $sucursalId, $from, $to);
 
         return $summary;
     }
 
+    /** @return array<int, array<string, mixed>> */
     public function ventasPorDia(int $empresaId, ?int $sucursalId, string $from, string $to): array
     {
-        $where = $this->closureWhere($sucursalId);
         $statement = $this->connection->prepare(
-            "SELECT fecha_cierre AS fecha,
-                    COALESCE(SUM(total_ventas), 0) AS total_ventas,
-                    COALESCE(SUM(cantidad_ventas), 0) AS cantidad_ventas,
-                    'CERRADO' AS estado
-             FROM cierres_diarios
-             WHERE {$where}
-             GROUP BY fecha_cierre
-             ORDER BY fecha_cierre"
+            "SELECT DATE(v.fecha_venta) AS fecha,
+                    COALESCE(SUM(v.total), 0) AS total_ventas,
+                    COUNT(v.id) AS cantidad_ventas,
+                    CASE WHEN COUNT(DISTINCT v.sucursal_id) = COUNT(DISTINCT c.sucursal_id)
+                         THEN 'CERRADO' ELSE 'PARCIAL' END AS estado
+             FROM ventas v
+             LEFT JOIN cierres_diarios c
+                    ON c.empresa_id = v.empresa_id
+                   AND c.sucursal_id = v.sucursal_id
+                   AND c.fecha_cierre = DATE(v.fecha_venta)
+                   AND c.estado = 'CERRADO'
+             WHERE {$this->salesWhere($sucursalId, 'v')}
+             GROUP BY DATE(v.fecha_venta)
+             ORDER BY fecha"
         );
-        $statement->execute($this->closureParams($empresaId, $sucursalId, $from, $to));
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
 
         return $statement->fetchAll();
     }
 
+    /** @return array<int, array<string, mixed>> */
     public function ventasPorMetodoPago(int $empresaId, ?int $sucursalId, string $from, string $to): array
     {
-        $where = $this->closureWhere($sucursalId, 'c');
         $statement = $this->connection->prepare(
-            "SELECT crp.metodo_pago_id,
-                    crp.metodo_pago_codigo AS codigo,
-                    COALESCE(mp.nombre, crp.metodo_pago_codigo) AS nombre,
-                    COALESCE(SUM(crp.total), 0) AS total,
-                    COALESCE(SUM(crp.cantidad_operaciones), 0) AS cantidad_operaciones
-             FROM cierre_resumen_pagos crp
-             INNER JOIN cierres_diarios c ON c.id = crp.cierre_diario_id
-             LEFT JOIN metodos_pago mp ON mp.id = crp.metodo_pago_id
-             WHERE {$where}
-             GROUP BY crp.metodo_pago_id, crp.metodo_pago_codigo, mp.nombre
+            "SELECT vp.metodo_pago_id,
+                    vp.metodo_pago_codigo AS codigo,
+                    COALESCE(mp.nombre, vp.metodo_pago_codigo) AS nombre,
+                    COALESCE(SUM(vp.monto), 0) AS total,
+                    COUNT(vp.id) AS cantidad_operaciones
+             FROM venta_pagos vp
+             INNER JOIN ventas v ON v.id = vp.venta_id AND v.empresa_id = vp.empresa_id
+             LEFT JOIN metodos_pago mp ON mp.id = vp.metodo_pago_id
+             WHERE {$this->salesWhere($sucursalId, 'v')}
+             GROUP BY vp.metodo_pago_id, vp.metodo_pago_codigo, mp.nombre
              ORDER BY total DESC"
         );
-        $statement->execute($this->closureParams($empresaId, $sucursalId, $from, $to));
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
 
         return $statement->fetchAll();
     }
 
+    /** @return array<int, array<string, mixed>> */
+    public function productosPorDia(int $empresaId, ?int $sucursalId, string $from, string $to): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT DATE(v.fecha_venta) AS fecha,
+                    COALESCE(SUM(vd.cantidad), 0) AS cantidad_productos
+             FROM venta_detalles vd
+             INNER JOIN ventas v ON v.id = vd.venta_id AND v.empresa_id = vd.empresa_id
+             WHERE ' . $this->salesWhere($sucursalId, 'v') . '
+             GROUP BY DATE(v.fecha_venta)
+             ORDER BY fecha'
+        );
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
+
+        return $statement->fetchAll();
+    }
+
+    /** @return array<int, array<string, mixed>> */
     public function ventasPorProducto(int $empresaId, ?int $sucursalId, string $from, string $to, int $limit, string $order): array
     {
-        $where = $this->closureWhere($sucursalId, 'c');
         $orderBy = $order === 'cantidad' ? 'cantidad_vendida' : 'total_vendido';
         $statement = $this->connection->prepare(
-            "SELECT crp.producto_id,
-                    crp.codigo_producto AS codigo,
-                    crp.nombre_producto AS nombre,
-                    COALESCE(SUM(crp.cantidad), 0) AS cantidad_vendida,
-                    COALESCE(SUM(crp.total), 0) AS total_vendido,
-                    COALESCE(SUM(crp.margen_total), 0) AS margen_estimado
-             FROM cierre_resumen_productos crp
-             INNER JOIN cierres_diarios c ON c.id = crp.cierre_diario_id
-             WHERE {$where}
-             GROUP BY crp.producto_id, crp.codigo_producto, crp.nombre_producto
+            "SELECT vd.producto_id,
+                    vd.codigo_producto AS codigo,
+                    vd.nombre_producto AS nombre,
+                    COALESCE(SUM(vd.cantidad), 0) AS cantidad_vendida,
+                    COALESCE(SUM(vd.total), 0) AS total_vendido,
+                    COALESCE(SUM(vd.margen_total), 0) AS margen_estimado
+             FROM venta_detalles vd
+             INNER JOIN ventas v ON v.id = vd.venta_id AND v.empresa_id = vd.empresa_id
+             WHERE {$this->salesWhere($sucursalId, 'v')}
+             GROUP BY vd.producto_id, vd.codigo_producto, vd.nombre_producto
              ORDER BY {$orderBy} DESC
              LIMIT {$limit}"
         );
-        $statement->execute($this->closureParams($empresaId, $sucursalId, $from, $to));
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
 
         return $statement->fetchAll();
     }
 
+    /** @return array<int, array<string, mixed>> */
     public function ventasPorRubro(int $empresaId, ?int $sucursalId, string $from, string $to): array
     {
-        $where = $this->closureWhere($sucursalId, 'c');
         $statement = $this->connection->prepare(
-            "SELECT crr.rubro_id,
-                    COALESCE(crr.nombre_rubro, 'Sin rubro') AS rubro,
-                    COALESCE(SUM(crr.cantidad), 0) AS cantidad_vendida,
-                    COALESCE(SUM(crr.total), 0) AS total_vendido,
-                    COALESCE(SUM(crr.margen_total), 0) AS margen_estimado
-             FROM cierre_resumen_rubros crr
-             INNER JOIN cierres_diarios c ON c.id = crr.cierre_diario_id
-             WHERE {$where}
-             GROUP BY crr.rubro_id, crr.nombre_rubro
+            "SELECT p.rubro_id,
+                    COALESCE(r.nombre, 'Sin rubro') AS rubro,
+                    COALESCE(SUM(vd.cantidad), 0) AS cantidad_vendida,
+                    COALESCE(SUM(vd.total), 0) AS total_vendido,
+                    COALESCE(SUM(vd.margen_total), 0) AS margen_estimado
+             FROM venta_detalles vd
+             INNER JOIN ventas v ON v.id = vd.venta_id AND v.empresa_id = vd.empresa_id
+             INNER JOIN productos p ON p.id = vd.producto_id AND p.empresa_id = vd.empresa_id
+             LEFT JOIN rubros r ON r.id = p.rubro_id
+             WHERE {$this->salesWhere($sucursalId, 'v')}
+             GROUP BY p.rubro_id, r.nombre
              ORDER BY total_vendido DESC"
         );
-        $statement->execute($this->closureParams($empresaId, $sucursalId, $from, $to));
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
 
         return $statement->fetchAll();
     }
 
+    /** @return array<int, array<string, mixed>> */
     public function ventasPorUsuario(int $empresaId, ?int $sucursalId, string $from, string $to, int $limit = 100): array
     {
-        $where = $this->closureWhere($sucursalId, 'c');
         $statement = $this->connection->prepare(
-            "SELECT cru.usuario_id,
-                    cru.nombre_usuario AS usuario,
-                    COALESCE(SUM(cru.cantidad_ventas), 0) AS cantidad_ventas,
-                    COALESCE(SUM(cru.total), 0) AS total_vendido,
-                    COALESCE(SUM(cru.margen_total), 0) AS margen_estimado
-             FROM cierre_resumen_usuarios cru
-             INNER JOIN cierres_diarios c ON c.id = cru.cierre_diario_id
-             WHERE {$where}
-             GROUP BY cru.usuario_id, cru.nombre_usuario
+            "SELECT v.usuario_id,
+                    u.nombre AS usuario,
+                    COUNT(v.id) AS cantidad_ventas,
+                    COALESCE(SUM(v.total), 0) AS total_vendido,
+                    COALESCE(SUM(v.margen_total), 0) AS margen_estimado
+             FROM ventas v
+             INNER JOIN usuarios u ON u.id = v.usuario_id
+             WHERE {$this->salesWhere($sucursalId, 'v')}
+             GROUP BY v.usuario_id, u.nombre
              ORDER BY total_vendido DESC
              LIMIT {$limit}"
         );
-        $statement->execute($this->closureParams($empresaId, $sucursalId, $from, $to));
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
 
         return $statement->fetchAll();
     }
 
     private function cantidadProductos(int $empresaId, ?int $sucursalId, string $from, string $to): string
     {
-        $where = $this->closureWhere($sucursalId, 'c');
         $statement = $this->connection->prepare(
-            "SELECT COALESCE(SUM(crp.cantidad), 0) AS cantidad_productos
-             FROM cierre_resumen_productos crp
-             INNER JOIN cierres_diarios c ON c.id = crp.cierre_diario_id
-             WHERE {$where}"
+            'SELECT COALESCE(SUM(vd.cantidad), 0)
+             FROM venta_detalles vd
+             INNER JOIN ventas v ON v.id = vd.venta_id AND v.empresa_id = vd.empresa_id
+             WHERE ' . $this->salesWhere($sucursalId, 'v')
         );
-        $statement->execute($this->closureParams($empresaId, $sucursalId, $from, $to));
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
 
         return number_format((float) $statement->fetchColumn(), 3, '.', '');
     }
 
-    private function closureWhere(?int $sucursalId, string $alias = ''): string
+    private function closedDays(int $empresaId, ?int $sucursalId, string $from, string $to): int
     {
-        $prefix = $alias !== '' ? $alias . '.' : '';
-        $where = "{$prefix}empresa_id = :empresa_id
-            AND {$prefix}fecha_cierre >= :fecha_desde
-            AND {$prefix}fecha_cierre <= :fecha_hasta
-            AND {$prefix}estado = 'CERRADO'";
-
+        $where = 'empresa_id = :empresa_id
+            AND fecha_cierre >= :fecha_desde
+            AND fecha_cierre <= :fecha_hasta
+            AND estado = \'CERRADO\'';
         if ($sucursalId !== null) {
-            $where .= " AND {$prefix}sucursal_id = :sucursal_id";
+            $where .= ' AND sucursal_id = :sucursal_id';
+        }
+
+        $statement = $this->connection->prepare("SELECT COUNT(DISTINCT fecha_cierre) FROM cierres_diarios WHERE {$where}");
+        $statement->execute($this->closureParams($empresaId, $sucursalId, $from, $to));
+
+        return (int) $statement->fetchColumn();
+    }
+
+    private function salesWhere(?int $sucursalId, string $alias): string
+    {
+        $where = "{$alias}.empresa_id = :empresa_id
+            AND {$alias}.fecha_venta >= :fecha_desde
+            AND {$alias}.fecha_venta < DATE_ADD(:fecha_hasta, INTERVAL 1 DAY)
+            AND {$alias}.estado <> 'ANULADA'";
+        if ($sucursalId !== null) {
+            $where .= " AND {$alias}.sucursal_id = :sucursal_id";
         }
 
         return $where;
     }
 
+    /** @return array<string, int|string> */
+    private function salesParams(int $empresaId, ?int $sucursalId, string $from, string $to): array
+    {
+        return $this->closureParams($empresaId, $sucursalId, $from, $to);
+    }
+
+    /** @return array<string, int|string> */
     private function closureParams(int $empresaId, ?int $sucursalId, string $from, string $to): array
     {
-        $params = [
-            'empresa_id' => $empresaId,
-            'fecha_desde' => $from,
-            'fecha_hasta' => $to,
-        ];
-
+        $params = ['empresa_id' => $empresaId, 'fecha_desde' => $from, 'fecha_hasta' => $to];
         if ($sucursalId !== null) {
             $params['sucursal_id'] = $sucursalId;
         }

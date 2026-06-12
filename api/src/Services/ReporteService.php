@@ -27,6 +27,7 @@ final class ReporteService
         $days = $this->daysInfo($from, $to, (int) $summary['dias_cerrados']);
         $totalVentas = (int) ($summary['total_ventas'] ?? 0);
         $totalImpuestos = (int) ($summary['total_impuestos'] ?? 0);
+        $cantidadVentas = (int) ($summary['cantidad_ventas'] ?? 0);
 
         $data = [
             'empresa_id' => $empresaId,
@@ -38,7 +39,8 @@ final class ReporteService
             'total_impuestos' => $totalImpuestos,
             'total_descuentos' => (int) ($summary['total_descuentos'] ?? 0),
             'total_margen_estimado' => (int) ($summary['total_margen_estimado'] ?? 0),
-            'cantidad_ventas' => (int) ($summary['cantidad_ventas'] ?? 0),
+            'cantidad_ventas' => $cantidadVentas,
+            'ticket_promedio' => $cantidadVentas > 0 ? (int) round($totalVentas / $cantidadVentas) : 0,
             'cantidad_productos' => (string) ($summary['cantidad_productos'] ?? '0.000'),
             'dias_cerrados' => $days['dias_cerrados'],
             'dias_parciales' => $days['dias_parciales'],
@@ -47,7 +49,7 @@ final class ReporteService
         ];
 
         if ($data['parcial']) {
-            $data['advertencia'] = 'Existen dias sin cierre dentro del rango; los datos pueden estar incompletos.';
+            $data['advertencia'] = 'Existen dias sin cierre dentro del rango; sus totales aun pueden cambiar.';
         }
 
         return $data;
@@ -56,24 +58,32 @@ final class ReporteService
     public function ventasPorDia(array $filters): array
     {
         [$empresaId, $sucursalId, $from, $to] = $this->filters($filters);
-        $closed = [];
+        $sales = [];
+        $products = [];
+
+        foreach ($this->repository->productosPorDia($empresaId, $sucursalId, $from, $to) as $row) {
+            $products[(string) $row['fecha']] = (string) $row['cantidad_productos'];
+        }
 
         foreach ($this->repository->ventasPorDia($empresaId, $sucursalId, $from, $to) as $row) {
-            $closed[(string) $row['fecha']] = [
+            $isClosed = (string) ($row['estado'] ?? '') === 'CERRADO';
+            $sales[(string) $row['fecha']] = [
                 'fecha' => (string) $row['fecha'],
                 'total_ventas' => (int) $row['total_ventas'],
                 'cantidad_ventas' => (int) $row['cantidad_ventas'],
-                'estado' => 'CERRADO',
-                'parcial' => false,
+                'cantidad_productos' => $products[(string) $row['fecha']] ?? '0.000',
+                'estado' => $isClosed ? 'CERRADO' : 'PARCIAL',
+                'parcial' => !$isClosed,
             ];
         }
 
         $rows = [];
         foreach ($this->dateRange($from, $to) as $date) {
-            $rows[] = $closed[$date] ?? [
+            $rows[] = $sales[$date] ?? [
                 'fecha' => $date,
                 'total_ventas' => 0,
                 'cantidad_ventas' => 0,
+                'cantidad_productos' => '0.000',
                 'estado' => 'SIN_CIERRE',
                 'parcial' => true,
             ];
