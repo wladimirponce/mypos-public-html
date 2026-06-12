@@ -71,6 +71,14 @@ class MuestraPdfGenerator
         return ($f == (int)$f) ? self::n($f) : rtrim(rtrim(number_format($f, 3, ',', '.'), '0'), ',');
     }
 
+    private static function unidadSii(string $unidad): string
+    {
+        $unidad = trim($unidad);
+        $unidad = preg_replace('/^(?:S\.?\s*I\.?\s*I\.?|SII)\s*[-—:]*\s*/iu', '', $unidad) ?? $unidad;
+
+        return trim($unidad);
+    }
+
     /**
      * @param array  $dte  ['tipo','folio','xml' (UTF-8), 'raw' (ISO-8859-1), 'label']
      * @param array  $opts ['unidadSII','resolNum','resolFch','certBanner'=>bool]
@@ -92,6 +100,13 @@ class MuestraPdfGenerator
 
         $tipo  = (int)$dte['tipo'];
         $folio = (int)$dte['folio'];
+        $copia = strtoupper(trim($copia));
+        if (!in_array($copia, ['TRIBUTARIA', 'CEDIBLE'], true)) {
+            throw new Exception("Copia inválida para muestra T{$tipo}F{$folio}: {$copia}");
+        }
+        if ($copia === 'CEDIBLE' && !in_array($tipo, self::TIPOS_CEDIBLE, true)) {
+            throw new Exception("El DTE tipo {$tipo} no admite copia CEDIBLE");
+        }
 
         // TED con los bytes ORIGINALES firmados (ISO-8859-1)
         $ted = '';
@@ -126,10 +141,20 @@ class MuestraPdfGenerator
 
         $resolNum = (int)($opts['resolNum'] ?? 0);
         $resolAno = substr((string)($opts['resolFch'] ?? '2021-01-04'), 0, 4) ?: '2021';
-        $unidad   = (string)($opts['unidadSII'] ?? 'S.I.I.');
+        $unidad   = self::unidadSii((string)($opts['unidadSII'] ?? ''));
+        $indTraslado = (int)$q('//s:Encabezado/s:IdDoc/s:IndTraslado');
+        if ($copia === 'CEDIBLE' && $tipo === 52 && $indTraslado === 5) {
+            throw new Exception('La guía de traslado interno no admite copia CEDIBLE');
+        }
 
         // ── PDF ──────────────────────────────────────────────────────────────
-        $pdf = new \TCPDF('P', 'mm', 'LETTER', true, 'UTF-8', false);
+        $pdf = new class('P', 'mm', 'A4', true, 'UTF-8', false) extends \TCPDF {
+            public function disableTcpdfLink(): void
+            {
+                $this->tcpdflink = false;
+            }
+        };
+        $pdf->disableTcpdfLink();
         $pdf->SetCreator('MyPOS DTE');
         $pdf->SetTitle("Muestra T{$tipo} F{$folio} {$copia}");
         $pdf->SetMargins(12, 10, 12);
@@ -176,7 +201,7 @@ class MuestraPdfGenerator
         $pdf->SetTextColor(0, 0, 0);
         $pdf->SetFont('helvetica', 'B', 8);
         $pdf->SetXY($bx, $by + $bh + 1.5);
-        $pdf->Cell($bw, 4, 'S.I.I. — ' . $unidad, 0, 0, 'C');
+        $pdf->Cell($bw, 4, 'S.I.I.' . ($unidad !== '' ? ' - ' . $unidad : ''), 0, 0, 'C');
         $pdf->SetDrawColor(120, 120, 120);
         $pdf->SetLineWidth(0.2);
 
@@ -191,7 +216,7 @@ class MuestraPdfGenerator
         $pdf->Cell(120, 4, 'Dirección: ' . trim($reDir . ($reCmna !== '' ? ', ' . $reCmna : '')), 0, 0, 'L');
         $pdf->Cell(70, 4, 'Fecha emisión: ' . $fchEmis, 0, 1, 'L');
         $pdf->SetX(14);
-        $pdf->Cell(120, 4, 'Ciudad: ' . $reCiu, 0, 0, 'L');
+        $pdf->Cell(120, 4, 'Ciudad: ' . ($reCiu !== '' ? $reCiu : $reCmna), 0, 0, 'L');
         $pdf->Cell(70, 4, 'Giro: ' . $reGiro, 0, 1, 'L');
         $y = $y + 20;
 
@@ -208,9 +233,16 @@ class MuestraPdfGenerator
                 $fchRef = $q('.//s:FchRef', $r);
                 $rznRef = $q('.//s:RazonRef', $r);
                 $codRef = $q('.//s:CodRef', $r);
-                $linea  = "Doc: {$tpoRef}  Folio {$folRef}  ({$fchRef})";
-                if ($codRef !== '') $linea .= "  Cód: {$codRef}";
-                if ($rznRef !== '') $linea .= "  — {$rznRef}";
+                if (strtoupper($tpoRef) === 'SET' || strtoupper($codRef) === 'SET') {
+                    $linea = 'Referencia certificación SII: SET';
+                    if ($rznRef !== '') $linea .= ' - ' . $rznRef;
+                } else {
+                    $linea = "Doc: {$tpoRef}";
+                    if ($folRef !== '') $linea .= "  Folio {$folRef}";
+                    if ($fchRef !== '') $linea .= "  ({$fchRef})";
+                    if ($codRef !== '') $linea .= "  Cód: {$codRef}";
+                    if ($rznRef !== '') $linea .= "  — {$rznRef}";
+                }
                 $pdf->SetX(14);
                 $pdf->Cell(190, 3.8, $linea, 0, 1, 'L');
             }
@@ -219,7 +251,7 @@ class MuestraPdfGenerator
 
         // Traslado (guías)
         if ($tipo === 52) {
-            $indT = (int)$q('//s:Encabezado/s:IdDoc/s:IndTraslado');
+            $indT = $indTraslado;
             $tDes = (int)$q('//s:Encabezado/s:IdDoc/s:TipoDespacho');
             $pdf->SetXY(12, $y);
             $pdf->SetFont('helvetica', '', 8);
@@ -228,34 +260,43 @@ class MuestraPdfGenerator
             $y = $pdf->GetY() + 2;
         }
 
-        // Detalle
+        // Detalle. El manual de muestras exige el descuento por línea en MONTO
+        // (el porcentaje es opcional adicional).
         $pdf->SetXY(12, $y);
         $pdf->SetFont('helvetica', 'B', 8);
         $pdf->Cell(8, 5, '#', 'B', 0, 'L');
-        $pdf->Cell(92, 5, 'Descripción', 'B', 0, 'L');
-        $pdf->Cell(18, 5, 'Cant.', 'B', 0, 'R');
-        $pdf->Cell(26, 5, 'P. Unitario', 'B', 0, 'R');
-        $pdf->Cell(16, 5, 'Dcto.%', 'B', 0, 'R');
+        $pdf->Cell(76, 5, 'Descripción', 'B', 0, 'L');
+        $pdf->Cell(16, 5, 'Cant.', 'B', 0, 'R');
+        $pdf->Cell(24, 5, 'P. Unitario', 'B', 0, 'R');
+        $pdf->Cell(12, 5, 'Dcto.%', 'B', 0, 'R');
+        $pdf->Cell(24, 5, 'Dcto. $', 'B', 0, 'R');
         $pdf->Cell(32, 5, 'Total', 'B', 1, 'R');
         $pdf->SetFont('helvetica', '', 8);
         foreach ($xp->query('//s:Detalle') as $det) {
-            $nl   = $q('.//s:NroLinDet', $det);
-            $nm   = $q('.//s:NmbItem', $det);
-            $cant = $q('.//s:QtyItem', $det);
-            $prc  = $q('.//s:PrcItem', $det);
-            $dcto = $q('.//s:DescuentoPct', $det);
-            $mont = $q('.//s:MontoItem', $det);
-            $exe  = $q('.//s:IndExe', $det);
-            $unm  = $q('.//s:UnmdItem', $det);
+            $nl    = $q('.//s:NroLinDet', $det);
+            $nm    = $q('.//s:NmbItem', $det);
+            $cant  = $q('.//s:QtyItem', $det);
+            $prc   = $q('.//s:PrcItem', $det);
+            $dcto  = $q('.//s:DescuentoPct', $det);
+            $dctoM = $q('.//s:DescuentoMonto', $det);
+            $mont  = $q('.//s:MontoItem', $det);
+            $exe   = $q('.//s:IndExe', $det);
+            $unm   = $q('.//s:UnmdItem', $det);
             if ($exe === '1') $nm .= ' (EXENTO)';
             if ($unm !== '')  $cant = ($cant !== '' ? self::qty($cant) . ' ' . $unm : $unm);
             elseif ($cant !== '') $cant = self::qty($cant);
+            // Monto del descuento: obligatorio si hay % y el XML no lo trae
+            if ($dctoM === '' && $dcto !== '' && $prc !== '' && $cant !== '') {
+                $bruto = (float)$q('.//s:QtyItem', $det) * (float)$prc;
+                $dctoM = (string)round($bruto * (float)$dcto / 100);
+            }
             $pdf->SetX(12);
             $pdf->Cell(8, 4.5, $nl, 0, 0, 'L');
-            $pdf->Cell(92, 4.5, mb_substr($nm, 0, 60), 0, 0, 'L');
-            $pdf->Cell(18, 4.5, $cant, 0, 0, 'R');
-            $pdf->Cell(26, 4.5, $prc !== '' ? '$' . self::n($prc) : '', 0, 0, 'R');
-            $pdf->Cell(16, 4.5, $dcto !== '' ? self::n($dcto) . '%' : '', 0, 0, 'R');
+            $pdf->Cell(76, 4.5, mb_substr($nm, 0, 50), 0, 0, 'L');
+            $pdf->Cell(16, 4.5, $cant, 0, 0, 'R');
+            $pdf->Cell(24, 4.5, $prc !== '' ? '$' . self::n($prc) : '', 0, 0, 'R');
+            $pdf->Cell(12, 4.5, $dcto !== '' ? self::n($dcto) . '%' : '', 0, 0, 'R');
+            $pdf->Cell(24, 4.5, $dctoM !== '' && (float)$dctoM > 0 ? '$' . self::n($dctoM) : '', 0, 0, 'R');
             $pdf->Cell(32, 4.5, '$' . self::n($mont), 0, 1, 'R');
         }
         $pdf->Line(12, $pdf->GetY() + 0.5, 204, $pdf->GetY() + 0.5);
@@ -293,9 +334,10 @@ class MuestraPdfGenerator
         $pdf->Cell(36, 6, '$' . self::n($mntTot), 1, 1, 'R');
         $y = max($y + 4, $ty + 10);
 
-        // Acuse de recibo (cedibles y guías) — Ley 19.983
+        // Acuse de recibo (Ley 19.983) — SOLO en copias cedibles: el manual de
+        // muestras prohíbe el cuadro de acuse en los ejemplares no cedibles.
         $esCedible = strtoupper($copia) === 'CEDIBLE';
-        if ($esCedible || $tipo === 52) {
+        if ($esCedible) {
             $pdf->SetDrawColor(120, 120, 120);
             $pdf->Rect(12, $y, 192, 26);
             $pdf->SetFont('helvetica', 'B', 8);
@@ -316,12 +358,26 @@ class MuestraPdfGenerator
             $y += 30;
         }
 
-        // Timbre PDF417 — mínimo 2x5 cm, a ≥2 cm del borde izquierdo
+        // Timbre PDF417 — mínimo 2x5 cm (máx 4x9), a ≥2 cm del borde izquierdo.
+        // El manual recomienda incrustarlo como imagen PNG (su lector lo
+        // reconoce más rápido que los vectores); fallback a vector si no hay GD.
         $tedY = min($y + 2, 235.0);
-        $pdf->write2DBarcode($ted, 'PDF417', 20, $tedY, 60, 22, [
-            'border' => false, 'padding' => 0,
-            'fgcolor' => [0, 0, 0], 'bgcolor' => false,
-        ], 'N');
+        $pngOk = false;
+        if (function_exists('imagecreate')) {
+            require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
+            $bc  = new \TCPDF2DBarcode($ted, 'PDF417');
+            $png = $bc->getBarcodePngData(4, 4, [0, 0, 0]); // alta densidad de píxeles
+            if ($png !== false && $png !== '') {
+                $pdf->Image('@' . $png, 20, $tedY, 60, 22, 'PNG');
+                $pngOk = true;
+            }
+        }
+        if (!$pngOk) {
+            $pdf->write2DBarcode($ted, 'PDF417', 20, $tedY, 60, 22, [
+                'border' => false, 'padding' => 0,
+                'fgcolor' => [0, 0, 0], 'bgcolor' => false,
+            ], 'N');
+        }
         $pdf->SetFont('helvetica', 'B', 8);
         $pdf->SetXY(20, $tedY + 23);
         $pdf->Cell(60, 3.5, 'Timbre Electrónico SII', 0, 2, 'C');
@@ -339,6 +395,15 @@ class MuestraPdfGenerator
             $pdf->Cell(76, 9, $txt, 1, 0, 'C');
         }
 
-        return $pdf->Output('', 'S');
+        if ($pdf->getNumPages() !== 1) {
+            throw new Exception("La muestra T{$tipo}F{$folio} {$copia} ocupa más de una página");
+        }
+
+        $bytes = $pdf->Output('', 'S');
+        if (strlen($bytes) > 500 * 1024) {
+            throw new Exception("La muestra T{$tipo}F{$folio} {$copia} supera el máximo SII de 500 KB");
+        }
+
+        return $bytes;
     }
 }

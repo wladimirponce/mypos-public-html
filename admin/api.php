@@ -1475,11 +1475,21 @@ function generateDTE(array $data): array {
     // FORZADO DE RECEPTOR PARA CERTIFICACIÃ“N (Seguridad total)
     if (isset($globalContext) && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $tipoDTE = (int)($data['tipoDTE'] ?? 33);
-        $rutRecepCorrecto = in_array($tipoDTE, [39, 41]) ? '66666666-6' : '55555555-5';
-        
         if (!isset($data['receptor'])) $data['receptor'] = [];
-        $data['receptor']['rut'] = $rutRecepCorrecto;
-        if (empty($data['receptor']['nombre'])) $data['receptor']['nombre'] = 'EMPRESA DE PRUEBAS SII';
+        if ($tipoDTE === 52 && (int)($data['indTraslado'] ?? 0) === 5) {
+            $empresa = $globalContext->getEmpresa();
+            $data['receptor'] = [
+                'rut'       => $empresa['rut'] ?? '',
+                'nombre'    => $empresa['razon_social'] ?? '',
+                'giro'      => $empresa['giro'] ?? '',
+                'direccion' => $empresa['direccion_origen'] ?? '',
+                'comuna'    => $empresa['comuna_origen'] ?? '',
+                'ciudad'    => $empresa['ciudad_origen'] ?? '',
+            ];
+        } else {
+            $data['receptor']['rut'] = in_array($tipoDTE, [39, 41]) ? '66666666-6' : '55555555-5';
+            if (empty($data['receptor']['nombre'])) $data['receptor']['nombre'] = 'EMPRESA DE PRUEBAS SII';
+        }
     }
     global $globalContext;
     
@@ -7304,10 +7314,10 @@ function getCertCaseData(string $caseId): array {
         ],
         // SET BASICO FACTURACION (AtenciÃ³n 4832043)
         'F-4832043-1' => [
-            'tipoDTE' => 33, 'items' => [['nombre'=>'CajÃ³n AFECTO','cantidad'=>169,'precio'=>3531],['nombre'=>'Relleno AFECTO','cantidad'=>71,'precio'=>5882]]
+            'tipoDTE' => 33, 'items' => [['nombre'=>'Cajón AFECTO','cantidad'=>169,'precio'=>3531],['nombre'=>'Relleno AFECTO','cantidad'=>71,'precio'=>5882]]
         ],
         'F-4832043-2' => [
-            'tipoDTE' => 33, 'items' => [['nombre'=>'PaÃ±uelo AFECTO','cantidad'=>767,'precio'=>5937,'descuento'=>10],['nombre'=>'ITEM 2 AFECTO','cantidad'=>712,'precio'=>4988,'descuento'=>23]]
+            'tipoDTE' => 33, 'items' => [['nombre'=>'Pañuelo AFECTO','cantidad'=>767,'precio'=>5937,'descuento'=>10],['nombre'=>'ITEM 2 AFECTO','cantidad'=>712,'precio'=>4988,'descuento'=>23]]
         ],
         'F-4832043-3' => [
             'tipoDTE' => 33, 'items' => [['nombre'=>'Pintura B&W AFECTO','cantidad'=>65,'precio'=>6938],['nombre'=>'ITEM 2 AFECTO','cantidad'=>238,'precio'=>4041],['nombre'=>'ITEM 3 SERVICIO EXENTO','cantidad'=>1,'precio'=>35301,'exento'=>true]]
@@ -7323,7 +7333,7 @@ function getCertCaseData(string $caseId): array {
         ],
         'F-4832043-6' => [
             'tipoDTE' => 61, 'referencias' => [['tipo'=>33, 'folio'=>'REF_F2', 'codigo'=>1, 'razon'=>'DEVOLUCION DE MERCADERIAS']],
-            'items' => [['nombre'=>'PaÃ±uelo AFECTO','cantidad'=>282,'precio'=>5937],['nombre'=>'ITEM 2 AFECTO','cantidad'=>483,'precio'=>4988]]
+            'items' => [['nombre'=>'Pañuelo AFECTO','cantidad'=>282,'precio'=>5937],['nombre'=>'ITEM 2 AFECTO','cantidad'=>483,'precio'=>4988]]
         ],
         // Caso 7: NC que anula la factura del caso 3. Los Ã­tems deben replicar
         // exactamente los de F-4832043-3 para que los montos cuadren (NC de anulaciÃ³n).

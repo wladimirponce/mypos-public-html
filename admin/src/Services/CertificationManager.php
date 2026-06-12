@@ -50,6 +50,11 @@ class CertificationManager
     private const SIM_CANTIDAD     = 50;   // Cantidad objetivo a intentar enviar
     /** Mínimo para considerar la simulación completa (exigencia SII para bajo volumen) */
     private const SIM_MIN_CANTIDAD = 10;
+    /** Muestras exigidas por el upload SII para la etapa de simulación. */
+    private const MUESTRAS_SIMULACION = [33 => 3, 52 => 1, 56 => 1, 61 => 1];
+    /** DTE únicos exigidos por el set de prueba mostrado en el portal SII. */
+    private const MUESTRAS_PRUEBA = [33 => 4, 52 => 3, 56 => 1, 61 => 3];
+    private const TOTAL_PDFS_EXIGIDOS = 26; // 17 prueba + 9 simulación
 
     public function __construct(Context $context)
     {
@@ -1710,10 +1715,9 @@ class CertificationManager
     // =========================================================
 
     /**
-     * Selecciona los DTEs para las muestras impresas (set de pruebas + hasta 10
-     * de simulación + set de boletas). Devuelve solo los XML; el render lo hace
-     * el ÚNICO renderer (jscript.js → DTE.renderMuestras) — misma fuente de
-     * verdad que la impresión real.
+     * Selecciona únicamente los DTE exigidos por el upload de muestras:
+     * set de pruebas sin boletas + muestras exactas de simulación.
+     * Elimina duplicados por tipo y folio antes de renderizar.
      * @return array<int,array{label:string,tipo:int,folio:int,xml:string}>
      */
     public function getMuestrasXmls(bool $withRaw = false): array
@@ -1721,18 +1725,32 @@ class CertificationManager
         $state  = $this->loadState();
         $tmpDir = $this->context->getTmpPath();
         $dtes   = [];
+        $seen   = [];
+        $pruebasPorTipo = [];
         // 'raw' = bytes ISO-8859-1 originales del archivo: el PDF417 de las
         // muestras PDF debe contener el TED EXACTO firmado (re-codificarlo a
         // UTF-8 invalida la firma). NO incluir en respuestas JSON.
-        $add = function (string $label, int $tipo, int $folio, string $xmlContent) use (&$dtes, $withRaw) {
+        $add = function (string $label, int $tipo, int $folio, string $xmlContent) use (&$dtes, &$seen, $withRaw) {
+            $key = "{$tipo}:{$folio}";
+            if (isset($seen[$key])) {
+                return false;
+            }
+            $seen[$key] = true;
+
+            // Algunos XML firmados ya llegan como UTF-8 aunque declaren Latin-1.
+            // Convertirlos siempre genera mojibake (CajÃ³n/Pañuelo) en el PDF.
+            $xmlUtf8 = preg_match('//u', $xmlContent)
+                ? $xmlContent
+                : mb_convert_encoding($xmlContent, 'UTF-8', 'ISO-8859-1');
             $row = [
                 'label' => $label,
                 'tipo'  => $tipo,
                 'folio' => $folio,
-                'xml'   => mb_convert_encoding($xmlContent, 'UTF-8', 'ISO-8859-1'),
+                'xml'   => $xmlUtf8,
             ];
             if ($withRaw) $row['raw'] = $xmlContent;
             $dtes[] = $row;
+            return true;
         };
 
         // Set de Pruebas
@@ -1740,33 +1758,26 @@ class CertificationManager
             $info = $state['pruebas'][$caseId] ?? null;
             if (!$info || $info['status'] !== 'ok' || !$info['folio']) continue;
             $tipo    = (int)($info['tipo'] ?? $this->detectTipo($caseId));
+            if (in_array($tipo, [39, 41], true)) continue;
+            if (!isset(self::MUESTRAS_PRUEBA[$tipo])) continue;
+            if (($pruebasPorTipo[$tipo] ?? 0) >= self::MUESTRAS_PRUEBA[$tipo]) continue;
             $xmlFile = $tmpDir . "dte_T{$tipo}F{$info['folio']}.xml";
             if (file_exists($xmlFile)) {
-                $add($caseId, $tipo, (int)$info['folio'], file_get_contents($xmlFile));
-            }
-        }
-
-        // Simulación: hasta 10 docs representativos
-        $simCount = 0;
-        foreach (self::SIM_TIPOS as $tipo) {
-            $key     = "t$tipo";
-            $simInfo = $state['simulacion'][$key] ?? null;
-            foreach (array_slice($simInfo['folios_ok'] ?? [], 0, 3) as $folio) {
-                if ($simCount >= 10) break;
-                $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
-                if (file_exists($xmlFile)) {
-                    $add("SIM-T{$tipo}", (int)$tipo, (int)$folio, file_get_contents($xmlFile));
-                    $simCount++;
+                if ($add($caseId, $tipo, (int)$info['folio'], file_get_contents($xmlFile))) {
+                    $pruebasPorTipo[$tipo] = ($pruebasPorTipo[$tipo] ?? 0) + 1;
                 }
             }
         }
 
-        // Set de boletas de certificación: cert_boletas/dte_T39F*.xml
-        $boletasDir = $tmpDir . 'cert_boletas/';
-        if (is_dir($boletasDir)) {
-            foreach (glob($boletasDir . 'dte_T*F*.xml') ?: [] as $bxml) {
-                if (preg_match('/dte_T(\d+)F(\d+)\.xml$/', $bxml, $mm)) {
-                    $add('BOLETA SET', (int)$mm[1], (int)$mm[2], file_get_contents($bxml));
+        // Simulación: el portal pide 3 facturas y una muestra por cada otro
+        // tipo certificado (guía, nota de débito y nota de crédito).
+        foreach (self::MUESTRAS_SIMULACION as $tipo => $cantidad) {
+            $key     = "t$tipo";
+            $simInfo = $state['simulacion'][$key] ?? null;
+            foreach (array_slice($simInfo['folios_ok'] ?? [], 0, $cantidad) as $folio) {
+                $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
+                if (file_exists($xmlFile)) {
+                    $add("SIM-T{$tipo}", (int)$tipo, (int)$folio, file_get_contents($xmlFile));
                 }
             }
         }
@@ -1786,19 +1797,58 @@ class CertificationManager
         if (!is_dir($outDir)) @mkdir($outDir, 0755, true);
         foreach (glob($outDir . '*.pdf') ?: [] as $old) @unlink($old);
 
-        $files  = [];
-        $errors = [];
-        foreach ($this->getMuestrasXmls(true) as $dte) {
+        $files    = [];
+        $errors   = [];
+        $muestras = $this->getMuestrasXmls(true);
+        foreach (self::MUESTRAS_PRUEBA as $tipo => $cantidad) {
+            $disponibles = count(array_filter(
+                $muestras,
+                fn(array $dte): bool => (int)$dte['tipo'] === $tipo
+                    && !str_starts_with((string)$dte['label'], 'SIM-')
+            ));
+            if ($disponibles < $cantidad) {
+                $errors[] = "Faltan muestras de prueba T{$tipo}: se requieren {$cantidad} y hay {$disponibles}.";
+            }
+        }
+        foreach (self::MUESTRAS_SIMULACION as $tipo => $cantidad) {
+            $disponibles = count(array_filter(
+                $muestras,
+                fn(array $dte): bool => (int)$dte['tipo'] === $tipo
+                    && str_starts_with((string)$dte['label'], 'SIM-')
+            ));
+            if ($disponibles < $cantidad) {
+                $errors[] = "Faltan muestras de simulación T{$tipo}: se requieren {$cantidad} y hay {$disponibles}.";
+            }
+        }
+
+        $generated = [];
+        foreach ($muestras as $dte) {
+            // Las boletas (39/41) NO van en el upload de muestras del proceso de
+            // factura de mercado: su certificación es un trámite aparte y el
+            // validador las rechaza ("Validación" roja) por no pertenecer a los
+            // envíos de este proceso.
+            if (in_array((int)$dte['tipo'], [39, 41], true)) continue;
             $copias = ['TRIBUTARIA'];
             // Guía de traslado interno (sin venta) no requiere cedible
             $esGuiaInterna = false;
             if ((int)$dte['tipo'] === 52 && preg_match('/<IndTraslado>\s*5\s*<\/IndTraslado>/', $dte['raw'])) {
                 $esGuiaInterna = true;
             }
-            if (in_array((int)$dte['tipo'], MuestraPdfGenerator::TIPOS_CEDIBLE, true) && !$esGuiaInterna) {
+            $esGuiaSimulacion = (int)$dte['tipo'] === 52
+                && str_starts_with((string)$dte['label'], 'SIM-');
+            if (in_array((int)$dte['tipo'], MuestraPdfGenerator::TIPOS_CEDIBLE, true)
+                && !$esGuiaInterna
+                && !$esGuiaSimulacion
+            ) {
                 $copias[] = 'CEDIBLE';
             }
             foreach ($copias as $copia) {
+                $pdfKey = "{$dte['tipo']}:{$dte['folio']}:{$copia}";
+                if (isset($generated[$pdfKey])) {
+                    continue;
+                }
+                $generated[$pdfKey] = true;
+
                 try {
                     $pdfBytes = $gen->render($dte, $opts, $copia);
                     $slug = preg_replace('/[^A-Za-z0-9_-]+/', '_', $dte['label']);
@@ -1818,6 +1868,10 @@ class CertificationManager
                 }
             }
         }
+        if (count($files) !== self::TOTAL_PDFS_EXIGIDOS) {
+            $errors[] = 'El portal SII exige exactamente ' . self::TOTAL_PDFS_EXIGIDOS
+                . ' PDF (17 de prueba y 9 de simulación); se generaron ' . count($files) . '.';
+        }
 
         $state = $this->loadState();
         $state['muestras'] = [
@@ -1827,7 +1881,11 @@ class CertificationManager
         ];
         $this->saveState($state);
 
-        return ['ok' => !empty($files), 'archivos' => $files, 'errores' => $errors];
+        return [
+            'ok' => count($files) === self::TOTAL_PDFS_EXIGIDOS && empty($errors),
+            'archivos' => $files,
+            'errores' => $errors,
+        ];
     }
 
     private function detectTipo(string $caseId): int
