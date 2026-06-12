@@ -180,11 +180,13 @@ final class CajaRepository
     {
         $statement = $this->connection->prepare(
             'INSERT INTO caja_movimientos (
-                empresa_id, sucursal_id, caja_apertura_id, usuario_id, tipo, concepto, monto, observacion
+                empresa_id, sucursal_id, caja_apertura_id, usuario_id, tipo, concepto, monto, observacion, referencia_tipo, referencia_id
              ) VALUES (
-                :empresa_id, :sucursal_id, :caja_apertura_id, :usuario_id, :tipo, :concepto, :monto, :observacion
+                :empresa_id, :sucursal_id, :caja_apertura_id, :usuario_id, :tipo, :concepto, :monto, :observacion, :referencia_tipo, :referencia_id
              )'
         );
+        $data['referencia_tipo'] = $data['referencia_tipo'] ?? null;
+        $data['referencia_id'] = $data['referencia_id'] ?? null;
         $statement->execute($data);
 
         return (int) $this->connection->lastInsertId();
@@ -194,7 +196,7 @@ final class CajaRepository
     {
         $sql = 'SELECT cm.id, cm.empresa_id, cm.sucursal_id, cm.caja_apertura_id,
                        ca.caja_id, cm.usuario_id, cm.tipo, cm.concepto, cm.monto,
-                       cm.observacion, cm.created_at
+                       cm.observacion, cm.referencia_tipo, cm.referencia_id, cm.created_at
                 FROM caja_movimientos cm
                 INNER JOIN caja_aperturas ca ON ca.id = cm.caja_apertura_id
                 WHERE cm.empresa_id = :empresa_id AND ca.caja_id = :caja_id';
@@ -257,13 +259,15 @@ final class CajaRepository
         $statement = $this->connection->prepare(
             'SELECT
                 COALESCE(SUM(CASE WHEN tipo = \'INGRESO\' THEN monto ELSE 0 END), 0) AS ingresos,
-                COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' THEN monto ELSE 0 END), 0) AS retiros
+                COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' THEN monto ELSE 0 END), 0) AS retiros,
+                COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' AND referencia_tipo = \'EGRESO\' THEN monto ELSE 0 END), 0) AS egresos_efectivo,
+                COALESCE(SUM(CASE WHEN tipo = \'RETIRO\' AND (referencia_tipo IS NULL OR referencia_tipo <> \'EGRESO\') THEN monto ELSE 0 END), 0) AS retiros_operativos
              FROM caja_movimientos
              WHERE empresa_id = :empresa_id AND caja_apertura_id = :caja_apertura_id'
         );
         $statement->execute(['empresa_id' => $empresaId, 'caja_apertura_id' => $openingId]);
 
-        return $statement->fetch() ?: ['ingresos' => 0, 'retiros' => 0];
+        return $statement->fetch() ?: ['ingresos' => 0, 'retiros' => 0, 'egresos_efectivo' => 0, 'retiros_operativos' => 0];
     }
 
     public function insertClosure(array $data): int
@@ -272,12 +276,12 @@ final class CajaRepository
             'INSERT INTO caja_cierres (
                 empresa_id, sucursal_id, caja_id, caja_apertura_id, apertura_id, usuario_id, fecha_cierre,
                 monto_inicial, total_ventas_efectivo, total_ventas_tarjeta, total_ventas_transferencia,
-                total_ventas_otros, total_ingresos, total_retiros, monto_esperado, monto_contado,
+                total_ventas_otros, total_ingresos, total_retiros, total_retiros_operativos, total_egresos_efectivo, monto_esperado, monto_contado,
                 monto_declarado, monto_sistema, diferencia, observacion, observacion_cierre
              ) VALUES (
                 :empresa_id, :sucursal_id, :caja_id, :caja_apertura_id, :apertura_id, :usuario_id, CURRENT_TIMESTAMP,
                 :monto_inicial, :total_ventas_efectivo, :total_ventas_tarjeta, :total_ventas_transferencia,
-                :total_ventas_otros, :total_ingresos, :total_retiros, :monto_esperado, :monto_contado,
+                :total_ventas_otros, :total_ingresos, :total_retiros, :total_retiros_operativos, :total_egresos_efectivo, :monto_esperado, :monto_contado,
                 :monto_declarado, :monto_sistema, :diferencia, :observacion, :observacion_cierre
              )'
         );
@@ -302,7 +306,7 @@ final class CajaRepository
                        cc.caja_apertura_id, cc.apertura_id, cc.usuario_id, u.nombre AS usuario,
                        cc.fecha_cierre, cc.monto_inicial, cc.total_ventas_efectivo,
                        cc.total_ventas_tarjeta, cc.total_ventas_transferencia,
-                       cc.total_ventas_otros, cc.total_ingresos, cc.total_retiros,
+                       cc.total_ventas_otros, cc.total_ingresos, cc.total_retiros, cc.total_retiros_operativos, cc.total_egresos_efectivo,
                        cc.monto_esperado, cc.monto_contado, cc.diferencia, cc.observacion_cierre
                 FROM caja_cierres cc
                 INNER JOIN cajas c ON c.id = cc.caja_id
@@ -341,7 +345,7 @@ final class CajaRepository
                     cc.caja_apertura_id, cc.apertura_id, cc.usuario_id, u.nombre AS usuario,
                     cc.fecha_cierre, cc.monto_inicial, cc.total_ventas_efectivo,
                     cc.total_ventas_tarjeta, cc.total_ventas_transferencia,
-                    cc.total_ventas_otros, cc.total_ingresos, cc.total_retiros,
+                    cc.total_ventas_otros, cc.total_ingresos, cc.total_retiros, cc.total_retiros_operativos, cc.total_egresos_efectivo,
                     cc.monto_esperado, cc.monto_contado, cc.diferencia,
                     cc.observacion_cierre, ca.fecha_apertura, ca.observacion_apertura
              FROM caja_cierres cc

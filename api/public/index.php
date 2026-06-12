@@ -30,6 +30,7 @@ use Mypos\Controllers\EmpleadoController;
 use Mypos\Controllers\DocumentoTributarioController;
 use Mypos\Controllers\DispositivoController;
 use Mypos\Controllers\DteController;
+use Mypos\Controllers\EgresoController;
 use Mypos\Controllers\FolioController;
 use Mypos\Controllers\IaController;
 use Mypos\Controllers\ImportacionCatalogoController;
@@ -505,6 +506,11 @@ $router->post('/api/v1/cajas/{id}/abrir', protectedRoute([$cajaController, 'open
 $router->post('/api/v1/cajas/movimientos', protectedRoute([$cajaController, 'movement'], 'cajas.movimientos'));
 $router->get('/api/v1/cajas/{id}/movimientos', protectedRoute([$cajaController, 'movements'], 'cajas.ver'));
 $router->post('/api/v1/cajas/aperturas/{id}/cerrar', protectedRoute([$cajaController, 'close'], 'cajas.cerrar'));
+
+$egresoController = new EgresoController();
+$router->get('/api/v1/egresos', protectedRoute([$egresoController, 'index'], 'egresos.ver'));
+$router->post('/api/v1/egresos', protectedRoute([$egresoController, 'store'], 'egresos.crear'));
+$router->post('/api/v1/egresos/{id}/anular', protectedRoute([$egresoController, 'cancel'], 'egresos.anular'));
 
 $ventaController = new VentaController();
 $router->post('/api/v1/ventas', protectedRoute([$ventaController, 'store'], 'ventas.crear'));

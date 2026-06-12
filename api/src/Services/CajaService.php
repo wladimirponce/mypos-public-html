@@ -180,6 +180,8 @@ final class CajaService
             'total_ventas_otros' => (int) $payments['otros'],
             'total_ingresos' => $income,
             'total_retiros' => $withdrawals,
+            'total_retiros_operativos' => (int) $movements['retiros_operativos'],
+            'total_egresos_efectivo' => (int) $movements['egresos_efectivo'],
             'saldo_actual_estimado' => $initial + $cash + $income - $withdrawals,
         ];
     }
@@ -294,6 +296,8 @@ final class CajaService
                 'total_ventas_otros' => (int) $payments['otros'],
                 'total_ingresos' => $income,
                 'total_retiros' => $withdrawals,
+                'total_retiros_operativos' => (int) $movements['retiros_operativos'],
+                'total_egresos_efectivo' => (int) $movements['egresos_efectivo'],
                 'monto_esperado' => $expected,
                 'monto_contado' => $countedAmount,
                 'monto_declarado' => $countedAmount,
@@ -333,6 +337,8 @@ final class CajaService
                 'total_ventas_efectivo' => $cash,
                 'total_ingresos' => $income,
                 'total_retiros' => $withdrawals,
+                'total_retiros_operativos' => (int) $movements['retiros_operativos'],
+                'total_egresos_efectivo' => (int) $movements['egresos_efectivo'],
                 'monto_esperado' => $expected,
                 'monto_contado' => $countedAmount,
                 'diferencia' => $difference,
