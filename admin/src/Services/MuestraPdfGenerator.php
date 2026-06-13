@@ -50,6 +50,8 @@ class MuestraPdfGenerator
         3 => 'Despacho por cuenta del emisor a otras instalaciones',
     ];
 
+    private const FORMATO_HOJA_SII = [215, 330];
+
     /** Tipos que requieren ejemplar CEDIBLE además del tributario */
     public const TIPOS_CEDIBLE = [33, 34, 43, 46, 52];
 
@@ -148,7 +150,7 @@ class MuestraPdfGenerator
         }
 
         // ── PDF ──────────────────────────────────────────────────────────────
-        $pdf = new class('P', 'mm', 'A4', true, 'UTF-8', false) extends \TCPDF {
+        $pdf = new class('P', 'mm', self::FORMATO_HOJA_SII, true, 'UTF-8', false) extends \TCPDF {
             public function disableTcpdfLink(): void
             {
                 $this->tcpdflink = false;
@@ -162,15 +164,6 @@ class MuestraPdfGenerator
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
         $pdf->AddPage();
-
-        // Banner de certificación (discreto)
-        if (!empty($opts['certBanner'])) {
-            $pdf->SetFont('helvetica', '', 7);
-            $pdf->SetTextColor(150, 150, 150);
-            $pdf->SetXY(12, 5);
-            $pdf->Cell(120, 3, 'DOCUMENTO DE CERTIFICACIÓN — SIN VALIDEZ TRIBUTARIA', 0, 0, 'L');
-            $pdf->SetTextColor(0, 0, 0);
-        }
 
         // Emisor (izquierda)
         $pdf->SetXY(12, 12);
@@ -237,7 +230,8 @@ class MuestraPdfGenerator
                     $linea = 'Referencia certificación SII: SET';
                     if ($rznRef !== '') $linea .= ' - ' . $rznRef;
                 } else {
-                    $linea = "Doc: {$tpoRef}";
+                    $tipoRefNombre = self::TIPO_NOMBRE[(int)$tpoRef] ?? $tpoRef;
+                    $linea = "Documento: {$tipoRefNombre}";
                     if ($folRef !== '') $linea .= "  Folio {$folRef}";
                     if ($fchRef !== '') $linea .= "  ({$fchRef})";
                     if ($codRef !== '') $linea .= "  Cód: {$codRef}";

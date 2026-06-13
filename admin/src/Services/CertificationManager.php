@@ -861,7 +861,7 @@ class CertificationManager
         $foliosXml    = $state['simulacion'][$key]['folios_xml']   ?? [];
         $foliosFailed = $state['simulacion'][$key]['folios_failed'] ?? [];
         $muestrasRequeridas = self::MUESTRAS_SIMULACION[$tipo] ?? 1;
-        $foliosConXml = $this->simulationFoliosWithXml($tipo, array_merge($foliosOk, $foliosXml));
+        $foliosConXml = $this->simulationFoliosWithXml($tipo, $foliosOk);
 
         // El estado puede sobrevivir a una limpieza/migración de tmp.
         if (($state['simulacion'][$key]['status'] ?? '') === 'ok'
@@ -882,11 +882,13 @@ class CertificationManager
         $remaining    = $objetivo - $done;
 
         if ($remaining <= 0) {
-            $state['simulacion'][$key]['status'] = 'ok';
+            $state['simulacion'][$key]['status'] = count($foliosOk) >= ($tipo === 33 ? self::SIM_MIN_CANTIDAD : 1)
+                ? 'ok'
+                : 'partial';
             $this->saveState($state);
             return [
                 'skipped' => true,
-                'mensaje' => "Simulación tipo $tipo ya tiene $done docs.",
+                'mensaje' => "Simulación tipo $tipo ya tiene XML disponible para su muestra.",
                 'enviados' => count($foliosOk),
                 'xml_generados' => count($foliosConXml),
                 'errores' => array_slice($foliosFailed, -5),
@@ -983,6 +985,7 @@ class CertificationManager
                 $dte = generateDTE($payload);
 
                 if (empty($dte['ok'])) throw new Exception($dte['error'] ?? 'Error DTE');
+                file_put_contents($this->simulationXmlPath($tipo, (int)$dte['folio']), $dte['xml']);
                 $foliosXml[] = (int)$dte['folio'];
                 $foliosXml = array_values(array_unique($foliosXml));
 
@@ -990,6 +993,10 @@ class CertificationManager
 
                 if ($send['ok']) {
                     $foliosOk[] = $dte['folio'];
+                    $foliosFailed = array_values(array_filter(
+                        $foliosFailed,
+                        fn(array $error): bool => (int)($error['folio'] ?? 0) !== (int)$dte['folio']
+                    ));
                 } else {
                     $foliosFailed[] = ['folio' => $dte['folio'], 'error' => $send['error'] ?? '?'];
                 }
@@ -1015,7 +1022,8 @@ class CertificationManager
         // hasta $cantidad (50) pero acepta menos si el CAF se agota antes.
         $minimo = $tipo === 33 ? self::SIM_MIN_CANTIDAD : 1;
         $allDone = count($foliosOk) >= $minimo
-            && count($this->simulationFoliosWithXml($tipo, array_merge($foliosOk, $foliosXml))) >= $muestrasRequeridas;
+            && count($this->simulationFoliosWithXml($tipo, $foliosOk)) >= $muestrasRequeridas;
+        $foliosFailed = $this->uniqueSimulationErrors($foliosFailed);
         $state['simulacion'][$key] = [
             'status'       => $allDone ? 'ok' : 'partial',
             'tipo'         => $tipo,
@@ -1823,12 +1831,14 @@ class CertificationManager
             $key     = "t$tipo";
             $simInfo = $state['simulacion'][$key] ?? null;
             $agregadas = 0;
-            $foliosDisponibles = array_values(array_unique(array_merge(
-                $simInfo['folios_ok'] ?? [],
-                $simInfo['folios_xml'] ?? []
-            )));
+            // El upload SII valida que el documento haya sido recibido. Por eso
+            // solo son elegibles folios cuyo envío terminó correctamente.
+            $foliosDisponibles = array_values(array_unique($simInfo['folios_ok'] ?? []));
             foreach ($foliosDisponibles as $folio) {
-                $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
+                $xmlFile = $this->simulationXmlPath((int)$tipo, (int)$folio);
+                if (!file_exists($xmlFile)) {
+                    $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
+                }
                 if (file_exists($xmlFile)) {
                     if ($add("SIM-T{$tipo}", (int)$tipo, (int)$folio, file_get_contents($xmlFile))) {
                         $agregadas++;
@@ -1968,8 +1978,27 @@ class CertificationManager
 
         return array_values(array_filter(
             array_map('intval', $folios),
-            fn(int $folio): bool => $folio > 0 && file_exists($tmpDir . "dte_T{$tipo}F{$folio}.xml")
+            fn(int $folio): bool => $folio > 0 && (
+                file_exists($this->simulationXmlPath($tipo, $folio))
+                || file_exists($tmpDir . "dte_T{$tipo}F{$folio}.xml")
+            )
         ));
+    }
+
+    private function simulationXmlPath(int $tipo, int $folio): string
+    {
+        return $this->context->getTmpPath() . "sim_dte_T{$tipo}F{$folio}.xml";
+    }
+
+    private function uniqueSimulationErrors(array $errors): array
+    {
+        $unique = [];
+        foreach ($errors as $error) {
+            $key = (int)($error['folio'] ?? 0) . ':' . (string)($error['error'] ?? '');
+            $unique[$key] = $error;
+        }
+
+        return array_values($unique);
     }
 
     private function detectTipo(string $caseId): int

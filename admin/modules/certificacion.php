@@ -456,6 +456,11 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
             </button>
             <span class="cert-badge cb-pending" id="sim-extra-badge">Pendiente</span>
           </div>
+          <div style="display:flex; gap:6px; margin-top:8px">
+            <button class="d-btn d-btn-sm d-btn-outline flex-fill" onclick="certSimulacion(52)">T52</button>
+            <button class="d-btn d-btn-sm d-btn-outline flex-fill" onclick="certSimulacion(56)">Reintentar T56</button>
+            <button class="d-btn d-btn-sm d-btn-outline flex-fill" onclick="certSimulacion(61)">T61</button>
+          </div>
           <div id="sim-extra-info" style="font-size:.68rem; color:var(--c-text-muted); margin-top:6px"></div>
         </div>
       </div>
@@ -526,9 +531,9 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
   </div>
   <div class="paso-body hidden" id="pbody-7">
     <p style="font-size:.78rem; color:var(--c-text-muted); margin-bottom:12px">
-      Genera <strong>un PDF por documento</strong> (con copia CEDIBLE donde aplica), con texto real
-      y timbre PDF417 nativo — listos para subir de a uno en
-      "Upload de muestras impresas" del menú de postulantes (maullin).
+      Genera <strong>un PDF por documento ya emitido y recibido por el SII</strong>
+      (con copia CEDIBLE donde aplica), con texto real y timbre PDF417 nativo.
+      Esta sección no emite DTE ni consume folios.
     </p>
     <button class="d-btn d-btn-info" onclick="certMuestrasPdf()">
       <i class="bi bi-file-earmark-pdf-fill"></i> Generar PDFs de Muestras (1 por doc)
@@ -536,6 +541,10 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
     <button class="d-btn d-btn-outline ms-2" onclick="certMuestras()"
       title="Render HTML en el navegador (vista previa / impresión manual)">
       <i class="bi bi-printer-fill"></i> Vista previa HTML
+    </button>
+    <button class="d-btn d-btn-primary ms-2" onclick="certMuestrasPdfDescargarExistentes(this)"
+      title="Descarga al disco local los PDF que ya fueron generados, sin emitir documentos ni consumir folios">
+      <i class="bi bi-download"></i> Descargar PDFs ya generados
     </button>
     <a href="https://www4.sii.cl/pdfdteInternet/" target="_blank"
        class="d-btn d-btn-outline d-btn-sm ms-2">
@@ -1299,8 +1308,9 @@ async function certSimulacion(tipo) {
   const info     = document.getElementById('sim-t'+tipo+'-info');
   if (badge) { badge.className='cert-badge cb-running'; badge.textContent='⟳ Enviando…'; }
   if (info)  info.textContent = '';
-  if (statusEl) statusEl.innerHTML = `<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Enviando simulación T${tipo} (50 docs)… puede tardar varios minutos.</div>`;
-  log(`Iniciando simulación T${tipo} (50 docs)…`, 'info');
+  const cantidad = tipo === 33 ? 50 : 1;
+  if (statusEl) statusEl.innerHTML = `<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Enviando simulación T${tipo} (${cantidad} doc)… puede tardar varios minutos.</div>`;
+  log(`Iniciando simulación T${tipo} (${cantidad} doc)…`, 'info');
   try {
     const res = await api('cert_run_sim', { tipo });
     if (res.ok) {
@@ -1403,15 +1413,8 @@ async function certMuestrasPdf() {
     const res = await api('cert_muestras_pdfgen');
     if (!res.ok || !(res.archivos||[]).length) {
       const errores = res.errores || [];
-      const faltanSimulaciones = errores.some(e => String(e).includes('muestras de simulación'));
-      const accion = faltanSimulaciones
-        ? `<div class="mt-2"><button class="d-btn d-btn-sm d-btn-primary" onclick="certGenerarSimulacionesFaltantes(this)">`
-          + `<i class="bi bi-play-fill"></i> Generar simulaciones faltantes</button></div>`
-        : '';
-      const diagnostico = window._simMuestrasDiagnostico
-        ? `<div class="d-alert warning mt-2"><strong>Detalle de simulación:</strong><br>${window._simMuestrasDiagnostico}</div>`
-        : '';
-      st.innerHTML = `<div class="d-alert danger">${errores.join('<br>') || res.error || 'No se generaron PDFs. Ejecute primero el Set de Pruebas.'}${accion}</div>${diagnostico}`;
+      st.innerHTML = `<div class="d-alert danger">${errores.join('<br>') || res.error || 'No se generaron PDFs.'}`
+        + `<br><strong>Esta sección solo imprime documentos ya emitidos.</strong> Complete los documentos faltantes en su etapa correspondiente y vuelva a generar los PDF.</div>`;
       log('Error generando PDFs de muestras', 'error');
       return;
     }
@@ -1425,7 +1428,7 @@ async function certMuestrasPdf() {
     const errs = (res.errores||[]).length
       ? `<div class="d-alert warning mt-1">${res.errores.join('<br>')}</div>` : '';
     st.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> `
-      + `${res.archivos.length} PDF(s) generados. Súbalos de a uno en el portal SII. `
+      + `${res.archivos.length} PDF(s) generados desde documentos ya emitidos. Súbalos de a uno en el portal SII. `
       + `<button class="d-btn d-btn-sm d-btn-primary ms-2" onclick="certMuestrasPdfDlAll()">`
       + `<i class="bi bi-download"></i> Descargar todos como archivos individuales</button></div>`
       + `<div style="max-height:260px; overflow-y:auto"><table style="font-size:.72rem; width:100%">${rows}</table></div>${errs}`;
@@ -1439,28 +1442,24 @@ async function certMuestrasPdf() {
   }
 }
 
-async function certGenerarSimulacionesFaltantes(btn) {
+async function certMuestrasPdfDescargarExistentes(btn) {
   const st = document.getElementById('muestras-pdf-status');
   if (btn) btn.disabled = true;
-  st.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Generando T52, T56 y T61 faltantes…</div>';
-  log('Generando simulaciones faltantes para muestras PDF…', 'info');
+  st.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Preparando descarga de PDF ya generados…</div>';
   try {
-    const res = await api('cert_sim_all');
-    const tipos = [52, 56, 61];
-    const detalles = tipos.map(tipo => {
-      const r = (res.resultados || {})['sim_' + tipo] || {};
-      const errores = (r.errores || []).map(e => e.error || String(e)).filter(Boolean);
-      return `<strong>T${tipo}</strong>: ${r.enviados || 0} enviado(s), ${r.xml_generados || 0} XML generado(s)`
-        + (errores.length ? `<br><small>${errores.join('<br>')}</small>` : '');
-    }).join('<br>');
-    window._simMuestrasDiagnostico = detalles;
-    st.innerHTML = `<div class="d-alert info">${detalles}<br><span class="spinner-border spinner-border-sm me-2 mt-2"></span> Generando nuevamente los PDF individuales…</div>`;
-    log('Simulaciones procesadas. Regenerando PDF individuales…', 'info');
-    await loadState();
-    await certMuestrasPdf();
+    const res = await api('cert_muestras_pdflist');
+    const files = res.archivos || [];
+    if (!files.length) {
+      st.innerHTML = '<div class="d-alert warning">No hay PDF generados en el servidor. Presione primero <strong>Generar PDFs de Muestras</strong>.</div>';
+      return;
+    }
+    window._muestrasPdfFiles = files;
+    certMuestrasPdfDlAll();
+    st.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> Descarga iniciada: ${files.length} PDF individuales.</div>`;
+    log(`Descarga local iniciada: ${files.length} PDF individuales.`, 'ok');
   } catch(e) {
-    st.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
-    log('Error generando simulaciones faltantes: ' + e.message, 'error');
+    st.innerHTML = `<div class="d-alert danger">No fue posible descargar los PDF: ${e.message}</div>`;
+    log('Error descargando PDF existentes: ' + e.message, 'error');
   } finally {
     if (btn) btn.disabled = false;
   }

@@ -515,6 +515,15 @@ try {
             ]));
             break;
 
+        // ── Lista PDF ya generados: no emite DTE ni consume folios ──
+        case 'cert_muestras_pdflist':
+            ob_clean();
+            $pdfDir = $globalContext->getTmpPath() . 'muestras_pdf/';
+            $files = array_map('basename', glob($pdfDir . '*.pdf') ?: []);
+            sort($files, SORT_NATURAL);
+            echo json_encode(['ok' => true, 'archivos' => $files]);
+            break;
+
         // ── Descarga individual de una muestra PDF generada ──
         case 'cert_muestras_pdfdl':
             $f    = basename((string)($_GET['file'] ?? ''));
