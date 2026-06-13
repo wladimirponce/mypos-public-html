@@ -857,14 +857,22 @@ class CertificationManager
 
         $key = "t$tipo";
 
-        if (($state['simulacion'][$key]['status'] ?? '') === 'ok') {
+        $foliosOk     = $state['simulacion'][$key]['folios_ok']    ?? [];
+        $foliosFailed = $state['simulacion'][$key]['folios_failed'] ?? [];
+        $muestrasRequeridas = self::MUESTRAS_SIMULACION[$tipo] ?? 1;
+        $foliosConXml = $this->simulationFoliosWithXml($tipo, $foliosOk);
+
+        // El estado puede sobrevivir a una limpieza/migración de tmp.
+        if (($state['simulacion'][$key]['status'] ?? '') === 'ok'
+            && count($foliosConXml) >= $muestrasRequeridas
+        ) {
             return ['skipped' => true, 'mensaje' => "Simulación tipo $tipo ya completada."];
         }
 
-        $foliosOk     = $state['simulacion'][$key]['folios_ok']    ?? [];
-        $foliosFailed = $state['simulacion'][$key]['folios_failed'] ?? [];
         $done         = count($foliosOk);
-        $remaining    = $cantidad - $done;
+        $faltanMuestras = max(0, $muestrasRequeridas - count($foliosConXml));
+        $objetivo     = max($cantidad, $done + $faltanMuestras);
+        $remaining    = $objetivo - $done;
 
         if ($remaining <= 0) {
             $state['simulacion'][$key]['status'] = 'ok';
@@ -990,7 +998,8 @@ class CertificationManager
         // Completo si se alcanzó el mínimo SII (10 docs). El sistema intenta
         // hasta $cantidad (50) pero acepta menos si el CAF se agota antes.
         $minimo = $tipo === 33 ? self::SIM_MIN_CANTIDAD : 1;
-        $allDone = count($foliosOk) >= $minimo;
+        $allDone = count($foliosOk) >= $minimo
+            && count($this->simulationFoliosWithXml($tipo, $foliosOk)) >= $muestrasRequeridas;
         $state['simulacion'][$key] = [
             'status'       => $allDone ? 'ok' : 'partial',
             'tipo'         => $tipo,
@@ -1794,10 +1803,14 @@ class CertificationManager
         foreach (self::MUESTRAS_SIMULACION as $tipo => $cantidad) {
             $key     = "t$tipo";
             $simInfo = $state['simulacion'][$key] ?? null;
-            foreach (array_slice($simInfo['folios_ok'] ?? [], 0, $cantidad) as $folio) {
+            $agregadas = 0;
+            foreach (($simInfo['folios_ok'] ?? []) as $folio) {
                 $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
                 if (file_exists($xmlFile)) {
-                    $add("SIM-T{$tipo}", (int)$tipo, (int)$folio, file_get_contents($xmlFile));
+                    if ($add("SIM-T{$tipo}", (int)$tipo, (int)$folio, file_get_contents($xmlFile))) {
+                        $agregadas++;
+                    }
+                    if ($agregadas >= $cantidad) break;
                 }
             }
         }
@@ -1921,6 +1934,19 @@ class CertificationManager
         }
 
         return 0;
+    }
+
+    /**
+     * @return int[]
+     */
+    private function simulationFoliosWithXml(int $tipo, array $folios): array
+    {
+        $tmpDir = $this->context->getTmpPath();
+
+        return array_values(array_filter(
+            array_map('intval', $folios),
+            fn(int $folio): bool => $folio > 0 && file_exists($tmpDir . "dte_T{$tipo}F{$folio}.xml")
+        ));
     }
 
     private function detectTipo(string $caseId): int

@@ -1402,7 +1402,13 @@ async function certMuestrasPdf() {
   try {
     const res = await api('cert_muestras_pdfgen');
     if (!res.ok || !(res.archivos||[]).length) {
-      st.innerHTML = `<div class="d-alert danger">${(res.errores||[]).join('<br>') || res.error || 'No se generaron PDFs. Ejecute primero el Set de Pruebas.'}</div>`;
+      const errores = res.errores || [];
+      const faltanSimulaciones = errores.some(e => String(e).includes('muestras de simulación'));
+      const accion = faltanSimulaciones
+        ? `<div class="mt-2"><button class="d-btn d-btn-sm d-btn-primary" onclick="certSimulacionAll()">`
+          + `<i class="bi bi-play-fill"></i> Generar simulaciones faltantes</button></div>`
+        : '';
+      st.innerHTML = `<div class="d-alert danger">${errores.join('<br>') || res.error || 'No se generaron PDFs. Ejecute primero el Set de Pruebas.'}${accion}</div>`;
       log('Error generando PDFs de muestras', 'error');
       return;
     }
