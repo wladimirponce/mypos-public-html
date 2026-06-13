@@ -1405,10 +1405,13 @@ async function certMuestrasPdf() {
       const errores = res.errores || [];
       const faltanSimulaciones = errores.some(e => String(e).includes('muestras de simulación'));
       const accion = faltanSimulaciones
-        ? `<div class="mt-2"><button class="d-btn d-btn-sm d-btn-primary" onclick="certSimulacionAll()">`
+        ? `<div class="mt-2"><button class="d-btn d-btn-sm d-btn-primary" onclick="certGenerarSimulacionesFaltantes(this)">`
           + `<i class="bi bi-play-fill"></i> Generar simulaciones faltantes</button></div>`
         : '';
-      st.innerHTML = `<div class="d-alert danger">${errores.join('<br>') || res.error || 'No se generaron PDFs. Ejecute primero el Set de Pruebas.'}${accion}</div>`;
+      const diagnostico = window._simMuestrasDiagnostico
+        ? `<div class="d-alert warning mt-2"><strong>Detalle de simulación:</strong><br>${window._simMuestrasDiagnostico}</div>`
+        : '';
+      st.innerHTML = `<div class="d-alert danger">${errores.join('<br>') || res.error || 'No se generaron PDFs. Ejecute primero el Set de Pruebas.'}${accion}</div>${diagnostico}`;
       log('Error generando PDFs de muestras', 'error');
       return;
     }
@@ -1418,13 +1421,13 @@ async function certMuestrasPdf() {
       + `<td style="padding:2px 8px">${a.copia}</td>`
       + `<td style="padding:2px 8px">${a.kb} KB</td>`
       + `<td style="padding:2px 8px"><a href="cert_bridge.php?action=cert_muestras_pdfdl&file=${encodeURIComponent(a.file)}" download>`
-      + `<i class="bi bi-download"></i> ${a.file}</a></td></tr>`).join('');
+      + `<i class="bi bi-download"></i> Descargar PDF individual</a></td></tr>`).join('');
     const errs = (res.errores||[]).length
       ? `<div class="d-alert warning mt-1">${res.errores.join('<br>')}</div>` : '';
     st.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> `
       + `${res.archivos.length} PDF(s) generados. Súbalos de a uno en el portal SII. `
       + `<button class="d-btn d-btn-sm d-btn-primary ms-2" onclick="certMuestrasPdfDlAll()">`
-      + `<i class="bi bi-download"></i> Descargar todos</button></div>`
+      + `<i class="bi bi-download"></i> Descargar todos como archivos individuales</button></div>`
       + `<div style="max-height:260px; overflow-y:auto"><table style="font-size:.72rem; width:100%">${rows}</table></div>${errs}`;
     window._muestrasPdfFiles = res.archivos.map(a => a.file);
     setBadge('pbadge-7', '✓ Generado', 'success');
@@ -1433,6 +1436,33 @@ async function certMuestrasPdf() {
   } catch(e) {
     st.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
     log('Error: ' + e.message, 'error');
+  }
+}
+
+async function certGenerarSimulacionesFaltantes(btn) {
+  const st = document.getElementById('muestras-pdf-status');
+  if (btn) btn.disabled = true;
+  st.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Generando T52, T56 y T61 faltantes…</div>';
+  log('Generando simulaciones faltantes para muestras PDF…', 'info');
+  try {
+    const res = await api('cert_sim_all');
+    const tipos = [52, 56, 61];
+    const detalles = tipos.map(tipo => {
+      const r = (res.resultados || {})['sim_' + tipo] || {};
+      const errores = (r.errores || []).map(e => e.error || String(e)).filter(Boolean);
+      return `<strong>T${tipo}</strong>: ${r.enviados || 0} enviado(s), ${r.xml_generados || 0} XML generado(s)`
+        + (errores.length ? `<br><small>${errores.join('<br>')}</small>` : '');
+    }).join('<br>');
+    window._simMuestrasDiagnostico = detalles;
+    st.innerHTML = `<div class="d-alert info">${detalles}<br><span class="spinner-border spinner-border-sm me-2 mt-2"></span> Generando nuevamente los PDF individuales…</div>`;
+    log('Simulaciones procesadas. Regenerando PDF individuales…', 'info');
+    await loadState();
+    await certMuestrasPdf();
+  } catch(e) {
+    st.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
+    log('Error generando simulaciones faltantes: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

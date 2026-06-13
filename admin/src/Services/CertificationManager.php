@@ -858,15 +858,22 @@ class CertificationManager
         $key = "t$tipo";
 
         $foliosOk     = $state['simulacion'][$key]['folios_ok']    ?? [];
+        $foliosXml    = $state['simulacion'][$key]['folios_xml']   ?? [];
         $foliosFailed = $state['simulacion'][$key]['folios_failed'] ?? [];
         $muestrasRequeridas = self::MUESTRAS_SIMULACION[$tipo] ?? 1;
-        $foliosConXml = $this->simulationFoliosWithXml($tipo, $foliosOk);
+        $foliosConXml = $this->simulationFoliosWithXml($tipo, array_merge($foliosOk, $foliosXml));
 
         // El estado puede sobrevivir a una limpieza/migración de tmp.
         if (($state['simulacion'][$key]['status'] ?? '') === 'ok'
             && count($foliosConXml) >= $muestrasRequeridas
         ) {
-            return ['skipped' => true, 'mensaje' => "Simulación tipo $tipo ya completada."];
+            return [
+                'skipped' => true,
+                'mensaje' => "Simulación tipo $tipo ya completada.",
+                'enviados' => count($foliosOk),
+                'xml_generados' => count($foliosConXml),
+                'errores' => array_slice($foliosFailed, -5),
+            ];
         }
 
         $done         = count($foliosOk);
@@ -877,7 +884,13 @@ class CertificationManager
         if ($remaining <= 0) {
             $state['simulacion'][$key]['status'] = 'ok';
             $this->saveState($state);
-            return ['skipped' => true, 'mensaje' => "Simulación tipo $tipo ya tiene $done docs."];
+            return [
+                'skipped' => true,
+                'mensaje' => "Simulación tipo $tipo ya tiene $done docs.",
+                'enviados' => count($foliosOk),
+                'xml_generados' => count($foliosConXml),
+                'errores' => array_slice($foliosFailed, -5),
+            ];
         }
 
         $rutRec = in_array($tipo, [39, 41]) ? '66666666-6' : '55555555-5';
@@ -970,6 +983,8 @@ class CertificationManager
                 $dte = generateDTE($payload);
 
                 if (empty($dte['ok'])) throw new Exception($dte['error'] ?? 'Error DTE');
+                $foliosXml[] = (int)$dte['folio'];
+                $foliosXml = array_values(array_unique($foliosXml));
 
                 $send = sendDTE(['xml' => $dte['xml'], 'tipo' => $dte['tipo'], 'folio' => $dte['folio']]);
 
@@ -988,6 +1003,7 @@ class CertificationManager
                     'status'       => 'running',
                     'tipo'         => $tipo,
                     'folios_ok'    => $foliosOk,
+                    'folios_xml'   => $foliosXml,
                     'folios_failed'=> $foliosFailed,
                     'ts'           => date('Y-m-d\TH:i:s'),
                 ];
@@ -999,11 +1015,12 @@ class CertificationManager
         // hasta $cantidad (50) pero acepta menos si el CAF se agota antes.
         $minimo = $tipo === 33 ? self::SIM_MIN_CANTIDAD : 1;
         $allDone = count($foliosOk) >= $minimo
-            && count($this->simulationFoliosWithXml($tipo, $foliosOk)) >= $muestrasRequeridas;
+            && count($this->simulationFoliosWithXml($tipo, array_merge($foliosOk, $foliosXml))) >= $muestrasRequeridas;
         $state['simulacion'][$key] = [
             'status'       => $allDone ? 'ok' : 'partial',
             'tipo'         => $tipo,
             'folios_ok'    => $foliosOk,
+            'folios_xml'   => $foliosXml,
             'folios_failed'=> $foliosFailed,
             'ts'           => date('Y-m-d\TH:i:s'),
         ];
@@ -1014,6 +1031,8 @@ class CertificationManager
             'tipo'    => $tipo,
             'enviados'=> count($foliosOk),
             'fallidos'=> count($foliosFailed),
+            'xml_generados' => count($this->simulationFoliosWithXml($tipo, $foliosXml)),
+            'errores' => array_slice($foliosFailed, -5),
         ];
     }
 
@@ -1804,7 +1823,11 @@ class CertificationManager
             $key     = "t$tipo";
             $simInfo = $state['simulacion'][$key] ?? null;
             $agregadas = 0;
-            foreach (($simInfo['folios_ok'] ?? []) as $folio) {
+            $foliosDisponibles = array_values(array_unique(array_merge(
+                $simInfo['folios_ok'] ?? [],
+                $simInfo['folios_xml'] ?? []
+            )));
+            foreach ($foliosDisponibles as $folio) {
                 $xmlFile = $tmpDir . "dte_T{$tipo}F{$folio}.xml";
                 if (file_exists($xmlFile)) {
                     if ($add("SIM-T{$tipo}", (int)$tipo, (int)$folio, file_get_contents($xmlFile))) {
