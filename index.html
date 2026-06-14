@@ -51,11 +51,33 @@
       }
     }
     </script>
-    <script type="module" crossorigin src="/assets/index-BYyF5FAZ.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-OJb6JHvv.css">
+
+    <!-- CSS crítico en línea del splash: se aplica al instante, sin esperar al bundle. -->
+    <style>
+      #mypos-splash{position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 100%);color:#fff;font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif}
+      #mypos-splash .ms-logo{font-size:2.6rem;font-weight:800;letter-spacing:-.02em;line-height:1}
+      #mypos-splash .ms-logo span{opacity:.82}
+      #mypos-splash .ms-spin{width:38px;height:38px;border-radius:50%;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;animation:ms-rot .8s linear infinite}
+      #mypos-splash .ms-tag{font-size:.85rem;opacity:.8;letter-spacing:.02em}
+      @keyframes ms-rot{to{transform:rotate(360deg)}}
+      @media (prefers-reduced-motion:reduce){#mypos-splash .ms-spin{animation:none}}
+    </style>
+    <!-- Sin JavaScript no hay React que quite el splash: lo ocultamos para
+         dejar a la vista el contenido SEO estático que está debajo. -->
+    <noscript><style>#mypos-splash{display:none!important}</style></noscript>
+    <script type="module" crossorigin src="/assets/index-CgSGGD-D.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/react-vendor-DE9CMQDZ.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-ohizNvI9.css">
   </head>
   <body>
     <div id="root">
+      <!-- Splash con marca: se ve al instante y evita el "flash" de texto sin estilo.
+           React reemplaza todo el contenido de #root al montar, por lo que desaparece solo. -->
+      <div id="mypos-splash" role="status" aria-label="Cargando MyPOS">
+        <div class="ms-logo">My<span>POS</span></div>
+        <div class="ms-spin"></div>
+        <div class="ms-tag">Cargando tu sistema…</div>
+      </div>
       <!-- Contenido SEO estático: visible para rastreadores sin JS. React lo reemplaza al cargar. -->
       <main style="max-width:960px;margin:0 auto;padding:24px;font-family:system-ui,Arial,sans-serif;color:#0f172a;line-height:1.6">
         <header>
@@ -109,5 +131,14 @@
         </footer>
       </main>
     </div>
+    <script>
+      // Failsafe: si el bundle no carga y React nunca llega a montar, ocultamos el
+      // splash a los 8 s para no dejar un spinner infinito (queda visible el
+      // contenido SEO). En el flujo normal React ya reemplazó #root mucho antes.
+      setTimeout(function () {
+        var s = document.getElementById('mypos-splash');
+        if (s) s.style.display = 'none';
+      }, 8000);
+    </script>
   </body>
 </html>
