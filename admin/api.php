@@ -2,12 +2,27 @@
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 error_reporting(E_ALL);
-if (session_status() === PHP_SESSION_NONE) session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    // Cookie de sesión endurecida (HttpOnly + SameSite=Strict, Secure en HTTPS).
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path'     => '/',
+        'httponly' => true,
+        'samesite' => 'Strict',
+        'secure'   => (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off'),
+    ]);
+    session_start();
+}
 date_default_timezone_set('America/Santiago');
 if (file_exists(__DIR__ . '/openssl_legacy.cnf')) {
     putenv('OPENSSL_CONF=' . __DIR__ . '/openssl_legacy.cnf');
 }
-file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . ' | === API CALLED: ' . ($_GET['action'] ?? 'no-action') . ' | file_exists(api.php)=' . (is_file(__FILE__) ? 'YES' : 'NO') . ' | phpversion=' . PHP_VERSION . PHP_EOL, FILE_APPEND);
+// Log de depuración SOLO si existe el flag admin/.debug_enabled (nunca en
+// producción). El .htaccess del directorio ya impide su acceso por web.
+$apiDebugLog = is_file(__DIR__ . '/.debug_enabled');
+if ($apiDebugLog) {
+    file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . ' | === API CALLED: ' . ($_GET['action'] ?? 'no-action') . ' | file_exists(api.php)=' . (is_file(__FILE__) ? 'YES' : 'NO') . ' | phpversion=' . PHP_VERSION . PHP_EOL, FILE_APPEND);
+}
 
 // Verificar parseo al inicio
 $parse_errors = [];
@@ -19,7 +34,7 @@ set_error_handler(function($code, $msg, $file, $line) use (&$parse_errors) {
 // Trigger un include dummy para verificar que todo el archivo compila
 $r = eval('return true;');
 restore_error_handler();
-if (!empty($parse_errors)) {
+if (!empty($parse_errors) && $apiDebugLog) {
     file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . ' | PARSE ERRORS: ' . implode(' | ', $parse_errors) . PHP_EOL, FILE_APPEND);
 }
 unset($parse_errors, $r);
@@ -2905,6 +2920,12 @@ function generateTimbre(
 // FIRMA DIGITAL XML (XMLDSig)
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function signDTE(string $xml, string $certPem, $privKey, string $idToSign): string {
+    // Endurecimiento anti XPath injection: el ID debe ser un identificador XML
+    // válido (sin comillas ni caracteres especiales). Evita romper la consulta
+    // XPath //*[@ID='$idToSign'] y la Reference URI="#...".
+    if (!preg_match('/^[A-Za-z_][A-Za-z0-9_.\-]*$/', $idToSign)) {
+        throw new Exception('ID de firma inválido.');
+    }
     // Reemplazar placeholder de ACTECO
     $xml = str_replace('ACTECO_VAL', ACTECO, $xml);
     $xml = preg_replace('/^\xEF\xBB\xBF/', '', $xml) ?? $xml;

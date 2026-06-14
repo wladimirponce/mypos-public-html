@@ -1313,11 +1313,12 @@ async function certSimulacion(tipo) {
   log(`Iniciando simulación T${tipo} (${cantidad} doc)…`, 'info');
   try {
     const res = await api('cert_run_sim', { tipo });
-    if (res.ok) {
+    if (res.ok || res.skipped) {
       if (badge) { badge.className='cert-badge cb-ok'; badge.textContent=`✓ OK (${res.enviados||0})`; }
       if (info)  info.textContent = `${res.enviados||0} enviados · ${res.fallidos||0} fallidos`;
-      if (statusEl) statusEl.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> Simulación T${tipo} completada: ${res.enviados||0} docs OK.</div>`;
-      log(`Simulación T${tipo}: ${res.enviados||0} OK, ${res.fallidos||0} fallidos.`, 'ok');
+      const mensaje = res.mensaje || `Simulación T${tipo} completada: ${res.enviados||0} docs OK.`;
+      if (statusEl) statusEl.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> ${mensaje}</div>`;
+      log(`Simulación T${tipo}: ${mensaje}`, 'ok');
     } else {
       if (badge) { badge.className='cert-badge cb-failed'; badge.textContent='✗ Error'; }
       if (statusEl) statusEl.innerHTML = `<div class="d-alert danger">${res.error||'Error desconocido'}</div>`;

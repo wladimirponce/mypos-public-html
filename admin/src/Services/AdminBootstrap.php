@@ -26,18 +26,29 @@ class AdminBootstrap
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         );
 
-        $email = EnvLoader::getString('ADMIN_SUPER_EMAIL', 'wladimirponce@gmail.com');
-        $password = EnvLoader::getString('ADMIN_SUPER_PASSWORD', 'tronador');
-        $name = EnvLoader::getString('ADMIN_SUPER_NAME', 'Wladimir Ponce');
+        // Las credenciales del superadmin provienen SIEMPRE del entorno.
+        // No hay valores por defecto: sin configuración no se siembra nada
+        // (evita una credencial conocida hardcodeada en el código fuente).
+        $email = EnvLoader::getString('ADMIN_SUPER_EMAIL', '');
+        $password = EnvLoader::getString('ADMIN_SUPER_PASSWORD', '');
+        $name = EnvLoader::getString('ADMIN_SUPER_NAME', 'Administrador');
+
+        if ($email === '' || $password === '') {
+            return;
+        }
+
+        // Crear el superadmin solo si NO existe. Nunca se sobrescribe la
+        // contraseña de una cuenta existente: el antiguo ON DUPLICATE KEY
+        // UPDATE reseteaba la clave en cada intento de login.
+        $check = $db->prepare('SELECT id FROM admin_usuario WHERE email = :email LIMIT 1');
+        $check->execute([':email' => $email]);
+        if ($check->fetch() !== false) {
+            return;
+        }
 
         $stmt = $db->prepare(
             "INSERT INTO admin_usuario (nombre, email, password_hash, rol, activo)
-             VALUES (:nombre, :email, :password_hash, 'superadmin', 1)
-             ON DUPLICATE KEY UPDATE
-                nombre = VALUES(nombre),
-                password_hash = VALUES(password_hash),
-                rol = 'superadmin',
-                activo = 1"
+             VALUES (:nombre, :email, :password_hash, 'superadmin', 1)"
         );
 
         $stmt->execute([

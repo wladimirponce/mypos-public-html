@@ -28,6 +28,24 @@ final class EmpresaRepository
         return $statement->fetchAll();
     }
 
+    /**
+     * Lista únicamente las empresas a las que pertenece el usuario autenticado.
+     * Evita exponer el universo completo de empresas a cualquier sesión.
+     */
+    public function listEmpresasDeUsuario(int $userId): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT e.id, e.razon_social, e.nombre_fantasia, e.rut, e.giro, e.email, e.telefono, e.direccion, e.comuna, e.ciudad, e.activo
+             FROM empresas e
+             INNER JOIN empresa_usuarios eu ON eu.empresa_id = e.id
+             WHERE eu.usuario_id = :user_id AND eu.activo = 1
+             ORDER BY e.id'
+        );
+        $statement->execute(['user_id' => $userId]);
+
+        return $statement->fetchAll();
+    }
+
     public function getEmpresaById(int $id): ?array
     {
         $statement = $this->connection->prepare(

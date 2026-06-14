@@ -24,6 +24,11 @@ final class EmpresaService
         return ['empresas' => $this->repository->listEmpresas()];
     }
 
+    public function listarEmpresasDeUsuario(int $userId): array
+    {
+        return ['empresas' => $this->repository->listEmpresasDeUsuario($userId)];
+    }
+
     public function obtenerEmpresa(int $id): array
     {
         $empresa = $this->repository->getEmpresaById($id);

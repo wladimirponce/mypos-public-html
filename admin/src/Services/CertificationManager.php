@@ -868,6 +868,7 @@ class CertificationManager
             && count($foliosConXml) >= $muestrasRequeridas
         ) {
             return [
+                'ok' => true,
                 'skipped' => true,
                 'mensaje' => "Simulación tipo $tipo ya completada.",
                 'enviados' => count($foliosOk),
@@ -887,6 +888,7 @@ class CertificationManager
                 : 'partial';
             $this->saveState($state);
             return [
+                'ok' => true,
                 'skipped' => true,
                 'mensaje' => "Simulación tipo $tipo ya tiene XML disponible para su muestra.",
                 'enviados' => count($foliosOk),

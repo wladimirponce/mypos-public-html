@@ -1,8 +1,48 @@
 <?php
 /**
  * Instalador Automático de Base de Datos MyPOS
- * ¡ADVERTENCIA! Elimina este archivo después de usarlo en producción.
+ *
+ * SEGURIDAD: deshabilitado por defecto. Solo se ejecuta si INSTALLER_TOKEN está
+ * definido en el .env y la petición incluye el mismo token (?token= o campo
+ * token). Tras usarlo, vacíe INSTALLER_TOKEN y elimine este archivo.
+ * Ya NO reescribe el .env con datos recibidos por web.
  */
+
+/**
+ * Lee una clave directamente del archivo .env (sin depender del autoload).
+ */
+function mypos_env_lookup(string $key): string
+{
+    foreach ([__DIR__ . '/../.env', __DIR__ . '/../../.env'] as $candidate) {
+        $resolved = realpath($candidate);
+        if (!$resolved || !is_file($resolved)) {
+            continue;
+        }
+        foreach (file($resolved, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+            if ($line === '' || str_starts_with(ltrim($line), '#')) {
+                continue;
+            }
+            $pos = strpos($line, '=');
+            if ($pos === false) {
+                continue;
+            }
+            if (trim(substr($line, 0, $pos)) === $key) {
+                return trim(substr($line, $pos + 1), " \t\"'");
+            }
+        }
+    }
+
+    return '';
+}
+
+// Puerta de acceso: sin token configurado y coincidente, el instalador no existe.
+$installerToken = mypos_env_lookup('INSTALLER_TOKEN');
+$providedToken  = (string) ($_GET['token'] ?? $_POST['token'] ?? '');
+if ($installerToken === '' || !hash_equals($installerToken, $providedToken)) {
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=UTF-8');
+    exit('Not found');
+}
 
 $mensaje = '';
 
@@ -191,20 +231,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $mensaje = "<div class='alert alert-danger'><h5>Instalación incompleta</h5>Se instalaron $exito archivos base y $seedsExitosos seeds, con $totalErrores errores. Corrige los errores antes de usar el sistema. Detalles: $log</div>";
             }
 
-            // Guardar también las credenciales en el archivo .env automáticamente
-            $envPath = mypos_resolve_file([
-                __DIR__ . '/../.env',
-                __DIR__ . '/../../.env',
-            ]);
-            if ($envPath && is_writable($envPath)) {
-                $envContent = file_get_contents($envPath);
-                $envContent = preg_replace('/DB_DATABASE=.*/', 'DB_DATABASE=' . mypos_env_value($db), $envContent);
-                $envContent = preg_replace('/DB_USERNAME=.*/', 'DB_USERNAME=' . mypos_env_value($user), $envContent);
-                $envContent = preg_replace('/DB_PASSWORD=.*/', 'DB_PASSWORD=' . mypos_env_value($pass), $envContent);
-                $envContent = preg_replace('/DB_HOST=.*/', 'DB_HOST=' . mypos_env_value($host), $envContent);
-                file_put_contents($envPath, $envContent);
-                $mensaje .= "<div class='alert alert-info'>El archivo <b>.env</b> fue actualizado automáticamente.</div>";
-            }
+            // SEGURIDAD: el instalador ya NO reescribe el .env con datos
+            // recibidos por web (era un vector de toma de control). Configure
+            // las credenciales de BD directamente en el archivo .env del servidor.
+            $mensaje .= "<div class='alert alert-info'>Recuerde configurar las credenciales de BD en el archivo <b>.env</b> del servidor.</div>";
 
         } catch (PDOException $e) {
             $mensaje = "<div class='alert alert-danger'><b>Error de Conexión:</b> Verifica que el usuario y la clave sean correctos. " . $e->getMessage() . "</div>";

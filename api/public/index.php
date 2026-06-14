@@ -1,9 +1,12 @@
 <?php
 declare(strict_types=1);
-ini_set('display_errors', 1);
+// Por defecto seguro para producción: NO mostrar errores al cliente.
+// Se reactiva más abajo solo cuando el entorno es de depuración.
+ini_set('display_errors', '0');
 error_reporting(E_ALL);
-ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/php_errors.log');
+ini_set('log_errors', '1');
+// El log de errores vive FUERA del docroot público (public/): no es accesible por web.
+ini_set('error_log', dirname(__DIR__) . '/storage/logs/php_errors.log');
 
 use Mypos\Config\Database;
 use Mypos\Controllers\AnulacionController;
@@ -88,6 +91,13 @@ if (is_file($vendorAutoload)) {
 $envDir = dirname(__DIR__);
 Env::loadFile(dirname($envDir) . '/.env');
 Env::loadFile($envDir . '/.env');
+
+// Mostrar errores en pantalla SOLO en entornos de depuración (jamás en producción).
+$appEnv = (string) ($_ENV['APP_ENV'] ?? getenv('APP_ENV') ?: 'production');
+$appDebug = filter_var($_ENV['APP_DEBUG'] ?? getenv('APP_DEBUG') ?: false, FILTER_VALIDATE_BOOLEAN);
+if ($appDebug && $appEnv !== 'production') {
+    ini_set('display_errors', '1');
+}
 
 set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
     SafeLogger::warning('PHP runtime warning', [
@@ -196,97 +206,13 @@ $router->get('/api/health/db', static function (): void {
     ]);
 });
 
-$router->get('/health/config', static function (): void {
-    $envPath = dirname(__DIR__) . '/.env';
-    $dbHost = (string) ($_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: '');
-    $dbName = (string) ($_ENV['DB_DATABASE'] ?? getenv('DB_DATABASE') ?: '');
-    $dbUser = (string) ($_ENV['DB_USERNAME'] ?? getenv('DB_USERNAME') ?: '');
-    $dbPassword = (string) ($_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '');
-
-    Response::success([
-        'env_file_exists' => is_file($envPath),
-        'env_file_readable' => is_readable($envPath),
-        'pdo_loaded' => class_exists(PDO::class),
-        'pdo_mysql_loaded' => in_array('mysql', PDO::getAvailableDrivers(), true),
-        'db_host' => $dbHost,
-        'db_database' => $dbName,
-        'db_username' => $dbUser,
-        'db_password_length' => strlen($dbPassword),
-        'db_password_has_hash' => str_contains($dbPassword, '#'),
-    ]);
-});
-
-$router->get('/api/health/config', static function (): void {
-    $envPath = dirname(__DIR__) . '/.env';
-    $dbHost = (string) ($_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: '');
-    $dbName = (string) ($_ENV['DB_DATABASE'] ?? getenv('DB_DATABASE') ?: '');
-    $dbUser = (string) ($_ENV['DB_USERNAME'] ?? getenv('DB_USERNAME') ?: '');
-    $dbPassword = (string) ($_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '');
-
-    Response::success([
-        'env_file_exists' => is_file($envPath),
-        'env_file_readable' => is_readable($envPath),
-        'pdo_loaded' => class_exists(PDO::class),
-        'pdo_mysql_loaded' => in_array('mysql', PDO::getAvailableDrivers(), true),
-        'db_host' => $dbHost,
-        'db_database' => $dbName,
-        'db_username' => $dbUser,
-        'db_password_length' => strlen($dbPassword),
-        'db_password_has_hash' => str_contains($dbPassword, '#'),
-    ]);
-});
-
-$router->get('/api/health/auth', static function (): void {
-    $connection = Database::connection();
-    $email = 'admin@mypos.cl';
-    $userStatement = $connection->prepare(
-        'SELECT id, nombre, email, password_hash, activo, ultimo_login_at
-         FROM usuarios
-         WHERE email = :email
-         LIMIT 1'
-    );
-    $userStatement->execute(['email' => $email]);
-    $user = $userStatement->fetch();
-
-    $empresaRows = [];
-    if (is_array($user)) {
-        $empresaStatement = $connection->prepare(
-            'SELECT
-                eu.empresa_id,
-                e.razon_social,
-                e.nombre_fantasia,
-                e.onboarding_completado,
-                r.codigo AS rol,
-                eu.sucursal_id,
-                s.nombre AS sucursal_nombre
-             FROM empresa_usuarios eu
-             INNER JOIN empresas e ON e.id = eu.empresa_id
-             INNER JOIN roles r ON r.id = eu.rol_id
-             LEFT JOIN sucursales s ON s.id = eu.sucursal_id
-             WHERE eu.usuario_id = :user_id
-               AND eu.activo = 1
-               AND e.activo = 1'
-        );
-        $empresaStatement->execute(['user_id' => (int) $user['id']]);
-        $empresaRows = $empresaStatement->fetchAll();
-    }
-
-    $jwtSecret = (string) ($_ENV['JWT_SECRET'] ?? getenv('JWT_SECRET') ?: '');
-
-    Response::success([
-        'admin_found' => is_array($user),
-        'admin_active' => is_array($user) ? ((int) $user['activo'] === 1) : false,
-        'admin_password_hash_length' => is_array($user) ? strlen((string) $user['password_hash']) : 0,
-        'admin_password_verify_default' => is_array($user)
-            ? password_verify('Admin123456', (string) $user['password_hash'])
-            : false,
-        'jwt_secret_configured' => $jwtSecret !== '',
-        'jwt_secret_length' => strlen($jwtSecret),
-        'empresa_context_count' => count($empresaRows),
-        'first_empresa_id' => isset($empresaRows[0]['empresa_id']) ? (int) $empresaRows[0]['empresa_id'] : null,
-        'first_empresa_rol' => isset($empresaRows[0]['rol']) ? (string) $empresaRows[0]['rol'] : null,
-    ]);
-});
+// NOTA DE SEGURIDAD: Se eliminaron los endpoints de diagnóstico
+// /health/config, /api/health/config y /api/health/auth. Exponían sin
+// autenticación información sensible (host/usuario de BD, longitud del
+// JWT_SECRET y si la cuenta admin seguía usando la contraseña por defecto).
+// Para diagnósticos use herramientas internas autenticadas, nunca un
+// endpoint público. Los health checks de liveness viven arriba (/health,
+// /api/health, /health/db).
 
 $authController = new AuthController();
 $router->post('/api/v1/auth/register', [$authController, 'register']);

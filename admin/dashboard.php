@@ -3,9 +3,19 @@
  * Dashboard DTE — Layout Maestro
  * Sistema profesional de facturación electrónica
  */
-if (session_status() === PHP_SESSION_NONE) session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    // Cookie de sesión endurecida (HttpOnly + SameSite=Strict, Secure en HTTPS).
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path'     => '/',
+        'httponly' => true,
+        'samesite' => 'Strict',
+        'secure'   => (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off'),
+    ]);
+    session_start();
+}
 date_default_timezone_set('America/Santiago');
-ini_set('display_errors', '1');
+ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
 if (file_exists(__DIR__ . '/openssl_legacy.cnf')) {

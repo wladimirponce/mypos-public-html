@@ -3,7 +3,18 @@
  * Login del panel de administración MyPOS
  * Autentica contra la tabla admin_usuario de la BD mypos.
  */
-if (session_status() === PHP_SESSION_NONE) session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    // Cookie de sesión endurecida: HttpOnly + SameSite=Strict (defensa CSRF)
+    // + Secure cuando hay HTTPS.
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path'     => '/',
+        'httponly' => true,
+        'samesite' => 'Strict',
+        'secure'   => (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off'),
+    ]);
+    session_start();
+}
 
 // Si ya está autenticado, ir al dashboard directamente
 if (!empty($_SESSION['admin_id'])) {
@@ -17,17 +28,46 @@ use App\Services\AdminBootstrap;
 
 $error = '';
 
+// --- Anti-fuerza-bruta del login (lockout por IP, basado en archivo) ---
+$throttleMax    = 5;     // intentos fallidos permitidos por ventana
+$throttleWindow = 900;   // ventana y duración del bloqueo, en segundos (15 min)
+$throttleDir    = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'mypos_admin_login';
+$throttleFile   = $throttleDir . DIRECTORY_SEPARATOR . hash('sha256', $_SERVER['REMOTE_ADDR'] ?? 'unknown') . '.json';
+
+$loginBlocked = static function () use ($throttleFile, $throttleMax, $throttleWindow): bool {
+    if (!is_file($throttleFile)) return false;
+    $d = json_decode((string) file_get_contents($throttleFile), true);
+    if (!is_array($d)) return false;
+    if ((int) ($d['first'] ?? 0) + $throttleWindow < time()) return false; // ventana expirada
+    return (int) ($d['count'] ?? 0) >= $throttleMax;
+};
+$registerFail = static function () use ($throttleDir, $throttleFile, $throttleWindow): void {
+    if (!is_dir($throttleDir)) { @mkdir($throttleDir, 0700, true); }
+    $d = is_file($throttleFile) ? json_decode((string) file_get_contents($throttleFile), true) : null;
+    if (!is_array($d) || (int) ($d['first'] ?? 0) + $throttleWindow < time()) {
+        $d = ['count' => 0, 'first' => time()];
+    }
+    $d['count'] = (int) ($d['count'] ?? 0) + 1;
+    @file_put_contents($throttleFile, json_encode($d), LOCK_EX);
+};
+$clearThrottle = static function () use ($throttleFile): void {
+    if (is_file($throttleFile)) { @unlink($throttleFile); }
+};
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = trim((string)($_POST['email']    ?? ''));
     $password = (string)($_POST['password'] ?? '');
 
-    if ($email === '' || $password === '') {
+    if ($loginBlocked()) {
+        $error = 'Demasiados intentos fallidos. Espere unos minutos e intente nuevamente.';
+    } elseif ($email === '' || $password === '') {
         $error = 'Ingrese email y contraseña.';
     } else {
         try {
             $db  = Database::getInstance();
         } catch (Exception $e) {
-            $error = 'Error de conexion a la base de datos: ' . $e->getMessage();
+            error_log('login.php: error de conexión a la BD: ' . $e->getMessage());
+            $error = 'No fue posible conectar con el servicio. Intente más tarde.';
             $db = null;
         }
 
@@ -35,7 +75,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 AdminBootstrap::ensureSuperAdmin($db);
             } catch (Exception $e) {
-                $error = 'Error preparando superusuario admin: ' . $e->getMessage();
+                error_log('login.php: error preparando superadmin: ' . $e->getMessage());
+                $error = 'No fue posible conectar con el servicio. Intente más tarde.';
             }
         }
 
@@ -52,6 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($user && password_verify($password, $user['password_hash'])) {
                 // Login exitoso
+                $clearThrottle();
                 session_regenerate_id(true);
                 $_SESSION['admin_id']     = (int)$user['id'];
                 $_SESSION['admin_nombre'] = $user['nombre'];
@@ -61,14 +103,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $db->prepare("UPDATE admin_usuario SET ultimo_login = NOW() WHERE id = :id")
                    ->execute([':id' => $user['id']]);
 
-                $redirect = $_GET['redirect'] ?? 'dashboard.php';
+                // Prevención de open redirect: solo se permiten rutas internas
+                // relativas. Se descartan URLs absolutas, protocol-relative (//)
+                // y cualquier intento de inyección de cabeceras (CRLF).
+                $redirect = (string) ($_GET['redirect'] ?? 'dashboard.php');
+                if (preg_match('#^(?:[a-z][a-z0-9+.\-]*:|//)#i', $redirect)
+                    || strpbrk($redirect, "\r\n") !== false) {
+                    $redirect = 'dashboard.php';
+                }
                 header('Location: ' . $redirect);
                 exit;
             } else {
+                $registerFail();
                 $error = 'Credenciales incorrectas.';
             }
         } catch (Exception $e) {
-            $error = 'Error consultando usuario administrador: ' . $e->getMessage();
+            error_log('login.php: error consultando admin_usuario: ' . $e->getMessage());
+            $error = 'No fue posible procesar la solicitud. Intente más tarde.';
         }
     }
 }
