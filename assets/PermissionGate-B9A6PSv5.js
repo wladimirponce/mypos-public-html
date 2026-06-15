@@ -1,1 +1,0 @@
-import{aH as o,at as s}from"./index-CF2VJJnC.js";function h({permission:n,anyOf:t,fallback:r=null,children:a}){const i=o(e=>e.hasPermission),m=o(e=>e.hasAnyPermission);return(n?i(n):t?m(t):!0)?s.jsx(s.Fragment,{children:a}):s.jsx(s.Fragment,{children:r})}export{h as P};
