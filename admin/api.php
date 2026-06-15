@@ -1458,7 +1458,10 @@ function emisorInfo(): array {
             'ciudad'      => $emp['ciudad_origen'] ?? '',
             'sucursal'    => $emp['sucursal'] ?? null,
             'acteco'      => $emp['acteco'] ?? null,
-            'resolNum'    => $emp['numero_resolucion'] ?? NRO_RESOL,
+            // En CERTIFICACION el SII exige Resolucion N° 0 (igual que en la Caratula
+            // y en las muestras). En PRODUCCION se imprime la resolucion real de la
+            // empresa. Asi certificacion no se ve afectada al pasar una empresa a prod.
+            'resolNum'    => ($globalContext->getAmbiente() === 'CERTIFICACION') ? 0 : ($emp['numero_resolucion'] ?? NRO_RESOL),
             'resolFch'    => $emp['fecha_resolucion'] ?? FCH_RESOL,
             'unidadSII'   => $emp['unidad_sii'] ?? UNIDAD_SII,
             'ambiente'    => $globalContext->getAmbiente(),

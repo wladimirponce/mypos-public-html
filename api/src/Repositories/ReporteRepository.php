@@ -184,6 +184,36 @@ final class ReporteRepository
         return number_format((float) $statement->fetchColumn(), 3, '.', '');
     }
 
+    /**
+     * Días "accionables" pendientes de cierre dentro del rango: días ANTERIORES
+     * a hoy que tuvieron ventas y cuyo cierre no está completo (alguna sucursal
+     * con ventas ese día sigue sin cierre CERRADO). NO cuenta hoy (en curso) ni
+     * días sin ventas (no hay nada que cerrar).
+     */
+    public function diasPendientesDeCierre(int $empresaId, ?int $sucursalId, string $from, string $to, string $today): int
+    {
+        $statement = $this->connection->prepare(
+            "SELECT COUNT(*) FROM (
+                SELECT DATE(v.fecha_venta) AS fecha
+                FROM ventas v
+                LEFT JOIN cierres_diarios c
+                       ON c.empresa_id = v.empresa_id
+                      AND c.sucursal_id = v.sucursal_id
+                      AND c.fecha_cierre = DATE(v.fecha_venta)
+                      AND c.estado = 'CERRADO'
+                WHERE {$this->salesWhere($sucursalId, 'v')}
+                  AND DATE(v.fecha_venta) < :hoy
+                GROUP BY DATE(v.fecha_venta)
+                HAVING COUNT(DISTINCT v.sucursal_id) <> COUNT(DISTINCT c.sucursal_id)
+            ) t"
+        );
+        $params = $this->salesParams($empresaId, $sucursalId, $from, $to);
+        $params['hoy'] = $today;
+        $statement->execute($params);
+
+        return (int) $statement->fetchColumn();
+    }
+
     private function closedDays(int $empresaId, ?int $sucursalId, string $from, string $to): int
     {
         $where = 'empresa_id = :empresa_id

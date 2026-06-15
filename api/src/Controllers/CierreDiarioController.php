@@ -47,6 +47,29 @@ final class CierreDiarioController
         });
     }
 
+    public function pending(): void
+    {
+        $this->respond(function (): array {
+            $sucursalId = isset($_GET['sucursal_id']) && $_GET['sucursal_id'] !== '' ? (int) $_GET['sucursal_id'] : null;
+            return $this->service->pendientes((int) ($_GET['empresa_id'] ?? 0), $sucursalId);
+        });
+    }
+
+    public function reopen(array $params): void
+    {
+        $this->respond(function (int $userId) use ($params): array {
+            $payload = Request::json();
+            $motivo = isset($payload['motivo']) ? trim((string) $payload['motivo']) : null;
+
+            return $this->service->reabrir(
+                $userId,
+                (int) $params['id'],
+                $this->requestEmpresaId(),
+                $motivo !== null && $motivo !== '' ? $motivo : null
+            );
+        }, 'Cierre reabierto correctamente');
+    }
+
     private function respond(callable $callback, ?string $message = null): void
     {
         try {

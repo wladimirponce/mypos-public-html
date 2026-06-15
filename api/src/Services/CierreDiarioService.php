@@ -40,6 +40,10 @@ final class CierreDiarioService
                 throw new HttpException('El día ya se encuentra cerrado', 422);
             }
 
+            if ($this->repository->hasOpenCajasForDate($empresaId, $sucursalId, $date)) {
+                throw new HttpException('No puedes cerrar el día: hay cajas abiertas en la sucursal. Cierra primero las cajas de ese día.', 422);
+            }
+
             $totals = $this->repository->saleTotals($empresaId, $sucursalId, $date);
             $data = [
                 'empresa_id' => $empresaId,
@@ -122,6 +126,62 @@ final class CierreDiarioService
             'resumen_rubros' => $this->repository->summaryRubros($id),
             'resumen_usuarios' => $this->repository->summaryUsers($id),
         ];
+    }
+
+    public function pendientes(int $empresaId, ?int $sucursalId): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        return [
+            'pendientes' => $this->repository->pendientes($empresaId, $sucursalId, $this->today()),
+        ];
+    }
+
+    public function reabrir(int $userId, int $id, int $empresaId, ?string $motivo): array
+    {
+        if ($id <= 0 || $empresaId <= 0) {
+            throw new HttpException('Parámetros inválidos', 422);
+        }
+
+        $closure = $this->repository->findById($id, $empresaId);
+        if ($closure === null) {
+            throw new HttpException('Cierre no encontrado', 404);
+        }
+        if ((string) $closure['estado'] !== 'CERRADO') {
+            throw new HttpException('El cierre no está cerrado', 422);
+        }
+
+        $this->repository->reopenClosure($id);
+
+        AuditoriaService::registrarEvento([
+            'usuario_id' => $userId,
+            'modulo' => 'cierres',
+            'accion' => 'reabrir',
+            'entidad' => 'cierres_diarios',
+            'entidad_id' => $id,
+            'descripcion' => 'Reapertura de cierre diario',
+            'metadata' => [
+                'sucursal_id' => (int) $closure['sucursal_id'],
+                'fecha_cierre' => (string) $closure['fecha_cierre'],
+                'motivo' => $motivo,
+            ],
+            'severidad' => 'WARNING',
+        ]);
+
+        return [
+            'cierre_id' => $id,
+            'empresa_id' => $empresaId,
+            'sucursal_id' => (int) $closure['sucursal_id'],
+            'fecha_cierre' => (string) $closure['fecha_cierre'],
+            'estado' => 'ABIERTO',
+        ];
+    }
+
+    private function today(): string
+    {
+        return (new DateTimeImmutable('now', new \DateTimeZone('America/Santiago')))->format('Y-m-d');
     }
 
     private function positiveInt(array $data, string $field): int

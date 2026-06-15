@@ -42,6 +42,88 @@ final class CierreDiarioRepository
         return is_array($row) ? $row : null;
     }
 
+    /**
+     * ¿Quedan cajas ABIERTAS abiertas ese día en la sucursal? Un día no puede
+     * cerrarse mientras haya cajas sin cerrar (el cierre diario consolida el
+     * cuadre de caja).
+     */
+    public function hasOpenCajasForDate(int $empresaId, int $sucursalId, string $date): bool
+    {
+        $statement = $this->connection->prepare(
+            "SELECT 1
+             FROM caja_aperturas
+             WHERE empresa_id = :empresa_id
+               AND sucursal_id = :sucursal_id
+               AND estado = 'ABIERTA'
+               AND DATE(fecha_apertura) = :fecha
+             LIMIT 1"
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId, 'fecha' => $date]);
+
+        return (bool) $statement->fetchColumn();
+    }
+
+    /**
+     * Días pendientes de cierre (por sucursal): días anteriores a hoy con ventas
+     * y sin cierre CERRADO. Cada fila es un día+sucursal por cerrar.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function pendientes(int $empresaId, ?int $sucursalId, string $today): array
+    {
+        $sucursalFilter = $sucursalId !== null ? ' AND v.sucursal_id = :sucursal_id' : '';
+        $statement = $this->connection->prepare(
+            "SELECT DATE(v.fecha_venta) AS fecha,
+                    v.sucursal_id,
+                    s.nombre AS sucursal_nombre,
+                    COALESCE(SUM(v.total), 0) AS total_ventas,
+                    COUNT(v.id) AS cantidad_ventas
+             FROM ventas v
+             INNER JOIN sucursales s ON s.id = v.sucursal_id
+             LEFT JOIN cierres_diarios c
+                    ON c.empresa_id = v.empresa_id
+                   AND c.sucursal_id = v.sucursal_id
+                   AND c.fecha_cierre = DATE(v.fecha_venta)
+                   AND c.estado = 'CERRADO'
+             WHERE v.empresa_id = :empresa_id
+               AND v.estado <> 'ANULADA'
+               AND DATE(v.fecha_venta) < :hoy
+               {$sucursalFilter}
+               AND c.id IS NULL
+             GROUP BY DATE(v.fecha_venta), v.sucursal_id, s.nombre
+             ORDER BY fecha DESC, s.nombre"
+        );
+        $params = ['empresa_id' => $empresaId, 'hoy' => $today];
+        if ($sucursalId !== null) {
+            $params['sucursal_id'] = $sucursalId;
+        }
+        $statement->execute($params);
+
+        return $statement->fetchAll();
+    }
+
+    public function findById(int $id, int $empresaId): ?array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT id, empresa_id, sucursal_id, fecha_cierre, estado
+             FROM cierres_diarios
+             WHERE id = :id AND empresa_id = :empresa_id
+             LIMIT 1'
+        );
+        $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
+        $row = $statement->fetch();
+
+        return is_array($row) ? $row : null;
+    }
+
+    public function reopenClosure(int $id): void
+    {
+        $statement = $this->connection->prepare(
+            "UPDATE cierres_diarios SET estado = 'ABIERTO' WHERE id = :id"
+        );
+        $statement->execute(['id' => $id]);
+    }
+
     public function saleTotals(int $empresaId, int $sucursalId, string $date): array
     {
         $statement = $this->connection->prepare(

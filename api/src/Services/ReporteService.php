@@ -24,7 +24,10 @@ final class ReporteService
     {
         [$empresaId, $sucursalId, $from, $to] = $this->filters($filters);
         $summary = $this->repository->resumenVentas($empresaId, $sucursalId, $from, $to);
-        $days = $this->daysInfo($from, $to, (int) $summary['dias_cerrados']);
+        $days = $this->daysInfo(
+            (int) $summary['dias_cerrados'],
+            $this->repository->diasPendientesDeCierre($empresaId, $sucursalId, $from, $to, $this->today())
+        );
         $totalVentas = (int) ($summary['total_ventas'] ?? 0);
         $totalImpuestos = (int) ($summary['total_impuestos'] ?? 0);
         $cantidadVentas = (int) ($summary['cantidad_ventas'] ?? 0);
@@ -49,7 +52,10 @@ final class ReporteService
         ];
 
         if ($data['parcial']) {
-            $data['advertencia'] = 'Existen dias sin cierre dentro del rango; sus totales aun pueden cambiar.';
+            $n = (int) $data['dias_parciales'];
+            $data['advertencia'] = $n === 1
+                ? 'Hay 1 día con ventas sin cerrar; ciérralo para fijar los totales.'
+                : "Hay {$n} días con ventas sin cerrar; ciérralos para fijar los totales.";
         }
 
         return $data;
@@ -208,16 +214,18 @@ final class ReporteService
         return $value;
     }
 
-    private function daysInfo(string $from, string $to, int $closedDays): array
+    private function daysInfo(int $closedDays, int $pendingDays): array
     {
-        $totalDays = count($this->dateRange($from, $to));
-        $partialDays = max(0, $totalDays - $closedDays);
-
         return [
             'dias_cerrados' => $closedDays,
-            'dias_parciales' => $partialDays,
-            'parcial' => $partialDays > 0,
+            'dias_parciales' => $pendingDays,
+            'parcial' => $pendingDays > 0,
         ];
+    }
+
+    private function today(): string
+    {
+        return (new DateTimeImmutable('now', new \DateTimeZone('America/Santiago')))->format('Y-m-d');
     }
 
     private function dateRange(string $from, string $to): array

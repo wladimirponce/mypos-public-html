@@ -449,7 +449,9 @@ $router->get('/api/v1/anulaciones/{id}', protectedRoute([$anulacionController, '
 
 $cierreDiarioController = new CierreDiarioController();
 $router->get('/api/v1/cierres-diarios', protectedRoute([$cierreDiarioController, 'index'], 'reportes.ver'));
+$router->get('/api/v1/cierres-diarios/pendientes', protectedRoute([$cierreDiarioController, 'pending'], 'cierres.crear'));
 $router->post('/api/v1/cierres-diarios', protectedRoute([$cierreDiarioController, 'store'], 'cierres.crear'));
+$router->post('/api/v1/cierres-diarios/{id}/reabrir', protectedRoute([$cierreDiarioController, 'reopen'], 'cierres.reabrir'));
 $router->get('/api/v1/cierres-diarios/{id}', protectedRoute([$cierreDiarioController, 'show'], 'reportes.ver'));
 
 $compraController = new CompraController();
