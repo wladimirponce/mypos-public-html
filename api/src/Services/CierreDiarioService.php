@@ -40,7 +40,10 @@ final class CierreDiarioService
                 throw new HttpException('El día ya se encuentra cerrado', 422);
             }
 
-            if ($this->repository->hasOpenCajasForDate($empresaId, $sucursalId, $date)) {
+            $cajasAbiertas = $this->repository->hasOpenCajasForDate($empresaId, $sucursalId, $date);
+            // Solo bloquear si es hoy: para días pasados las cajas zombies no se pueden cerrar
+            // desde el POS, así que el cierre procede con advertencia en la respuesta.
+            if ($cajasAbiertas && $date === $this->today()) {
                 throw new HttpException('No puedes cerrar el día: hay cajas abiertas en la sucursal. Cierra primero las cajas de ese día.', 422);
             }
 
@@ -73,7 +76,7 @@ final class CierreDiarioService
 
             $connection->commit();
 
-            return [
+            $result = [
                 'cierre_id' => $closureId,
                 'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursalId,
@@ -82,6 +85,12 @@ final class CierreDiarioService
                 'cantidad_ventas' => (int) $data['cantidad_ventas'],
                 'estado' => 'CERRADO',
             ];
+
+            if ($cajasAbiertas) {
+                $result['advertencia'] = 'Había cajas sin cerrar ese día. El cierre se registró de todas formas ya que es una fecha pasada.';
+            }
+
+            return $result;
         } catch (Throwable $exception) {
             if ($connection->inTransaction()) {
                 $connection->rollBack();
