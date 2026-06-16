@@ -1,0 +1,1 @@
+import{aa as i,aj as r}from"./index-j3e6mbPg.js";const n={efectiva(a,e){return i.get(r.configuracion.efectiva,{params:{empresa_id:a,sucursal_id:e||void 0}})},getOperacion(a){return i.get(r.configuracion.operacion,{params:{empresa_id:a}})},updateOperacion(a,e){return i.put(r.configuracion.operacion,{empresa_id:a,...e})}};export{n as c};
