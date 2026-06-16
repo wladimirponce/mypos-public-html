@@ -7,6 +7,7 @@ namespace Mypos\Controllers;
 use Mypos\Core\HttpException;
 use Mypos\Core\Response;
 use Mypos\Middleware\AuthMiddleware;
+use Mypos\Middleware\PermissionMiddleware;
 use Mypos\Middleware\TenantMiddleware;
 use Mypos\Services\AuditoriaService;
 use Throwable;
@@ -36,10 +37,13 @@ final class AuditoriaController
             $claims = (new AuthMiddleware())->handle();
             $userId = (int) $claims['user_id'];
             $empresaId = (int) ($_GET['empresa_id'] ?? 0);
-            if ($empresaId > 0) {
-                (new TenantMiddleware())->handle($userId, $empresaId);
+            if ($empresaId <= 0) {
+                throw new HttpException('empresa_id obligatorio', ['empresa_id' => ['Debe seleccionar una empresa.']], 422);
             }
-            // TODO Fase 18: permiso auditoria.ver.
+
+            (new TenantMiddleware())->handle($userId, $empresaId);
+            (new PermissionMiddleware())->handle($userId, $empresaId, 'auditoria.ver');
+
             Response::success($callback());
         } catch (HttpException $exception) {
             Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());
