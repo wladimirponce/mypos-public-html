@@ -23,10 +23,18 @@ class CafCentralManager
 {
     private PDO $pdo;
     private bool $useLegacyTables = false;
+    private string $ambiente = 'CERTIFICACION';
 
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? Database::getInstance();
+        // Detect ambiente from globalContext (set by api.php via Context.php)
+        if (isset($GLOBALS['globalContext']) && method_exists($GLOBALS['globalContext'], 'getAmbiente')) {
+            $amb = strtoupper((string)$GLOBALS['globalContext']->getAmbiente());
+            if (in_array($amb, ['CERTIFICACION', 'PRODUCCION'], true)) {
+                $this->ambiente = $amb;
+            }
+        }
         try {
             $stmt = $this->pdo->query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cafs' LIMIT 1");
             $this->useLegacyTables = (bool)$stmt->fetchColumn();
@@ -149,11 +157,11 @@ class CafCentralManager
 
                 $tipoEnum = $this->mapTipoDteToEnum($tipo);
 
-                // Detectar duplicado
+                // Detectar duplicado (mismo ambiente)
                 $sel = $this->pdo->prepare(
-                    "SELECT id FROM caf_archivos WHERE empresa_id=? AND tipo_documento=? AND folio_desde=? AND folio_hasta=? LIMIT 1"
+                    "SELECT id FROM caf_archivos WHERE empresa_id=? AND tipo_documento=? AND folio_desde=? AND folio_hasta=? AND ambiente=? LIMIT 1"
                 );
-                $sel->execute([$empresaId, $tipoEnum, $desde, $hasta]);
+                $sel->execute([$empresaId, $tipoEnum, $desde, $hasta, $this->ambiente]);
                 if ($exists = $sel->fetch(PDO::FETCH_ASSOC)) {
                     return ['ok' => true, 'duplicado' => true, 'id' => (int)$exists['id'],
                             'tipo' => $tipo, 'desde' => $desde, 'hasta' => $hasta];
@@ -176,12 +184,12 @@ class CafCentralManager
                 $ins = $this->pdo->prepare("
                     INSERT INTO caf_archivos
                       (empresa_id, tipo_documento, rut_emisor, razon_social_emisor, folio_desde, folio_hasta,
-                       fecha_autorizacion, fecha_vencimiento, archivo_path, caf_xml, estado, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', NOW())
+                       fecha_autorizacion, fecha_vencimiento, archivo_path, caf_xml, estado, ambiente, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO', ?, NOW())
                 ");
                 $ins->execute([
                     $empresaId, $tipoEnum, $rut, $rs, $desde, $hasta,
-                    $fa, $fechaVenc, $xmlPath, $xmlContent
+                    $fa, $fechaVenc, $xmlPath, $xmlContent, $this->ambiente
                 ]);
                 $cafId = (int)$this->pdo->lastInsertId();
 
@@ -254,11 +262,12 @@ class CafCentralManager
                     FROM caf_archivos ca
                     LEFT JOIN folios_asignaciones fa ON fa.caf_id = ca.id
                     WHERE ca.empresa_id = ?
+                      AND ca.ambiente = ?
                       AND ca.estado = 'ACTIVO'
                     GROUP BY ca.id, ca.tipo_documento
                     HAVING COALESCE(MAX(fa.folio_hasta), ca.folio_desde - 1) < ca.folio_hasta
                 ");
-                $stPool->execute([$empresaId]);
+                $stPool->execute([$empresaId, $this->ambiente]);
                 $tiposEnPool = array_map(
                     fn($enum) => $this->mapEnumToTipoDte($enum),
                     $stPool->fetchAll(PDO::FETCH_COLUMN)
@@ -324,9 +333,10 @@ class CafCentralManager
                 WHERE fa.sucursal_id = ?
                   AND fa.estado = 'ACTIVA'
                   AND ca.estado = 'ACTIVO'
+                  AND ca.ambiente = ?
                   AND fa.folio_actual <= fa.folio_hasta
             ";
-            $params = [$sucursalId];
+            $params = [$sucursalId, $this->ambiente];
             if ($tipoDte !== null) {
                 $tipoEnum = $this->mapTipoDteToEnum($tipoDte);
                 $sql .= " AND fa.tipo_documento = ?";
@@ -1056,14 +1066,15 @@ class CafCentralManager
 
                 $tipoEnum = $this->mapTipoDteToEnum($tipoDte);
 
-                // Buscar CAF en pool con folios disponibles
+                // Buscar CAF en pool con folios disponibles, filtrando por ambiente
                 $st = $this->pdo->prepare("
-                    SELECT ca.*, 
+                    SELECT ca.*,
                            COALESCE(MAX(fa.folio_hasta), ca.folio_desde - 1) AS max_asignado
                     FROM caf_archivos ca
                     LEFT JOIN folios_asignaciones fa ON fa.caf_id = ca.id
                     WHERE ca.empresa_id = ?
                       AND ca.tipo_documento = ?
+                      AND ca.ambiente = ?
                       AND ca.estado = 'ACTIVO'
                     GROUP BY ca.id
                     HAVING max_asignado < ca.folio_hasta
@@ -1071,7 +1082,7 @@ class CafCentralManager
                     LIMIT 1
                     FOR UPDATE
                 ");
-                $st->execute([$empresaId, $tipoEnum]);
+                $st->execute([$empresaId, $tipoEnum, $this->ambiente]);
                 $pool = $st->fetch(PDO::FETCH_ASSOC);
                 if (!$pool) {
                     $this->pdo->rollBack();

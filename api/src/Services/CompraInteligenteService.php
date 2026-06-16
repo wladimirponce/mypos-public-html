@@ -239,9 +239,12 @@ final class CompraInteligenteService
             $row['accion_recomendada'] = 'COMPRAR';
         }
 
-        // --- Alerta de alza de costo ---
+        // --- Alerta de alza de costo (contra el mismo proveedor sugerido) ---
+        $proveedorId = isset($row['proveedor_id']) && (int) $row['proveedor_id'] > 0
+            ? (int) $row['proveedor_id']
+            : null;
         $row['alerta_alza_precio'] = $this->calcularAlertaAlza(
-            $empresaId, $productoId, $row['precio_vigente'], $umbralAlza
+            $empresaId, $productoId, $proveedorId, $row['precio_vigente'], $umbralAlza
         );
 
         // --- Ranking de proveedores ---
@@ -256,14 +259,15 @@ final class CompraInteligenteService
      *
      * @return array{detectada: bool, porcentaje_alza: float|null, precio_anterior: int|null}
      */
-    private function calcularAlertaAlza(int $empresaId, int $productoId, ?int $precioVigente, float $umbral): array
+    private function calcularAlertaAlza(int $empresaId, int $productoId, ?int $proveedorId, ?int $precioVigente, float $umbral): array
     {
-        if ($precioVigente === null || $precioVigente <= 0) {
+        if ($precioVigente === null || $precioVigente <= 0 || $proveedorId === null) {
             return ['detectada' => false, 'porcentaje_alza' => null, 'precio_anterior' => null];
         }
 
-        // Tomamos los 2 últimos precios; si el más reciente (vigente) > penúltimo * (1 + umbral) = alza
-        $historial = $this->repository->historialPreciosProveedor($empresaId, $productoId, 2);
+        // Tomamos los 2 últimos precios del MISMO proveedor; si el más reciente
+        // (vigente) > penúltimo * (1 + umbral) = alza.
+        $historial = $this->repository->historialPreciosProveedor($empresaId, $productoId, $proveedorId, 2);
 
         if (count($historial) < 2) {
             return ['detectada' => false, 'porcentaje_alza' => null, 'precio_anterior' => null];

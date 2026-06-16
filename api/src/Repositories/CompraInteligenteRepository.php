@@ -240,8 +240,11 @@ final class CompraInteligenteRepository
      * a partir de los movimientos de salida registrados en stock_movimientos
      * durante los últimos $dias días.
      *
-     * Tipos de movimiento considerados salida:
-     *   VENTA, AJUSTE_SALIDA, TRASLADO_SALIDA
+     * Tipos de movimiento considerados salida (deben coincidir con
+     * StockService::TIPOS_VALIDOS): VENTA (demanda real), TRASPASO_SALIDA
+     * (despacho a otra ubicación, relevante para bodegas que surten),
+     * MERMA y AJUSTE (correcciones a la baja). El filtro cantidad < 0
+     * garantiza que solo se cuenten las salidas, no las entradas.
      *
      * @return float Consumo diario promedio (puede ser 0 si no hubo salidas)
      */
@@ -256,7 +259,7 @@ final class CompraInteligenteRepository
              WHERE sm.empresa_id  = :empresa_id
                AND sm.producto_id = :producto_id
                AND sm.ubicacion_id = :ubicacion_id
-               AND sm.tipo_movimiento IN (\'VENTA\', \'AJUSTE_SALIDA\', \'TRASLADO_SALIDA\')
+               AND sm.tipo_movimiento IN (\'VENTA\', \'TRASPASO_SALIDA\', \'MERMA\', \'AJUSTE\')
                AND sm.cantidad < 0
                AND sm.created_at >= DATE_SUB(CURRENT_DATE, INTERVAL :dias_filter DAY)'
         );
@@ -308,16 +311,17 @@ final class CompraInteligenteRepository
     }
 
     /**
-     * Retorna el historial de precios del producto por proveedor para detectar
-     * tendencias o alzas recientes.
+     * Retorna el historial de precios del producto para detectar tendencias o
+     * alzas recientes. Si se indica $proveedorId, restringe el historial a ese
+     * proveedor (necesario para comparar alzas contra el mismo proveedor y no
+     * contra precios de otro proveedor más barato/caro).
      *
      * @return array<int, array{proveedor_id: int, proveedor_nombre: string, precio_compra: int, fecha_precio: string, origen: string}>
      */
-    public function historialPreciosProveedor(int $empresaId, int $productoId, int $limite = 10): array
+    public function historialPreciosProveedor(int $empresaId, int $productoId, ?int $proveedorId = null, int $limite = 10): array
     {
         $limiteSafe = max(1, min(100, $limite));
-        $statement  = $this->connection->prepare(
-            "SELECT pp.proveedor_id,
+        $sql = "SELECT pp.proveedor_id,
                     prov.nombre AS proveedor_nombre,
                     pp.precio_compra,
                     pp.moneda,
@@ -331,11 +335,19 @@ final class CompraInteligenteRepository
                     AND prov.empresa_id = pp.empresa_id
              WHERE pp.empresa_id  = :empresa_id
                AND pp.producto_id = :producto_id
-               AND pp.activo      = 1
-             ORDER BY pp.fecha_precio DESC, pp.id DESC
-             LIMIT {$limiteSafe}"
-        );
-        $statement->execute(['empresa_id' => $empresaId, 'producto_id' => $productoId]);
+               AND pp.activo      = 1";
+
+        $params = ['empresa_id' => $empresaId, 'producto_id' => $productoId];
+
+        if ($proveedorId !== null && $proveedorId > 0) {
+            $sql .= ' AND pp.proveedor_id = :proveedor_id';
+            $params['proveedor_id'] = $proveedorId;
+        }
+
+        $sql .= " ORDER BY pp.fecha_precio DESC, pp.id DESC LIMIT {$limiteSafe}";
+
+        $statement = $this->connection->prepare($sql);
+        $statement->execute($params);
 
         return $statement->fetchAll(PDO::FETCH_ASSOC);
     }
