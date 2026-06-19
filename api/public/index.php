@@ -225,9 +225,11 @@ $onboardingController = new OnboardingController();
 $router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);
 
 $crmController = new \Mypos\Controllers\CrmController();
-$router->get('/api/v1/crm/leads', [$crmController, 'index']);
-$router->get('/api/v1/crm/leads/{id}/mensajes', [$crmController, 'messages']);
-$router->put('/api/v1/crm/leads/{id}', [$crmController, 'update']);
+$router->get('/api/v1/crm/leads',                    [$crmController, 'index']);
+$router->get('/api/v1/crm/count',                    [$crmController, 'count']);
+$router->get('/api/v1/crm/leads/{id}/mensajes',      [$crmController, 'messages']);
+$router->put('/api/v1/crm/leads/{id}',               [$crmController, 'update']);
+$router->post('/api/v1/crm/leads/{id}/reply',        [$crmController, 'reply']);
 
 $whatsappController = new \Mypos\Controllers\WhatsappController();
 $router->post('/api/v1/whatsapp/token', [$whatsappController, 'generateToken']);
