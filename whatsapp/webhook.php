@@ -185,16 +185,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             // --- MEMORIA DE CONVERSACION ---
             $db = \Mypos\Config\Database::connection();
-            $stmt = $db->prepare('SELECT context_summary FROM whatsapp_conversations WHERE phone_number = ?');
+            $stmt = $db->prepare('SELECT id, context_summary FROM whatsapp_conversations WHERE phone_number = ?');
             $stmt->execute([$from]);
             $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-            
+
             $contextSummary = '';
+            $conversationId = null;
             if ($row) {
                 $contextSummary = $row['context_summary'];
+                $conversationId = (int)$row['id'];
             } else {
-                $stmtIns = $db->prepare('INSERT INTO whatsapp_conversations (phone_number, user_name) VALUES (?, ?)');
-                $stmtIns->execute([$from, $userName]);
+                // Detectar si el número ya existe como cliente (CLIENTE_CAUTIVO) o es un lead nuevo
+                $stmtCli = $db->prepare(
+                    'SELECT id FROM clientes WHERE REPLACE(REPLACE(telefono, " ", ""), "+", "") = ? LIMIT 1'
+                );
+                $fromNorm = ltrim(preg_replace('/\s+/', '', $from), '+');
+                $stmtCli->execute([$fromNorm]);
+                $clienteRow  = $stmtCli->fetch(\PDO::FETCH_ASSOC);
+                $clienteId   = $clienteRow ? (int)$clienteRow['id'] : null;
+                $tipoContacto = $clienteId ? 'CLIENTE_CAUTIVO' : 'LEAD';
+
+                $primerMensaje = mb_substr($userMessage, 0, 65535);
+
+                $stmtIns = $db->prepare(
+                    'INSERT INTO whatsapp_conversations (phone_number, user_name, cliente_id, tipo_contacto, primer_mensaje) VALUES (?, ?, ?, ?, ?)'
+                );
+                $stmtIns->execute([$from, $userName, $clienteId, $tipoContacto, $primerMensaje]);
+                $conversationId = (int)$db->lastInsertId();
             }
             // --------------------------------
 
@@ -416,7 +433,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 file_put_contents($log_file, "Error Gemini API Request Failed or Saturada\n", FILE_APPEND);
             }
             // ---------------------------------------
-            
+
+            // --- HISTORIAL CRM: guardar mensaje + respuesta IA ---
+            if ($conversationId) {
+                $intentLog = (isset($conceptoDetectado) && $conceptoDetectado && strtoupper(trim($conceptoDetectado)) !== 'NADA')
+                    ? mb_substr((string)$conceptoDetectado, 0, 80)
+                    : null;
+                $stmtMsg = $db->prepare(
+                    'INSERT INTO whatsapp_messages (conversation_id, direction, message_text, ai_response, intent) VALUES (?, "INBOUND", ?, ?, ?)'
+                );
+                $stmtMsg->execute([$conversationId, $userMessage, $aiResponse, $intentLog]);
+            }
+            // -----------------------------------------------------
+
             // Enviar respuesta por WhatsApp
             $response_data = [
                 'messaging_product' => 'whatsapp',

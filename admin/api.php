@@ -639,6 +639,56 @@ if ($action) {
                 echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
             }
             break;
+        case 'get_matriz_permisos':
+            $empId = (int)($data['empresa_id'] ?? $_GET['empresa_id'] ?? 0);
+            if ($empId <= 0) { echo json_encode(['ok' => false, 'error' => 'empresa_id requerido']); break; }
+            try {
+                $pdo = \App\Core\Database::getInstance();
+                $stmt = $pdo->prepare("SELECT nombre_rol, puede_anular, puede_descuento_mayor, puede_ver_reportes, puede_configurar_pos FROM saas_rol_matriz WHERE empresa_id = ?");
+                $stmt->execute([$empId]);
+                $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+                $matriz = [];
+                foreach ($rows as $r) {
+                    $matriz[$r['nombre_rol']] = [
+                        'puede_anular'           => (bool)$r['puede_anular'],
+                        'puede_descuento_mayor'  => (bool)$r['puede_descuento_mayor'],
+                        'puede_ver_reportes'     => (bool)$r['puede_ver_reportes'],
+                        'puede_configurar_pos'   => (bool)$r['puede_configurar_pos'],
+                    ];
+                }
+                echo json_encode(['ok' => true, 'matriz' => $matriz]);
+            } catch (\Exception $e) {
+                echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+            }
+            break;
+        case 'guardar_matriz_permisos':
+            $empId = (int)($data['empresa_id'] ?? 0);
+            $matrizData = $data['matriz'] ?? [];
+            if ($empId <= 0 || empty($matrizData)) { echo json_encode(['ok' => false, 'error' => 'Datos inválidos']); break; }
+            try {
+                $pdo = \App\Core\Database::getInstance();
+                $sql = "INSERT INTO saas_rol_matriz (empresa_id, nombre_rol, puede_anular, puede_descuento_mayor, puede_ver_reportes, puede_configurar_pos)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON DUPLICATE KEY UPDATE
+                        puede_anular=VALUES(puede_anular), puede_descuento_mayor=VALUES(puede_descuento_mayor),
+                        puede_ver_reportes=VALUES(puede_ver_reportes), puede_configurar_pos=VALUES(puede_configurar_pos)";
+                $stmt = $pdo->prepare($sql);
+                foreach ($matrizData as $rol => $perms) {
+                    $rol = preg_replace('/[^a-z_]/', '', strtolower((string)$rol));
+                    if ($rol === '') continue;
+                    $stmt->execute([
+                        $empId, $rol,
+                        (int)($perms['puede_anular'] ?? 0),
+                        (int)($perms['puede_descuento_mayor'] ?? 0),
+                        (int)($perms['puede_ver_reportes'] ?? 0),
+                        (int)($perms['puede_configurar_pos'] ?? 0),
+                    ]);
+                }
+                echo json_encode(['ok' => true]);
+            } catch (\Exception $e) {
+                echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+            }
+            break;
         case 'info':     echo json_encode(emisorInfo());      break;
         case 'generate':
             file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . " | generate called. function_exists(generateDTE)=" . (function_exists('generateDTE') ? 'YES' : 'NO') . PHP_EOL, FILE_APPEND);

@@ -417,7 +417,10 @@ function isTrialSubscription(array $cliente): bool
         <div id="vista-lista">
           <div class="d-flex justify-content-between align-items-center mb-3">
             <h6 class="mb-0">Listado de Operadores/Usuarios POS</h6>
-            <button class="btn btn-sm btn-primary" onclick="mostrarFormularioCrear()"><i class="bi bi-person-plus"></i> Nuevo Usuario</button>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-outline-secondary" onclick="mostrarPermisos()"><i class="bi bi-shield-lock"></i> Permisos</button>
+              <button class="btn btn-sm btn-primary" onclick="mostrarFormularioCrear()"><i class="bi bi-person-plus"></i> Nuevo Usuario</button>
+            </div>
           </div>
           <div class="table-responsive">
             <table class="table table-hover table-striped align-middle" style="font-size: 13px;">
@@ -435,6 +438,57 @@ function isTrialSubscription(array $cliente): bool
               </tbody>
             </table>
           </div>
+        </div>
+
+        <!-- Vista 3: Permisos por Rol -->
+        <div id="vista-permisos" class="d-none">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0"><i class="bi bi-shield-lock"></i> Permisos por Rol</h6>
+            <button class="btn btn-sm btn-secondary" onclick="mostrarLista()"><i class="bi bi-arrow-left"></i> Volver</button>
+          </div>
+          <p class="text-muted small mb-3">Define qué funciones puede ejecutar cada rol en el POS de esta empresa.</p>
+          <form id="form-permisos" onsubmit="guardarMatriz(event)">
+            <table class="table table-bordered text-center align-middle" style="font-size: 13px;">
+              <thead class="table-light">
+                <tr>
+                  <th class="text-start">Permiso / Función</th>
+                  <th>Cajero</th>
+                  <th>Supervisor</th>
+                  <th>Administrador</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="text-start">Anular documentos (Ventas/Boletas)</td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="cajero_puede_anular"></div></td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="supervisor_puede_anular"></div></td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="admin_puede_anular" checked></div></td>
+                </tr>
+                <tr>
+                  <td class="text-start">Aplicar descuentos &gt; 10%</td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="cajero_puede_descuento_mayor"></div></td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="supervisor_puede_descuento_mayor"></div></td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="admin_puede_descuento_mayor" checked></div></td>
+                </tr>
+                <tr>
+                  <td class="text-start">Ver reportes X y Z</td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="cajero_puede_ver_reportes"></div></td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="supervisor_puede_ver_reportes"></div></td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="admin_puede_ver_reportes" checked></div></td>
+                </tr>
+                <tr>
+                  <td class="text-start">Configuración de Caja (Impresoras, etc.)</td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="cajero_puede_configurar_pos"></div></td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="supervisor_puede_configurar_pos"></div></td>
+                  <td><div class="form-check form-switch d-flex justify-content-center"><input class="form-check-input" type="checkbox" id="admin_puede_configurar_pos" checked></div></td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="d-flex justify-content-end gap-2 mt-2">
+              <button type="button" class="btn btn-sm btn-secondary" onclick="mostrarLista()"><i class="bi bi-x-circle"></i> Cancelar</button>
+              <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-save"></i> Guardar Permisos</button>
+            </div>
+          </form>
         </div>
 
         <!-- Vista 2: Formulario (Crear / Editar) -->
@@ -591,6 +645,7 @@ async function cargarSucursalesSelect(empresaId) {
 function mostrarLista() {
     document.getElementById('vista-lista').classList.remove('d-none');
     document.getElementById('vista-formulario').classList.add('d-none');
+    document.getElementById('vista-permisos').classList.add('d-none');
 }
 
 function mostrarFormularioCrear() {
@@ -705,6 +760,72 @@ function limpiarAlerta() {
     const alertEl = document.getElementById('modal-alert');
     alertEl.classList.add('d-none');
     alertEl.textContent = '';
+}
+
+async function mostrarPermisos() {
+    document.getElementById('vista-lista').classList.add('d-none');
+    document.getElementById('vista-formulario').classList.add('d-none');
+    document.getElementById('vista-permisos').classList.remove('d-none');
+    limpiarAlerta();
+
+    const empresaId = document.getElementById('usr-empresa-id').value;
+    await cargarMatriz(empresaId);
+}
+
+async function cargarMatriz(empresaId) {
+    const roles = ['cajero', 'supervisor', 'admin'];
+    const permisos = ['puede_anular', 'puede_descuento_mayor', 'puede_ver_reportes', 'puede_configurar_pos'];
+
+    try {
+        const resp = await fetch(`api.php?action=get_matriz_permisos&empresa_id=${empresaId}`);
+        const data = await resp.json();
+        if (!data.ok) return;
+
+        const matriz = data.matriz || {};
+        roles.forEach(rol => {
+            permisos.forEach(perm => {
+                const el = document.getElementById(`${rol}_${perm}`);
+                if (el) el.checked = !!(matriz[rol] && matriz[rol][perm]);
+            });
+        });
+    } catch (e) {
+        mostrarAlerta('Error cargando permisos: ' + e.message, 'danger');
+    }
+}
+
+async function guardarMatriz(event) {
+    event.preventDefault();
+    limpiarAlerta();
+
+    const empresaId = parseInt(document.getElementById('usr-empresa-id').value);
+    const roles = ['cajero', 'supervisor', 'admin'];
+    const permisos = ['puede_anular', 'puede_descuento_mayor', 'puede_ver_reportes', 'puede_configurar_pos'];
+
+    const matriz = {};
+    roles.forEach(rol => {
+        matriz[rol] = {};
+        permisos.forEach(perm => {
+            const el = document.getElementById(`${rol}_${perm}`);
+            matriz[rol][perm] = el && el.checked ? 1 : 0;
+        });
+    });
+
+    try {
+        const resp = await fetch('api.php?action=guardar_matriz_permisos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ empresa_id: empresaId, matriz })
+        });
+        const data = await resp.json();
+
+        if (!data.ok) {
+            mostrarAlerta(data.error || 'Error al guardar permisos', 'danger');
+            return;
+        }
+        mostrarAlerta('Permisos guardados con éxito', 'success');
+    } catch (e) {
+        mostrarAlerta('Error de red: ' + e.message, 'danger');
+    }
 }
 
 function esc(s) {
