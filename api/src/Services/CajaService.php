@@ -87,8 +87,20 @@ final class CajaService
                 throw new HttpException('Caja no encontrada', 422);
             }
 
-            if ($this->repository->findOpenByBoxForUpdate($empresaId, $boxId) !== null) {
-                throw new HttpException('La caja ya se encuentra abierta', 422);
+            $forzar = !empty($payload['forzar']);
+            $existingOpening = $this->repository->findOpenByBoxForUpdate($empresaId, $boxId);
+
+            if ($existingOpening !== null) {
+                if (!$forzar) {
+                    $holder = $this->repository->findOpenByBoxWithUser($empresaId, $boxId);
+                    throw new HttpException('La caja ya se encuentra abierta', 422, [
+                        'caja_ocupada'   => ['true'],
+                        'usuario_nombre' => [$holder['usuario_nombre'] ?? 'Otro operador'],
+                        'usuario_email'  => [$holder['usuario_email'] ?? ''],
+                        'desde'          => [$holder['fecha_apertura'] ?? ''],
+                    ]);
+                }
+                $this->repository->forceCloseOpening((int) $existingOpening['id']);
             }
 
             if ($this->repository->findOpenByUserSucursalForUpdate($empresaId, $sucursalId, $userId) !== null) {

@@ -99,6 +99,31 @@ final class CajaRepository
         return is_array($row) ? $row : null;
     }
 
+    public function findOpenByBoxWithUser(int $empresaId, int $boxId): ?array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT ca.id, ca.usuario_id, ca.fecha_apertura,
+                    u.nombre AS usuario_nombre, u.email AS usuario_email
+             FROM caja_aperturas ca
+             JOIN usuarios u ON u.id = ca.usuario_id
+             WHERE ca.empresa_id = :empresa_id AND ca.caja_id = :caja_id AND ca.estado = \'ABIERTA\'
+             LIMIT 1'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'caja_id' => $boxId]);
+        $row = $statement->fetch();
+
+        return is_array($row) ? $row : null;
+    }
+
+    public function forceCloseOpening(int $openingId): void
+    {
+        $this->connection->prepare(
+            "UPDATE caja_aperturas SET estado = 'CERRADA', fecha_cierre = CURRENT_TIMESTAMP,
+             observacion_cierre = 'Sesión tomada por otro operador'
+             WHERE id = :id AND estado = 'ABIERTA'"
+        )->execute(['id' => $openingId]);
+    }
+
     public function findOpenByUserSucursalForUpdate(int $empresaId, int $sucursalId, int $userId): ?array
     {
         $statement = $this->connection->prepare(

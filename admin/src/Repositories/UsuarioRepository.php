@@ -54,9 +54,12 @@ class UsuarioRepository extends BaseRepository
             if ($existingUser) {
                 $usuarioId = (int)$existingUser['id'];
 
-                // Reactivar cuenta de usuario global si estaba inactiva
+                // Reactivar cuenta de usuario global si estaba inactiva; marcar email verificado
                 if ((int)$existingUser['activo'] === 0) {
-                    $this->db->prepare("UPDATE usuarios SET activo = 1 WHERE id = ?")
+                    $this->db->prepare("UPDATE usuarios SET activo = 1, email_verificado = 1 WHERE id = ?")
+                             ->execute([$usuarioId]);
+                } else {
+                    $this->db->prepare("UPDATE usuarios SET email_verificado = 1 WHERE id = ? AND email_verificado = 0")
                              ->execute([$usuarioId]);
                 }
 
@@ -91,7 +94,7 @@ class UsuarioRepository extends BaseRepository
                 }
             } else {
                 // Si no existe el usuario, crearlo en la tabla central y luego vincularlo
-                $sqlUser = "INSERT INTO usuarios (nombre, email, password_hash, activo) VALUES (?, ?, ?, 1)";
+                $sqlUser = "INSERT INTO usuarios (nombre, email, password_hash, activo, email_verificado) VALUES (?, ?, ?, 1, 1)";
                 $stmtUser = $this->db->prepare($sqlUser);
                 $stmtUser->execute([
                     $data['nombre'],
