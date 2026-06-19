@@ -236,6 +236,16 @@ $router->post('/api/v1/crm/leads/{id}/reply',              [$crmController, 'rep
 $router->post('/api/v1/crm/leads/{id}/convertir',          [$crmController, 'convertir']);
 $router->post('/api/v1/crm/leads/{id}/tareas',             [$crmController, 'crearTarea']);
 $router->put('/api/v1/crm/tareas/{tarea_id}/completar',    [$crmController, 'completarTarea']);
+$router->get('/api/v1/crm/agentes',                        [$crmController, 'agentes']);
+$router->get('/api/v1/crm/etapas',                         [$crmController, 'etapas']);
+$router->post('/api/v1/crm/etapas',                        [$crmController, 'saveEtapa']);
+$router->put('/api/v1/crm/etapas/{etapa_id}',              [$crmController, 'saveEtapa']);
+$router->get('/api/v1/crm/templates',                      [$crmController, 'templates']);
+$router->post('/api/v1/crm/templates',                     [$crmController, 'saveTemplate']);
+$router->put('/api/v1/crm/templates/{id}',                 [$crmController, 'saveTemplate']);
+$router->post('/api/v1/crm/leads/{id}/template',           [$crmController, 'sendTemplate']);
+$router->get('/api/v1/crm/broadcast',                      [$crmController, 'broadcasts']);
+$router->post('/api/v1/crm/broadcast',                     [$crmController, 'createBroadcast']);
 
 $whatsappController = new \Mypos\Controllers\WhatsappController();
 $router->post('/api/v1/whatsapp/token', [$whatsappController, 'generateToken']);

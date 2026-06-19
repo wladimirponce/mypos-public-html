@@ -485,9 +485,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // ---------------------------------------
 
             // --- HISTORIAL CRM: guardar mensaje + respuesta IA ---
+            $isNewConversation = !$row; // $row = null si se acaba de crear
             if ($conversationId) {
-                // intent: preferir el de la IA; fallback al clasificador KB
-                $kbIntent = (isset($conceptoDetectado) && $conceptoDetectado && strtoupper(trim($conceptoDetectado)) !== 'NADA')
+                $kbIntent  = (isset($conceptoDetectado) && $conceptoDetectado && strtoupper(trim($conceptoDetectado)) !== 'NADA')
                     ? mb_substr((string)$conceptoDetectado, 0, 80)
                     : null;
                 $intentLog = $intentFromAI ?? $kbIntent;
@@ -497,6 +497,133 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 )->execute([$conversationId, $userMessage, $aiResponse, $intentLog]);
             }
             // -----------------------------------------------------
+
+            // --- ASIGNACIÓN AUTOMÁTICA DE AGENTE (IA + reglas + fallback) ---
+            $asignadoId = null;
+            if ($conversationId && $empresaWhatsappId) {
+                // Verificar si ya tiene agente asignado
+                $stmtChk = $db->prepare('SELECT asignado_usuario_id FROM whatsapp_conversations WHERE id = ? LIMIT 1');
+                $stmtChk->execute([$conversationId]);
+                $convChk = $stmtChk->fetch(\PDO::FETCH_ASSOC);
+
+                if (empty($convChk['asignado_usuario_id'])) {
+                    // Capa 1a: regla por intent
+                    if ($intentFromAI) {
+                        $stmtR = $db->prepare(
+                            'SELECT usuario_id FROM crm_reglas_asignacion
+                             WHERE empresa_id = ? AND criterio = "intent" AND valor = ? AND activo = 1
+                             ORDER BY prioridad DESC LIMIT 1'
+                        );
+                        $stmtR->execute([$empresaWhatsappId, $intentFromAI]);
+                        $rr = $stmtR->fetch(\PDO::FETCH_ASSOC);
+                        if ($rr) $asignadoId = (int)$rr['usuario_id'];
+                    }
+
+                    // Capa 1b: regla por tipo_contacto
+                    if (!$asignadoId && $tipoFromAI) {
+                        $stmtR2 = $db->prepare(
+                            'SELECT usuario_id FROM crm_reglas_asignacion
+                             WHERE empresa_id = ? AND criterio = "tipo_contacto" AND valor = ? AND activo = 1
+                             ORDER BY prioridad DESC LIMIT 1'
+                        );
+                        $stmtR2->execute([$empresaWhatsappId, $tipoFromAI]);
+                        $rr2 = $stmtR2->fetch(\PDO::FETCH_ASSOC);
+                        if ($rr2) $asignadoId = (int)$rr2['usuario_id'];
+                    }
+
+                    // Capa 2: fallback — usuario con menos conversaciones abiertas
+                    if (!$asignadoId) {
+                        $stmtFb = $db->prepare(
+                            'SELECT eu.usuario_id, COUNT(wc.id) AS carga
+                             FROM empresa_usuarios eu
+                             LEFT JOIN whatsapp_conversations wc
+                                    ON wc.empresa_id   = eu.empresa_id
+                                   AND wc.asignado_usuario_id = eu.usuario_id
+                                   AND wc.estado_lead NOT IN ("CONVERTIDO","DESCARTADO")
+                             WHERE eu.empresa_id = ? AND eu.activo = 1
+                             GROUP BY eu.usuario_id
+                             ORDER BY carga ASC LIMIT 1'
+                        );
+                        $stmtFb->execute([$empresaWhatsappId]);
+                        $fbRow = $stmtFb->fetch(\PDO::FETCH_ASSOC);
+                        if ($fbRow) $asignadoId = (int)$fbRow['usuario_id'];
+                    }
+
+                    if ($asignadoId) {
+                        $db->prepare(
+                            'UPDATE whatsapp_conversations SET asignado_usuario_id = ?, leido = 0 WHERE id = ?'
+                        )->execute([$asignadoId, $conversationId]);
+                    }
+                } else {
+                    $asignadoId = (int)$convChk['asignado_usuario_id'];
+                    // Marcar como no leído para que el agente vea el nuevo mensaje
+                    $db->prepare('UPDATE whatsapp_conversations SET leido = 0 WHERE id = ?')
+                       ->execute([$conversationId]);
+                }
+            }
+            // -------------------------------------------------------------------
+
+            // --- NOTIFICACIÓN EMAIL AL AGENTE (solo en conversaciones nuevas) ---
+            if ($isNewConversation && $asignadoId && $empresaWhatsappId) {
+                try {
+                    $stmtUsr = $db->prepare('SELECT nombre, email FROM usuarios WHERE id = ? LIMIT 1');
+                    $stmtUsr->execute([$asignadoId]);
+                    $agente = $stmtUsr->fetch(\PDO::FETCH_ASSOC);
+
+                    $stmtEmp = $db->prepare('SELECT razon_social FROM empresas WHERE id = ? LIMIT 1');
+                    $stmtEmp->execute([$empresaWhatsappId]);
+                    $empresa = $stmtEmp->fetch(\PDO::FETCH_ASSOC);
+
+                    if ($agente && !empty($agente['email'])) {
+                        $nombreCliente = $userName ?: $from;
+                        $razonSocial   = $empresa['razon_social'] ?? 'MyPOS';
+                        $intentLabel   = $intentFromAI ?? 'nuevo mensaje';
+                        $primerMsg     = mb_substr($userMessage, 0, 200);
+
+                        $mailHost = getenv('MAIL_HOST') ?: '';
+                        $mailUser = getenv('MAIL_USERNAME') ?: '';
+                        $mailPass = getenv('MAIL_PASSWORD') ?: '';
+                        $mailFrom = getenv('MAIL_FROM_ADDRESS') ?: 'noreply@mypos.cl';
+                        $mailName = getenv('MAIL_FROM_NAME') ?: 'MyPOS CRM';
+                        $mailPort = (int)(getenv('MAIL_PORT') ?: 587);
+
+                        $subject = "🔔 Nuevo lead WhatsApp: $nombreCliente ($intentLabel) — $razonSocial";
+                        $body    = "Hola {$agente['nombre']},\n\nTienes un nuevo contacto asignado en el CRM WhatsApp.\n\n"
+                                 . "Nombre: $nombreCliente\n"
+                                 . "Teléfono: $from\n"
+                                 . "Tema: $intentLabel\n"
+                                 . "Empresa: $razonSocial\n\n"
+                                 . "Primer mensaje:\n\"$primerMsg\"\n\n"
+                                 . "Ingresa al CRM: https://www.mypos.cl/app/crm\n\n"
+                                 . "— MyPOS CRM";
+
+                        if ($mailHost !== '' && $mailUser !== '') {
+                            $mail = new \PHPMailer\PHPMailer\PHPMailer(false);
+                            $mail->isSMTP();
+                            $mail->Host       = $mailHost;
+                            $mail->Port       = $mailPort;
+                            $mail->SMTPAuth   = true;
+                            $mail->Username   = $mailUser;
+                            $mail->Password   = $mailPass;
+                            $mail->SMTPSecure = $mailPort === 465
+                                ? \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS
+                                : \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+                            $mail->CharSet    = 'UTF-8';
+                            $mail->setFrom($mailFrom, $mailName);
+                            $mail->addAddress($agente['email'], $agente['nombre']);
+                            $mail->Subject = $subject;
+                            $mail->Body    = $body;
+                            $mail->send();
+                        } else {
+                            // Fallback: mail() nativo
+                            mail($agente['email'], $subject, $body, "From: $mailFrom\r\nContent-Type: text/plain; charset=UTF-8\r\n");
+                        }
+                    }
+                } catch (\Throwable $mailErr) {
+                    file_put_contents($log_file, "MAIL ERROR: " . $mailErr->getMessage() . "\n", FILE_APPEND);
+                }
+            }
+            // -------------------------------------------------------------------
 
             // Enviar respuesta por WhatsApp
             $response_data = [
