@@ -225,11 +225,17 @@ $onboardingController = new OnboardingController();
 $router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);
 
 $crmController = new \Mypos\Controllers\CrmController();
-$router->get('/api/v1/crm/leads',                    [$crmController, 'index']);
-$router->get('/api/v1/crm/count',                    [$crmController, 'count']);
-$router->get('/api/v1/crm/leads/{id}/mensajes',      [$crmController, 'messages']);
-$router->put('/api/v1/crm/leads/{id}',               [$crmController, 'update']);
-$router->post('/api/v1/crm/leads/{id}/reply',        [$crmController, 'reply']);
+$router->get('/api/v1/crm/leads',                          [$crmController, 'index']);
+$router->get('/api/v1/crm/count',                          [$crmController, 'count']);
+$router->get('/api/v1/crm/stats',                          [$crmController, 'stats']);
+$router->get('/api/v1/crm/leads/{id}/mensajes',            [$crmController, 'messages']);
+$router->get('/api/v1/crm/leads/{id}/cliente',             [$crmController, 'clienteInfo']);
+$router->get('/api/v1/crm/leads/{id}/tareas',              [$crmController, 'tareas']);
+$router->put('/api/v1/crm/leads/{id}',                     [$crmController, 'update']);
+$router->post('/api/v1/crm/leads/{id}/reply',              [$crmController, 'reply']);
+$router->post('/api/v1/crm/leads/{id}/convertir',          [$crmController, 'convertir']);
+$router->post('/api/v1/crm/leads/{id}/tareas',             [$crmController, 'crearTarea']);
+$router->put('/api/v1/crm/tareas/{tarea_id}/completar',    [$crmController, 'completarTarea']);
 
 $whatsappController = new \Mypos\Controllers\WhatsappController();
 $router->post('/api/v1/whatsapp/token', [$whatsappController, 'generateToken']);

@@ -120,6 +120,12 @@ final class CrmController
             );
             $stmtM->execute([$id]);
 
+            // Marcar como leída (defensivo: columna puede no existir aún)
+            try {
+                $db->prepare('UPDATE whatsapp_conversations SET leido = 1 WHERE id = ?')
+                   ->execute([$id]);
+            } catch (\Throwable $ignored) {}
+
             Response::success([
                 'conversation' => $conv,
                 'messages'     => $stmtM->fetchAll(),
@@ -186,17 +192,316 @@ final class CrmController
         }
     }
 
+    public function clienteInfo(array $params = []): void
+    {
+        try {
+            [$empresaId] = $this->auth();
+            $id = (int)($params['id'] ?? 0);
+            if ($id <= 0) throw new HttpException('ID inválido', 400);
+
+            $db   = Database::connection();
+            $conv = $db->prepare(
+                'SELECT cliente_id, phone_number, user_name FROM whatsapp_conversations
+                 WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL) LIMIT 1'
+            );
+            $conv->execute([$id, $empresaId]);
+            $row = $conv->fetch();
+            if (!$row) throw new HttpException('Conversación no encontrada', 404);
+
+            $result = ['cliente_id' => null, 'cliente' => null, 'ventas' => [], 'credito_pendiente' => 0];
+
+            if ($row['cliente_id']) {
+                $result['cliente_id'] = (int)$row['cliente_id'];
+
+                // Datos del cliente
+                $stmtC = $db->prepare(
+                    'SELECT id, nombre, razon_social, rut, email, telefono, tipo_cliente,
+                            permite_credito, limite_credito
+                     FROM clientes WHERE id = ? AND empresa_id = ? LIMIT 1'
+                );
+                $stmtC->execute([$row['cliente_id'], $empresaId]);
+                $result['cliente'] = $stmtC->fetch() ?: null;
+
+                // Últimas 5 ventas + resumen
+                $stmtV = $db->prepare(
+                    'SELECT id, folio, fecha_venta, total, condicion_pago, estado
+                     FROM ventas
+                     WHERE cliente_id = ? AND empresa_id = ? AND estado != "ANULADA"
+                     ORDER BY fecha_venta DESC LIMIT 5'
+                );
+                $stmtV->execute([$row['cliente_id'], $empresaId]);
+                $result['ventas'] = $stmtV->fetchAll();
+
+                // Resumen histórico
+                $stmtR = $db->prepare(
+                    'SELECT COUNT(*) AS total_ventas,
+                            COALESCE(SUM(total), 0) AS total_comprado,
+                            COALESCE(AVG(total), 0) AS ticket_promedio,
+                            MAX(fecha_venta)         AS ultima_compra
+                     FROM ventas
+                     WHERE cliente_id = ? AND empresa_id = ? AND estado != "ANULADA"'
+                );
+                $stmtR->execute([$row['cliente_id'], $empresaId]);
+                $result['resumen'] = $stmtR->fetch();
+
+                // Crédito pendiente
+                $stmtCr = $db->prepare(
+                    'SELECT COALESCE(SUM(saldo_pendiente), 0) AS credito_pendiente
+                     FROM creditos_clientes
+                     WHERE cliente_id = ? AND empresa_id = ? AND estado IN ("PENDIENTE","PARCIAL")'
+                );
+                $stmtCr->execute([$row['cliente_id'], $empresaId]);
+                $result['credito_pendiente'] = (int)($stmtCr->fetchColumn() ?? 0);
+            }
+
+            Response::success($result);
+        } catch (HttpException $e) {
+            Response::error($e->getMessage(), null, $e->statusCode());
+        } catch (Throwable $e) {
+            error_log($e->getMessage());
+            Response::error('Error al obtener datos del cliente', null, 500);
+        }
+    }
+
+    public function convertir(array $params = []): void
+    {
+        try {
+            [$empresaId, $userId] = $this->auth();
+            $id = (int)($params['id'] ?? 0);
+            if ($id <= 0) throw new HttpException('ID inválido', 400);
+
+            $db   = Database::connection();
+            $conv = $db->prepare(
+                'SELECT id, cliente_id, phone_number, user_name FROM whatsapp_conversations
+                 WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL) LIMIT 1'
+            );
+            $conv->execute([$id, $empresaId]);
+            $row = $conv->fetch();
+            if (!$row) throw new HttpException('Conversación no encontrada', 404);
+
+            $clienteId = $row['cliente_id'] ? (int)$row['cliente_id'] : null;
+
+            if (!$clienteId) {
+                // Buscar si ya existe cliente con ese teléfono
+                $tel  = preg_replace('/\s+/', '', (string)$row['phone_number']);
+                $stmtE = $db->prepare(
+                    "SELECT id FROM clientes
+                     WHERE empresa_id = ? AND REPLACE(REPLACE(telefono,' ',''),'+','') = ? AND deleted_at IS NULL LIMIT 1"
+                );
+                $stmtE->execute([$empresaId, ltrim($tel, '+')]);
+                $existing = $stmtE->fetchColumn();
+
+                if ($existing) {
+                    $clienteId = (int)$existing;
+                } else {
+                    $nombre = mb_substr(trim((string)$row['user_name']) ?: 'Sin nombre', 0, 100);
+                    $db->prepare(
+                        'INSERT INTO clientes
+                         (empresa_id, tipo_cliente, rut, nombre, razon_social, nombre_fantasia,
+                          giro, email, telefono, direccion, comuna, ciudad,
+                          activo, credito_habilitado, permite_credito, limite_credito, observacion)
+                         VALUES (?, "PERSONA", "", ?, ?, "", "", "", ?, "", "", "", 1, 0, 0, 0, "Creado desde CRM WhatsApp")'
+                    )->execute([$empresaId, $nombre, $nombre, $row['phone_number']]);
+                    $clienteId = (int)$db->lastInsertId();
+                }
+            }
+
+            // Actualizar conversación
+            $db->prepare(
+                'UPDATE whatsapp_conversations
+                 SET cliente_id = ?, tipo_contacto = "CLIENTE_CAUTIVO", estado_lead = "CONVERTIDO"
+                 WHERE id = ?'
+            )->execute([$clienteId, $id]);
+
+            Response::success(['cliente_id' => $clienteId]);
+        } catch (HttpException $e) {
+            Response::error($e->getMessage(), null, $e->statusCode());
+        } catch (Throwable $e) {
+            error_log($e->getMessage());
+            Response::error('Error al convertir lead', null, 500);
+        }
+    }
+
+    public function stats(): void
+    {
+        try {
+            [$empresaId] = $this->auth();
+            $db = Database::connection();
+
+            $funnelStmt = $db->prepare(
+                'SELECT estado_lead, COUNT(*) AS total
+                 FROM whatsapp_conversations
+                 WHERE (empresa_id = ? OR empresa_id IS NULL)
+                 GROUP BY estado_lead'
+            );
+            $funnelStmt->execute([$empresaId]);
+            $funnelRows = $funnelStmt->fetchAll();
+            $funnel = [];
+            foreach ($funnelRows as $r) {
+                $funnel[$r['estado_lead']] = (int)$r['total'];
+            }
+
+            $metaStmt = $db->prepare(
+                'SELECT
+                    COUNT(*) AS total,
+                    SUM(DATE(created_at) = CURDATE()) AS hoy,
+                    SUM(created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)) AS semana,
+                    SUM(created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS mes,
+                    SUM(estado_lead = "CONVERTIDO") AS convertidos,
+                    SUM(COALESCE(leido, 1) = 0) AS no_leidos
+                 FROM whatsapp_conversations
+                 WHERE (empresa_id = ? OR empresa_id IS NULL)'
+            );
+            $metaStmt->execute([$empresaId]);
+            $meta = $metaStmt->fetch();
+
+            $total = (int)($meta['total'] ?? 1);
+            $conversion = $total > 0
+                ? round(((int)($meta['convertidos'] ?? 0)) / $total * 100, 1)
+                : 0;
+
+            $intentsStmt = $db->prepare(
+                'SELECT wm.intent, COUNT(*) AS total
+                 FROM whatsapp_messages wm
+                 JOIN whatsapp_conversations wc ON wc.id = wm.conversation_id
+                 WHERE wm.intent IS NOT NULL
+                   AND (wc.empresa_id = ? OR wc.empresa_id IS NULL)
+                 GROUP BY wm.intent
+                 ORDER BY total DESC
+                 LIMIT 6'
+            );
+            $intentsStmt->execute([$empresaId]);
+
+            $mensajesStmt = $db->prepare(
+                'SELECT COUNT(*) FROM whatsapp_messages wm
+                 JOIN whatsapp_conversations wc ON wc.id = wm.conversation_id
+                 WHERE (wc.empresa_id = ? OR wc.empresa_id IS NULL)'
+            );
+            $mensajesStmt->execute([$empresaId]);
+
+            Response::success([
+                'funnel'        => $funnel,
+                'total'         => $total,
+                'hoy'           => (int)($meta['hoy'] ?? 0),
+                'semana'        => (int)($meta['semana'] ?? 0),
+                'mes'           => (int)($meta['mes'] ?? 0),
+                'convertidos'   => (int)($meta['convertidos'] ?? 0),
+                'no_leidos'     => (int)($meta['no_leidos'] ?? 0),
+                'tasa_conversion' => $conversion,
+                'mensajes_total' => (int)$mensajesStmt->fetchColumn(),
+                'top_intents'   => $intentsStmt->fetchAll(),
+            ]);
+        } catch (HttpException $e) {
+            Response::error($e->getMessage(), null, $e->statusCode());
+        } catch (Throwable $e) {
+            error_log($e->getMessage());
+            Response::error('Error al obtener estadísticas', null, 500);
+        }
+    }
+
+    public function tareas(array $params = []): void
+    {
+        try {
+            [$empresaId] = $this->auth();
+            $id = (int)($params['id'] ?? 0);
+            if ($id <= 0) throw new HttpException('ID inválido', 400);
+
+            $db = Database::connection();
+            $db->prepare(
+                'SELECT 1 FROM whatsapp_conversations WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL) LIMIT 1'
+            )->execute([$id, $empresaId]);
+
+            $stmt = $db->prepare(
+                'SELECT id, titulo, fecha_vencimiento, completada, completada_en, creado_por, created_at
+                 FROM crm_tareas WHERE conversation_id = ? ORDER BY completada ASC, fecha_vencimiento ASC'
+            );
+            $stmt->execute([$id]);
+            Response::success($stmt->fetchAll());
+        } catch (HttpException $e) {
+            Response::error($e->getMessage(), null, $e->statusCode());
+        } catch (Throwable $e) {
+            error_log($e->getMessage());
+            Response::error('Error al obtener tareas', null, 500);
+        }
+    }
+
+    public function crearTarea(array $params = []): void
+    {
+        try {
+            [$empresaId, $userId] = $this->auth();
+            $id   = (int)($params['id'] ?? 0);
+            if ($id <= 0) throw new HttpException('ID inválido', 400);
+
+            $body = Request::json();
+            $titulo = mb_substr(trim($body['titulo'] ?? ''), 0, 255);
+            if ($titulo === '') throw new HttpException('Título obligatorio', 422);
+
+            $fecha = null;
+            if (!empty($body['fecha_vencimiento'])) {
+                $fecha = date('Y-m-d H:i:s', strtotime($body['fecha_vencimiento'])) ?: null;
+            }
+
+            $db = Database::connection();
+            $db->prepare(
+                'INSERT INTO crm_tareas (conversation_id, titulo, fecha_vencimiento, creado_por)
+                 VALUES (?, ?, ?, ?)'
+            )->execute([$id, $titulo, $fecha, $userId]);
+
+            $newId = (int)$db->lastInsertId();
+            $stmt  = $db->prepare('SELECT * FROM crm_tareas WHERE id = ?');
+            $stmt->execute([$newId]);
+            Response::success($stmt->fetch());
+        } catch (HttpException $e) {
+            Response::error($e->getMessage(), null, $e->statusCode());
+        } catch (Throwable $e) {
+            error_log($e->getMessage());
+            Response::error('Error al crear tarea', null, 500);
+        }
+    }
+
+    public function completarTarea(array $params = []): void
+    {
+        try {
+            [$empresaId] = $this->auth();
+            $tareaId = (int)($params['tarea_id'] ?? 0);
+            if ($tareaId <= 0) throw new HttpException('ID inválido', 400);
+
+            $db = Database::connection();
+            $db->prepare(
+                'UPDATE crm_tareas t
+                 INNER JOIN whatsapp_conversations wc ON wc.id = t.conversation_id
+                 SET t.completada = IF(t.completada=1,0,1),
+                     t.completada_en = IF(t.completada=0, NOW(), NULL)
+                 WHERE t.id = ? AND (wc.empresa_id = ? OR wc.empresa_id IS NULL)'
+            )->execute([$tareaId, $empresaId]);
+
+            Response::success(['toggled' => true]);
+        } catch (HttpException $e) {
+            Response::error($e->getMessage(), null, $e->statusCode());
+        } catch (Throwable $e) {
+            error_log($e->getMessage());
+            Response::error('Error al actualizar tarea', null, 500);
+        }
+    }
+
     public function count(): void
     {
         try {
             [$empresaId] = $this->auth();
             $db   = Database::connection();
             $stmt = $db->prepare(
-                "SELECT COUNT(*) FROM whatsapp_conversations
-                 WHERE (empresa_id = ? OR empresa_id IS NULL) AND estado_lead = 'NUEVO'"
+                "SELECT
+                    SUM(estado_lead = 'NUEVO') AS nuevos,
+                    SUM(COALESCE(leido, 1) = 0) AS no_leidos
+                 FROM whatsapp_conversations
+                 WHERE (empresa_id = ? OR empresa_id IS NULL)"
             );
             $stmt->execute([$empresaId]);
-            Response::success(['nuevos' => (int)$stmt->fetchColumn()]);
+            $row = $stmt->fetch();
+            Response::success([
+                'nuevos'    => (int)($row['nuevos']    ?? 0),
+                'no_leidos' => (int)($row['no_leidos'] ?? 0),
+            ]);
         } catch (HttpException $e) {
             Response::error($e->getMessage(), null, $e->statusCode());
         } catch (Throwable $e) {
