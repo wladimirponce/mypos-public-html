@@ -24,12 +24,13 @@ final class CrmController
             $tipo   = trim($_GET['tipo']   ?? '');
             $estado = trim($_GET['estado'] ?? '');
             $q      = trim($_GET['q']      ?? '');
+            $fecha  = trim($_GET['fecha']  ?? '');
             $page   = max(1, (int)($_GET['page'] ?? 1));
             $limit  = 40;
             $offset = ($page - 1) * $limit;
 
-            $where  = ['(wc.empresa_id = ? OR (wc.empresa_id IS NULL AND ? IS NULL))'];
-            $params = [$empresaId, $empresaId];
+            $where  = ['(wc.empresa_id = ? OR wc.empresa_id IS NULL)'];
+            $params = [$empresaId];
 
             if ($tipo !== '') {
                 $where[]  = 'wc.tipo_contacto = ?';
@@ -44,6 +45,13 @@ final class CrmController
                 $like     = '%' . $q . '%';
                 $params[] = $like;
                 $params[] = $like;
+            }
+            if ($fecha === 'hoy') {
+                $where[] = 'DATE(wc.created_at) = CURDATE()';
+            } elseif ($fecha === 'semana') {
+                $where[] = 'wc.created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)';
+            } elseif ($fecha === 'mes') {
+                $where[] = 'wc.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
             }
 
             $whereSql = 'WHERE ' . implode(' AND ', $where);
@@ -72,6 +80,7 @@ final class CrmController
                     wc.cliente_id,
                     wc.last_activity,
                     wc.created_at,
+                    COALESCE(wc.leido, 1) AS leido,
                     COUNT(wm.id) AS mensaje_count
                 FROM whatsapp_conversations wc
                 LEFT JOIN whatsapp_messages wm ON wm.conversation_id = wc.id
