@@ -87,12 +87,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $data = json_decode($input, true);
 
     $log_file = __DIR__ . '/webhook_log.txt';
-    
+
+    // Identificar a qué número llegó el mensaje (permite multi-empresa)
+    $phoneNumberId = $data['entry'][0]['changes'][0]['value']['metadata']['phone_number_id'] ?? '';
+
     $from = null;
     $userMessage = '';
     $userName = '';
     $messageId = '';
-    
+
     if (isset($data['entry'][0]['changes'][0]['value']['messages'][0])) {
         $message = $data['entry'][0]['changes'][0]['value']['messages'][0];
         $from = $message['from'];
@@ -183,10 +186,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // --- FIN INTERCEPCION ---
 
         try {
-            // --- MEMORIA DE CONVERSACION ---
+            // --- RESOLUCIÓN DE EMPRESA POR NÚMERO ---
             $db = \Mypos\Config\Database::connection();
-            $stmt = $db->prepare('SELECT id, context_summary FROM whatsapp_conversations WHERE phone_number = ?');
-            $stmt->execute([$from]);
+            $empresaWhatsappId = null;
+            $empresaAccessToken = $access_token;
+            $empresaApiUrl      = $api_url;
+
+            if ($phoneNumberId !== '') {
+                $stmtCfg = $db->prepare(
+                    'SELECT empresa_id, access_token FROM empresa_whatsapp_config WHERE phone_number_id = ? AND activo = 1 LIMIT 1'
+                );
+                $stmtCfg->execute([$phoneNumberId]);
+                $cfgRow = $stmtCfg->fetch(\PDO::FETCH_ASSOC);
+                if ($cfgRow) {
+                    $empresaWhatsappId  = (int)$cfgRow['empresa_id'];
+                    $empresaAccessToken = $cfgRow['access_token'];
+                    $empresaApiUrl      = 'https://graph.facebook.com/v25.0/' . $phoneNumberId . '/messages';
+                }
+            }
+            // -----------------------------------------
+
+            // --- MEMORIA DE CONVERSACION ---
+            $stmt = $db->prepare('SELECT id, context_summary FROM whatsapp_conversations WHERE phone_number = ? AND (empresa_id = ? OR (empresa_id IS NULL AND ? IS NULL))');
+            $stmt->execute([$from, $empresaWhatsappId, $empresaWhatsappId]);
             $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
             $contextSummary = '';
@@ -201,16 +223,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
                 $fromNorm = ltrim(preg_replace('/\s+/', '', $from), '+');
                 $stmtCli->execute([$fromNorm]);
-                $clienteRow  = $stmtCli->fetch(\PDO::FETCH_ASSOC);
-                $clienteId   = $clienteRow ? (int)$clienteRow['id'] : null;
+                $clienteRow   = $stmtCli->fetch(\PDO::FETCH_ASSOC);
+                $clienteId    = $clienteRow ? (int)$clienteRow['id'] : null;
                 $tipoContacto = $clienteId ? 'CLIENTE_CAUTIVO' : 'LEAD';
-
                 $primerMensaje = mb_substr($userMessage, 0, 65535);
 
                 $stmtIns = $db->prepare(
-                    'INSERT INTO whatsapp_conversations (phone_number, user_name, cliente_id, tipo_contacto, primer_mensaje) VALUES (?, ?, ?, ?, ?)'
+                    'INSERT INTO whatsapp_conversations (empresa_id, phone_number, user_name, cliente_id, tipo_contacto, primer_mensaje) VALUES (?, ?, ?, ?, ?, ?)'
                 );
-                $stmtIns->execute([$from, $userName, $clienteId, $tipoContacto, $primerMensaje]);
+                $stmtIns->execute([$empresaWhatsappId, $from, $userName, $clienteId, $tipoContacto, $primerMensaje]);
                 $conversationId = (int)$db->lastInsertId();
             }
             // --------------------------------
@@ -474,16 +495,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $options = [
                 'http' => [
-                    'header' => "Content-Type: application/json\r\nAuthorization: Bearer " . $access_token . "\r\n",
-                    'method' => 'POST',
-                    'content' => json_encode($response_data),
-                    'timeout' => 15,
-                    'ignore_errors' => true
+                    'header'        => "Content-Type: application/json\r\nAuthorization: Bearer " . $empresaAccessToken . "\r\n",
+                    'method'        => 'POST',
+                    'content'       => json_encode($response_data),
+                    'timeout'       => 15,
+                    'ignore_errors' => true,
                 ]
             ];
-            
+
             $context = stream_context_create($options);
-            $result = file_get_contents($api_url, false, $context);
+            $result = file_get_contents($empresaApiUrl, false, $context);
             
         } catch (Exception $e) {
             file_put_contents($log_file, "ERROR: " . $e->getMessage() . "\n", FILE_APPEND);

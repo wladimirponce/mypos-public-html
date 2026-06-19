@@ -67,7 +67,7 @@ if (isset($_GET['switch_empresa'])) {
 
 // —— Módulo activo ——
 $module = $_GET['module'] ?? 'empresas';
-$allowed = ['clientes_mypos','emision','consultas','historial','libros','empresas','config','certificacion','cafs','pos_urgencia','dispositivos',];
+$allowed = ['clientes_mypos','emision','consultas','historial','libros','empresas','config','certificacion','cafs','pos_urgencia','dispositivos','whatsapp',];
 if (!in_array($module, $allowed)) $module = 'empresas';
 
 // —— Intentar conexión DB (opcional, no bloquea) ——
@@ -119,6 +119,7 @@ $titles = [
     'historial'     => ['Historial DTE', 'Documentos emitidos'],
     'libros'        => ['Libros & RCOF', 'Reportes tributarios'],
     'certificacion' => ['Certificación SII', 'Pool de pruebas (Solo No-Prod)'],
+    'whatsapp'      => ['WhatsApp Business', 'Asignación de números por empresa'],
 ];
 
 $pageTitle = $titles[$module][0] ?? 'Dashboard';
@@ -208,6 +209,10 @@ $pageSubtitle = $titles[$module][1] ?? '';
             </a>
             <a href="dashboard.php?module=clientes_mypos" class="dash-nav-item <?= $module === 'clientes_mypos' ? 'active' : '' ?>">
                 <i class="bi bi-clipboard2-pulse"></i> Clientes MyPOS
+            </a>
+            <a href="dashboard.php?module=whatsapp" class="dash-nav-item <?= $module === 'whatsapp' ? 'active' : '' ?>"
+               style="color:#25d366;">
+                <i class="bi bi-whatsapp"></i> WhatsApp
             </a>
 
             <div class="dash-nav-section">2. Operación y Hardware</div>
@@ -327,7 +332,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <div class="dash-content">
             <?php
             $moduleFile = __DIR__ . "/modules/{$module}.php";
-            $globalModules = ['clientes_mypos', 'empresas'];
+            $globalModules = ['clientes_mypos', 'empresas', 'whatsapp'];
             if (!$globalContext && !in_array($module, $globalModules, true)) {
                 echo '<div class="d-alert warning"><i class="bi bi-building-exclamation"></i> Seleccione una empresa para acceder a este modulo.</div>';
             } elseif (file_exists($moduleFile)) {

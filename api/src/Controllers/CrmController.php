@@ -9,6 +9,7 @@ use Mypos\Core\HttpException;
 use Mypos\Core\Request;
 use Mypos\Core\Response;
 use Mypos\Middleware\AuthMiddleware;
+use Mypos\Middleware\TenantMiddleware;
 use Throwable;
 
 final class CrmController
@@ -18,7 +19,7 @@ final class CrmController
     public function index(): void
     {
         try {
-            (new AuthMiddleware())->handle();
+            [$empresaId] = $this->auth();
 
             $tipo   = trim($_GET['tipo']   ?? '');
             $estado = trim($_GET['estado'] ?? '');
@@ -27,8 +28,8 @@ final class CrmController
             $limit  = 40;
             $offset = ($page - 1) * $limit;
 
-            $where  = [];
-            $params = [];
+            $where  = ['(wc.empresa_id = ? OR (wc.empresa_id IS NULL AND ? IS NULL))'];
+            $params = [$empresaId, $empresaId];
 
             if ($tipo !== '') {
                 $where[]  = 'wc.tipo_contacto = ?';
@@ -45,26 +46,28 @@ final class CrmController
                 $params[] = $like;
             }
 
-            $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+            $whereSql = 'WHERE ' . implode(' AND ', $where);
 
-            $countStmt = Database::connection()->prepare(
+            $db = Database::connection();
+
+            $countStmt = $db->prepare(
                 "SELECT COUNT(*) FROM whatsapp_conversations wc $whereSql"
             );
             $countStmt->execute($params);
             $total = (int)$countStmt->fetchColumn();
 
-            $params[] = $limit;
-            $params[] = $offset;
-
-            $stmt = Database::connection()->prepare("
+            $listParams   = array_merge($params, [$limit, $offset]);
+            $stmt = $db->prepare("
                 SELECT
                     wc.id,
+                    wc.empresa_id,
                     wc.phone_number,
                     wc.user_name,
                     wc.tipo_contacto,
                     wc.estado_lead,
                     wc.plan_interes,
                     wc.primer_mensaje,
+                    wc.context_summary,
                     wc.notas_internas,
                     wc.cliente_id,
                     wc.last_activity,
@@ -77,7 +80,7 @@ final class CrmController
                 ORDER BY wc.last_activity DESC
                 LIMIT ? OFFSET ?
             ");
-            $stmt->execute($params);
+            $stmt->execute($listParams);
 
             Response::success([
                 'data'  => $stmt->fetchAll(),
@@ -96,14 +99,16 @@ final class CrmController
     public function messages(array $params = []): void
     {
         try {
-            (new AuthMiddleware())->handle();
+            [$empresaId] = $this->auth();
 
             $id = (int)($params['id'] ?? 0);
             if ($id <= 0) throw new HttpException('ID inválido', 400);
 
             $db   = Database::connection();
-            $stmt = $db->prepare('SELECT * FROM whatsapp_conversations WHERE id = ? LIMIT 1');
-            $stmt->execute([$id]);
+            $stmt = $db->prepare(
+                'SELECT * FROM whatsapp_conversations WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL) LIMIT 1'
+            );
+            $stmt->execute([$id, $empresaId]);
             $conv = $stmt->fetch();
             if (!$conv) throw new HttpException('Conversación no encontrada', 404);
 
@@ -130,7 +135,7 @@ final class CrmController
     public function update(array $params = []): void
     {
         try {
-            (new AuthMiddleware())->handle();
+            [$empresaId] = $this->auth();
 
             $id = (int)($params['id'] ?? 0);
             if ($id <= 0) throw new HttpException('ID inválido', 400);
@@ -164,8 +169,11 @@ final class CrmController
             if (empty($sets)) throw new HttpException('Sin campos a actualizar', 422);
 
             $values[] = $id;
-            $stmt     = Database::connection()->prepare(
-                'UPDATE whatsapp_conversations SET ' . implode(', ', $sets) . ' WHERE id = ?'
+            $values[] = $empresaId;
+
+            $stmt = Database::connection()->prepare(
+                'UPDATE whatsapp_conversations SET ' . implode(', ', $sets) .
+                ' WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL)'
             );
             $stmt->execute($values);
 
@@ -176,5 +184,20 @@ final class CrmController
             error_log($e->getMessage());
             Response::error('Error al actualizar lead', null, 500);
         }
+    }
+
+    /** Autentica y valida tenancy. Retorna [empresaId, userId]. */
+    private function auth(): array
+    {
+        $claims    = (new AuthMiddleware())->handle();
+        $userId    = (int)$claims['user_id'];
+        $empresaId = (int)($_GET['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            $body      = Request::json();
+            $empresaId = (int)($body['empresa_id'] ?? 0);
+        }
+        if ($empresaId <= 0) throw new HttpException('empresa_id obligatorio', 422);
+        (new TenantMiddleware())->handle($userId, $empresaId);
+        return [$empresaId, $userId];
     }
 }
