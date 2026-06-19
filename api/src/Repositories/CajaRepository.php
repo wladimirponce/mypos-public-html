@@ -118,8 +118,7 @@ final class CajaRepository
     public function forceCloseOpening(int $openingId): void
     {
         $this->connection->prepare(
-            "UPDATE caja_aperturas SET estado = 'CERRADA', fecha_cierre = CURRENT_TIMESTAMP,
-             observacion_cierre = 'Sesión tomada por otro operador'
+            "UPDATE caja_aperturas SET estado = 'CERRADA', updated_at = CURRENT_TIMESTAMP
              WHERE id = :id AND estado = 'ABIERTA'"
         )->execute(['id' => $openingId]);
     }
