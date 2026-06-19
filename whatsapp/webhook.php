@@ -323,11 +323,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]
                 ];
                 $context = stream_context_create($options);
+                // Suprimir el E_WARNING de file_get_contents para evitar que la URL
+                // (que contiene el API key) quede expuesta en el log de errores.
+                set_error_handler(function($errno, $errstr) use ($log_file) {
+                    $safe = preg_replace('/key=[A-Za-z0-9_\-\.]+/', 'key=***', $errstr);
+                    file_put_contents($log_file, "Gemini HTTP Warning: $safe\n", FILE_APPEND);
+                    return true;
+                }, E_WARNING);
                 $res = file_get_contents($gemini_endpoint, false, $context);
-                
+                restore_error_handler();
+
                 $used_tokens = 0;
-                
-                if (isset($http_response_header) && is_array($http_response_header)) {
+
+                if (isset($http_response_header) && is_array($http_response_header) && isset($http_response_header[0])) {
                     if (preg_match('/HTTP\/\d+\.\d+\s+429/', $http_response_header[0])) {
                         $updateKeyUsage($keyInfo['id'], 0, true);
                         return $callGemini($sysInstruction, $userMsg);
@@ -400,6 +408,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $aiResponseRaw = $resFinal['text'];
             $total_tokens_consumed += $resFinal['tokens'];
             
+            // Reconectar si MySQL cerró la conexión idle durante las llamadas a Gemini (error 2006)
+            try {
+                $db->query('SELECT 1');
+            } catch (\PDOException $e) {
+                \Mypos\Config\Database::reset();
+                $db = \Mypos\Config\Database::connection();
+            }
+
             // Actualizar total gastado en BD
             if ($total_tokens_consumed > 0) {
                 $stmtTk = $db->prepare('UPDATE whatsapp_conversations SET total_tokens_used = total_tokens_used + ? WHERE phone_number = ?');

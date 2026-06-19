@@ -224,6 +224,11 @@ $router->post('/api/v1/auth/verify-email', [$authController, 'verifyEmail']);
 $onboardingController = new OnboardingController();
 $router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);
 
+$crmController = new \Mypos\Controllers\CrmController();
+$router->get('/api/v1/crm/leads', [$crmController, 'index']);
+$router->get('/api/v1/crm/leads/{id}/mensajes', [$crmController, 'messages']);
+$router->put('/api/v1/crm/leads/{id}', [$crmController, 'update']);
+
 $whatsappController = new \Mypos\Controllers\WhatsappController();
 $router->post('/api/v1/whatsapp/token', [$whatsappController, 'generateToken']);
 $router->get('/api/v1/whatsapp/status', [$whatsappController, 'status']);

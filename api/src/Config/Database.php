@@ -11,6 +11,11 @@ final class Database
 {
     private static ?PDO $connection = null;
 
+    public static function reset(): void
+    {
+        self::$connection = null;
+    }
+
     public static function connection(): PDO
     {
         if (self::$connection instanceof PDO) {
