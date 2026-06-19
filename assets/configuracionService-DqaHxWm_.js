@@ -1,1 +1,0 @@
-import{ae as i,an as r}from"./index-Dv9eXkL5.js";const o={efectiva(e,a){return i.get(r.configuracion.efectiva,{params:{empresa_id:e,sucursal_id:a||void 0}})},getOperacion(e){return i.get(r.configuracion.operacion,{params:{empresa_id:e}})},updateOperacion(e,a){return i.put(r.configuracion.operacion,{empresa_id:e,...a})}};export{o as c};

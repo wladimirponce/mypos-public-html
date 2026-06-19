@@ -207,8 +207,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // -----------------------------------------
 
             // --- MEMORIA DE CONVERSACION ---
-            $stmt = $db->prepare('SELECT id, context_summary FROM whatsapp_conversations WHERE phone_number = ? AND (empresa_id = ? OR (empresa_id IS NULL AND ? IS NULL))');
-            $stmt->execute([$from, $empresaWhatsappId, $empresaWhatsappId]);
+            $stmt = $db->prepare('SELECT id, context_summary FROM whatsapp_conversations WHERE phone_number = ? AND empresa_id = ?');
+            $stmt->execute([$from, $empresaWhatsappId]);
             $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
             $contextSummary = '';

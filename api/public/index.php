@@ -243,6 +243,7 @@ $router->put('/api/v1/crm/etapas/{etapa_id}',              [$crmController, 'sav
 $router->get('/api/v1/crm/templates',                      [$crmController, 'templates']);
 $router->post('/api/v1/crm/templates',                     [$crmController, 'saveTemplate']);
 $router->put('/api/v1/crm/templates/{id}',                 [$crmController, 'saveTemplate']);
+$router->post('/api/v1/crm/templates/sync',                [$crmController, 'syncTemplates']);
 $router->post('/api/v1/crm/leads/{id}/template',           [$crmController, 'sendTemplate']);
 $router->get('/api/v1/crm/broadcast',                      [$crmController, 'broadcasts']);
 $router->post('/api/v1/crm/broadcast',                     [$crmController, 'createBroadcast']);

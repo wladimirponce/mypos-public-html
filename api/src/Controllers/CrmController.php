@@ -32,7 +32,7 @@ final class CrmController
             $limit  = $modo === 'kanban' ? 500 : 40;
             $offset = $modo === 'kanban' ? 0 : ($page - 1) * $limit;
 
-            $where  = ['(wc.empresa_id = ? OR wc.empresa_id IS NULL)'];
+            $where  = ['wc.empresa_id = ?'];
             $params = [$empresaId];
 
             if ($tipo !== '') {
@@ -128,7 +128,7 @@ final class CrmController
 
             $db   = Database::connection();
             $stmt = $db->prepare(
-                'SELECT * FROM whatsapp_conversations WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL) LIMIT 1'
+                'SELECT * FROM whatsapp_conversations WHERE id = ? AND empresa_id = ? LIMIT 1'
             );
             $stmt->execute([$id, $empresaId]);
             $conv = $stmt->fetch();
@@ -213,7 +213,7 @@ final class CrmController
 
             $stmt = Database::connection()->prepare(
                 'UPDATE whatsapp_conversations SET ' . implode(', ', $sets) .
-                ' WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL)'
+                ' WHERE id = ? AND empresa_id = ?'
             );
             $stmt->execute($values);
 
@@ -236,7 +236,7 @@ final class CrmController
             $db   = Database::connection();
             $conv = $db->prepare(
                 'SELECT cliente_id, phone_number, user_name FROM whatsapp_conversations
-                 WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL) LIMIT 1'
+                 WHERE id = ? AND empresa_id = ? LIMIT 1'
             );
             $conv->execute([$id, $empresaId]);
             $row = $conv->fetch();
@@ -307,7 +307,7 @@ final class CrmController
             $db   = Database::connection();
             $conv = $db->prepare(
                 'SELECT id, cliente_id, phone_number, user_name FROM whatsapp_conversations
-                 WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL) LIMIT 1'
+                 WHERE id = ? AND empresa_id = ? LIMIT 1'
             );
             $conv->execute([$id, $empresaId]);
             $row = $conv->fetch();
@@ -365,7 +365,7 @@ final class CrmController
             $funnelStmt = $db->prepare(
                 'SELECT estado_lead, COUNT(*) AS total
                  FROM whatsapp_conversations
-                 WHERE (empresa_id = ? OR empresa_id IS NULL)
+                 WHERE empresa_id = ?
                  GROUP BY estado_lead'
             );
             $funnelStmt->execute([$empresaId]);
@@ -384,7 +384,7 @@ final class CrmController
                     SUM(estado_lead = "CONVERTIDO") AS convertidos,
                     SUM(COALESCE(leido, 1) = 0) AS no_leidos
                  FROM whatsapp_conversations
-                 WHERE (empresa_id = ? OR empresa_id IS NULL)'
+                 WHERE empresa_id = ?'
             );
             $metaStmt->execute([$empresaId]);
             $meta = $metaStmt->fetch();
@@ -399,7 +399,7 @@ final class CrmController
                  FROM whatsapp_messages wm
                  JOIN whatsapp_conversations wc ON wc.id = wm.conversation_id
                  WHERE wm.intent IS NOT NULL
-                   AND (wc.empresa_id = ? OR wc.empresa_id IS NULL)
+                   AND wc.empresa_id = ?
                  GROUP BY wm.intent
                  ORDER BY total DESC
                  LIMIT 6'
@@ -409,7 +409,7 @@ final class CrmController
             $mensajesStmt = $db->prepare(
                 'SELECT COUNT(*) FROM whatsapp_messages wm
                  JOIN whatsapp_conversations wc ON wc.id = wm.conversation_id
-                 WHERE (wc.empresa_id = ? OR wc.empresa_id IS NULL)'
+                 WHERE wc.empresa_id = ?'
             );
             $mensajesStmt->execute([$empresaId]);
 
@@ -429,7 +429,7 @@ final class CrmController
                         COUNT(DISTINCT CASE WHEN DATE(wc.created_at) = CURDATE() THEN wc.id END) AS nuevas_hoy
                     FROM empresa_usuarios eu
                     JOIN usuarios u ON u.id = eu.usuario_id
-                    LEFT JOIN whatsapp_conversations wc ON wc.asignado_usuario_id = u.id AND (wc.empresa_id = eu.empresa_id OR wc.empresa_id IS NULL)
+                    LEFT JOIN whatsapp_conversations wc ON wc.asignado_usuario_id = u.id AND wc.empresa_id = eu.empresa_id
                     WHERE eu.empresa_id = ? AND eu.activo = 1
                     GROUP BY u.id, u.nombre
                     ORDER BY conversaciones_activas DESC
@@ -479,7 +479,7 @@ final class CrmController
 
             $db = Database::connection();
             $db->prepare(
-                'SELECT 1 FROM whatsapp_conversations WHERE id = ? AND (empresa_id = ? OR empresa_id IS NULL) LIMIT 1'
+                'SELECT 1 FROM whatsapp_conversations WHERE id = ? AND empresa_id = ? LIMIT 1'
             )->execute([$id, $empresaId]);
 
             $stmt = $db->prepare(
@@ -543,7 +543,7 @@ final class CrmController
                  INNER JOIN whatsapp_conversations wc ON wc.id = t.conversation_id
                  SET t.completada = IF(t.completada=1,0,1),
                      t.completada_en = IF(t.completada=0, NOW(), NULL)
-                 WHERE t.id = ? AND (wc.empresa_id = ? OR wc.empresa_id IS NULL)'
+                 WHERE t.id = ? AND wc.empresa_id = ?'
             )->execute([$tareaId, $empresaId]);
 
             Response::success(['toggled' => true]);
@@ -565,7 +565,7 @@ final class CrmController
                     SUM(estado_lead = 'NUEVO') AS nuevos,
                     SUM(COALESCE(leido, 1) = 0) AS no_leidos
                  FROM whatsapp_conversations
-                 WHERE (empresa_id = ? OR empresa_id IS NULL)"
+                 WHERE empresa_id = ?"
             );
             $stmt->execute([$empresaId]);
             $row = $stmt->fetch();
@@ -602,7 +602,7 @@ final class CrmController
                        ewc.phone_number_id, ewc.access_token
                 FROM whatsapp_conversations wc
                 LEFT JOIN empresa_whatsapp_config ewc ON ewc.empresa_id = wc.empresa_id AND ewc.activo = 1
-                WHERE wc.id = ? AND (wc.empresa_id = ? OR wc.empresa_id IS NULL)
+                WHERE wc.id = ? AND wc.empresa_id = ?
                 LIMIT 1
             ");
             $stmt->execute([$id, $empresaId]);
@@ -860,7 +860,7 @@ final class CrmController
 
             // Cargar conversación
             $stmtC = $db->prepare(
-                'SELECT phone_number FROM whatsapp_conversations WHERE id=? AND (empresa_id=? OR empresa_id IS NULL) LIMIT 1'
+                'SELECT phone_number FROM whatsapp_conversations WHERE id=? AND empresa_id=? LIMIT 1'
             );
             $stmtC->execute([$convId, $empresaId]);
             $conv = $stmtC->fetch();
@@ -921,6 +921,133 @@ final class CrmController
         } catch (Throwable $e) {
             error_log($e->getMessage());
             Response::error('Error al enviar template', null, 500);
+        }
+    }
+
+    public function syncTemplates(): void
+    {
+        try {
+            [$empresaId] = $this->auth();
+            $db = Database::connection();
+
+            // Obtener config WhatsApp de la empresa
+            $stmtWA = $db->prepare(
+                'SELECT phone_number_id, access_token, waba_id FROM empresa_whatsapp_config WHERE empresa_id = ? AND activo = 1 LIMIT 1'
+            );
+            $stmtWA->execute([$empresaId]);
+            $wa = $stmtWA->fetch();
+            if (!$wa) throw new HttpException('WhatsApp no configurado para esta empresa', 400);
+
+            $accessToken = $wa['access_token'];
+            $wabaId      = $wa['waba_id'];
+
+            // Si no tiene waba_id guardado, intentar resolverlo desde el phone_number_id
+            if (!$wabaId && $wa['phone_number_id']) {
+                $resolveUrl = "https://graph.facebook.com/v25.0/{$wa['phone_number_id']}?fields=whatsapp_business_account";
+                $ctx = stream_context_create(['http' => [
+                    'method'        => 'GET',
+                    'header'        => "Authorization: Bearer {$accessToken}\r\n",
+                    'timeout'       => 10,
+                    'ignore_errors' => true,
+                ]]);
+                $res  = file_get_contents($resolveUrl, false, $ctx);
+                $data = json_decode($res ?: '{}', true);
+                $wabaId = $data['whatsapp_business_account']['id'] ?? null;
+                if ($wabaId) {
+                    $db->prepare('UPDATE empresa_whatsapp_config SET waba_id = ? WHERE empresa_id = ?')
+                       ->execute([$wabaId, $empresaId]);
+                }
+            }
+
+            if (!$wabaId) throw new HttpException('No se pudo obtener el WABA ID. Ingrésalo manualmente en la configuración.', 400);
+
+            // Obtener templates desde Meta
+            $url = "https://graph.facebook.com/v25.0/{$wabaId}/message_templates?limit=100&fields=name,language,category,status,components";
+            $ctx = stream_context_create(['http' => [
+                'method'        => 'GET',
+                'header'        => "Authorization: Bearer {$accessToken}\r\n",
+                'timeout'       => 20,
+                'ignore_errors' => true,
+            ]]);
+            $res  = file_get_contents($url, false, $ctx);
+            $data = json_decode($res ?: '{}', true);
+
+            if (!empty($data['error'])) {
+                throw new HttpException('Meta error: ' . ($data['error']['message'] ?? 'desconocido'), 502);
+            }
+
+            $templates = $data['data'] ?? [];
+            $importados = 0; $actualizados = 0;
+
+            foreach ($templates as $tpl) {
+                if (($tpl['status'] ?? '') !== 'APPROVED') continue;
+
+                $nombre      = $tpl['name'];
+                $idioma      = $tpl['language'] ?? 'es';
+                $categoria   = $tpl['category'] ?? 'UTILITY';
+                $headerTexto = null; $bodyTexto = ''; $footerTexto = null;
+                $variables   = [];
+
+                foreach ($tpl['components'] ?? [] as $comp) {
+                    $type = strtoupper($comp['type'] ?? '');
+                    $text = $comp['text'] ?? '';
+                    if ($type === 'HEADER') $headerTexto = $text;
+                    if ($type === 'BODY')   { $bodyTexto = $text; }
+                    if ($type === 'FOOTER') $footerTexto = $text;
+                }
+
+                // Extraer variables {{1}}, {{2}}... del body
+                preg_match_all('/\{\{(\d+)\}\}/', $bodyTexto, $matches);
+                if (!empty($matches[1])) {
+                    $variables = array_map(fn($n) => "variable_{$n}", array_unique($matches[1]));
+                }
+
+                if ($bodyTexto === '') continue;
+
+                // Upsert por (empresa_id, template_name)
+                $check = $db->prepare(
+                    'SELECT id FROM whatsapp_templates WHERE empresa_id = ? AND template_name = ? LIMIT 1'
+                );
+                $check->execute([$empresaId, $nombre]);
+                $existingId = $check->fetchColumn();
+
+                if ($existingId) {
+                    $db->prepare(
+                        'UPDATE whatsapp_templates SET nombre=?, idioma=?, categoria=?, header_texto=?, body_texto=?, footer_texto=?, variables=?, activo=1
+                         WHERE id=?'
+                    )->execute([
+                        $nombre, $idioma, $categoria, $headerTexto, $bodyTexto, $footerTexto,
+                        $variables ? json_encode($variables) : null,
+                        $existingId,
+                    ]);
+                    $actualizados++;
+                } else {
+                    $db->prepare(
+                        'INSERT INTO whatsapp_templates (empresa_id, nombre, template_name, idioma, categoria, header_texto, body_texto, footer_texto, variables)
+                         VALUES (?,?,?,?,?,?,?,?,?)'
+                    )->execute([
+                        $empresaId, $nombre, $nombre, $idioma, $categoria,
+                        $headerTexto, $bodyTexto, $footerTexto,
+                        $variables ? json_encode($variables) : null,
+                    ]);
+                    $importados++;
+                }
+            }
+
+            $totalAprobados = count(array_filter($templates, fn($t) => ($t['status'] ?? '') === 'APPROVED'));
+
+            Response::success([
+                'importados'   => $importados,
+                'actualizados' => $actualizados,
+                'total_meta'   => count($templates),
+                'aprobados'    => $totalAprobados,
+                'waba_id'      => $wabaId,
+            ]);
+        } catch (HttpException $e) {
+            Response::error($e->getMessage(), null, $e->statusCode());
+        } catch (Throwable $e) {
+            error_log($e->getMessage());
+            Response::error('Error al sincronizar templates', null, 500);
         }
     }
 
