@@ -247,6 +247,7 @@ $router->put('/api/v1/crm/templates/{id}',                 [$crmController, 'sav
 $router->post('/api/v1/crm/leads/{id}/template',           [$crmController, 'sendTemplate']);
 $router->get('/api/v1/crm/broadcast',                      [$crmController, 'broadcasts']);
 $router->post('/api/v1/crm/broadcast',                     [$crmController, 'createBroadcast']);
+$router->post('/api/v1/crm/conversations/iniciar',         [$crmController, 'iniciarConversacion']);
 
 $whatsappController = new \Mypos\Controllers\WhatsappController();
 $router->post('/api/v1/whatsapp/token', [$whatsappController, 'generateToken']);

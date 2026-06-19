@@ -1051,6 +1051,155 @@ final class CrmController
         }
     }
 
+    // ── Iniciar conversación outbound ─────────────────────────────────────
+
+    public function iniciarConversacion(): void
+    {
+        try {
+            [$empresaId, $userId] = $this->auth();
+            $body = Request::json();
+
+            // Normalizar teléfono: quitar todo lo que no sea dígito
+            $telefono   = preg_replace('/\D/', '', $body['telefono'] ?? '');
+            $nombre     = mb_substr(trim($body['nombre']      ?? ''), 0, 150);
+            $templateId = (int)($body['template_id'] ?? 0);
+            $variables  = (array)($body['variables']  ?? []);   // ["1"=>"val1", "2"=>"val2"]
+
+            // Si el usuario ingresó solo 9 dígitos (celular chileno sin código país), añadir 56
+            if (strlen($telefono) === 9 && $telefono[0] === '9') {
+                $telefono = '56' . $telefono;
+            }
+
+            if (strlen($telefono) < 10 || strlen($telefono) > 15) {
+                throw new HttpException('Número de teléfono inválido. Incluye el código de país (ej: 56912345678)', 422);
+            }
+            if ($nombre === '') {
+                throw new HttpException('El nombre es obligatorio', 422);
+            }
+            if ($templateId <= 0) {
+                throw new HttpException('Debes seleccionar un template', 422);
+            }
+
+            $db = Database::connection();
+
+            // Obtener template
+            $stmtT = $db->prepare(
+                'SELECT id, nombre, template_name, idioma, body_texto FROM whatsapp_templates
+                 WHERE id = ? AND empresa_id = ? AND activo = 1'
+            );
+            $stmtT->execute([$templateId, $empresaId]);
+            $template = $stmtT->fetch();
+            if (!$template) throw new HttpException('Template no encontrado', 404);
+
+            // Obtener configuración WhatsApp de la empresa
+            $stmtC = $db->prepare(
+                'SELECT phone_number_id, access_token FROM empresa_whatsapp_config
+                 WHERE empresa_id = ? AND activo = 1 LIMIT 1'
+            );
+            $stmtC->execute([$empresaId]);
+            $config = $stmtC->fetch();
+            if (!$config) throw new HttpException('WhatsApp no está configurado para esta empresa', 422);
+
+            // Construir componentes de variables del template
+            $components = [];
+            if (!empty($variables)) {
+                $params = [];
+                // Ordenar por clave numérica 1,2,3...
+                ksort($variables);
+                foreach ($variables as $val) {
+                    $params[] = ['type' => 'text', 'text' => (string)$val];
+                }
+                $components[] = ['type' => 'body', 'parameters' => $params];
+            }
+
+            // Payload para Meta Cloud API
+            $payload = [
+                'messaging_product' => 'whatsapp',
+                'to'                => $telefono,
+                'type'              => 'template',
+                'template'          => [
+                    'name'     => $template['template_name'],
+                    'language' => ['code' => $template['idioma']],
+                ],
+            ];
+            if (!empty($components)) {
+                $payload['template']['components'] = $components;
+            }
+
+            $ch = curl_init("https://graph.facebook.com/v19.0/{$config['phone_number_id']}/messages");
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST           => true,
+                CURLOPT_HTTPHEADER     => [
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $config['access_token'],
+                ],
+                CURLOPT_POSTFIELDS => json_encode($payload),
+                CURLOPT_TIMEOUT    => 15,
+            ]);
+            $resp   = curl_exec($ch);
+            $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            $metaData = json_decode($resp, true);
+            if ($status !== 200 || empty($metaData['messages'][0]['id'])) {
+                $errMeta = $metaData['error']['message'] ?? 'Error desconocido';
+                $errCode = $metaData['error']['code']    ?? '';
+                throw new HttpException("Meta rechazó el mensaje ($errCode): $errMeta", 422);
+            }
+
+            $waMessageId = $metaData['messages'][0]['id'];
+
+            // Buscar o crear conversación
+            $stmtConv = $db->prepare(
+                'SELECT id, contact_name FROM whatsapp_conversations
+                 WHERE phone_number = ? AND empresa_id = ? LIMIT 1'
+            );
+            $stmtConv->execute([$telefono, $empresaId]);
+            $conv = $stmtConv->fetch();
+
+            if ($conv) {
+                $convId = (int)$conv['id'];
+                $db->prepare(
+                    'UPDATE whatsapp_conversations SET contact_name = ?, updated_at = NOW() WHERE id = ?'
+                )->execute([$nombre, $convId]);
+            } else {
+                $db->prepare(
+                    "INSERT INTO whatsapp_conversations
+                       (empresa_id, phone_number, contact_name, estado_lead, leido, created_at, updated_at)
+                     VALUES (?, ?, ?, 'NUEVO', 1, NOW(), NOW())"
+                )->execute([$empresaId, $telefono, $nombre]);
+                $convId = (int)$db->lastInsertId();
+            }
+
+            // Resolver body con variables para guardar el mensaje legible
+            $bodyTexto = $template['body_texto'];
+            foreach ($variables as $k => $v) {
+                $bodyTexto = str_replace('{{'.$k.'}}', (string)$v, $bodyTexto);
+            }
+
+            // Guardar mensaje saliente
+            $db->prepare(
+                "INSERT INTO whatsapp_messages
+                   (conversation_id, direction, message_type, content, wa_message_id, respondido_por, created_at)
+                 VALUES (?, 'outbound', 'template', ?, ?, ?, NOW())"
+            )->execute([$convId, $bodyTexto, $waMessageId, $userId]);
+
+            // Devolver conversación completa
+            $stmtRes = $db->prepare(
+                'SELECT id, phone_number, contact_name, estado_lead, leido FROM whatsapp_conversations WHERE id = ?'
+            );
+            $stmtRes->execute([$convId]);
+            Response::success($stmtRes->fetch());
+
+        } catch (HttpException $e) {
+            Response::error($e->getMessage(), null, $e->statusCode());
+        } catch (Throwable $e) {
+            error_log('[iniciarConversacion] ' . $e->getMessage());
+            Response::error('Error al iniciar conversación', null, 500);
+        }
+    }
+
     // ── Broadcast ──────────────────────────────────────────────────────────
 
     public function broadcasts(): void
