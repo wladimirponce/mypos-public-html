@@ -52,6 +52,7 @@ if ($tablaOk && $dbOk && isset($_POST['wa_action'])) {
     $waEmpresaId     = (int)($_POST['wa_empresa_id'] ?? 0);
     $waPhoneNumberId = trim($_POST['wa_phone_number_id'] ?? '');
     $waAccessToken   = trim($_POST['wa_access_token'] ?? '');
+    $waWabaId        = trim($_POST['wa_waba_id'] ?? '') ?: null;
     $waActivo        = isset($_POST['wa_activo']) ? 1 : 0;
 
     if ($_POST['wa_action'] === 'save') {
@@ -64,17 +65,23 @@ if ($tablaOk && $dbOk && isset($_POST['wa_action'])) {
                 $stE->execute([$waEmpresaId]);
                 if (!$stE->fetch()) throw new Exception('Empresa no encontrada.');
 
+                // Asegurar que la columna waba_id existe (post migración 062)
+                try {
+                    $db->exec("ALTER TABLE empresa_whatsapp_config ADD COLUMN waba_id VARCHAR(30) NULL DEFAULT NULL AFTER phone_number_id");
+                } catch (Throwable $_) { /* ya existe */ }
+
                 // Upsert
                 $stmt = $db->prepare("
-                    INSERT INTO empresa_whatsapp_config (empresa_id, phone_number_id, access_token, activo)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO empresa_whatsapp_config (empresa_id, phone_number_id, waba_id, access_token, activo)
+                    VALUES (?, ?, ?, ?, ?)
                     ON DUPLICATE KEY UPDATE
                         phone_number_id = VALUES(phone_number_id),
+                        waba_id         = VALUES(waba_id),
                         access_token    = VALUES(access_token),
                         activo          = VALUES(activo),
                         updated_at      = CURRENT_TIMESTAMP
                 ");
-                $stmt->execute([$waEmpresaId, $waPhoneNumberId, $waAccessToken, $waActivo]);
+                $stmt->execute([$waEmpresaId, $waPhoneNumberId, $waWabaId, $waAccessToken, $waActivo]);
                 $waMsj = '✓ Configuración WhatsApp guardada correctamente.';
             } catch (Throwable $e) {
                 $waError = 'Error al guardar: ' . $e->getMessage();
@@ -116,6 +123,7 @@ if ($tablaOk && $dbOk) {
     $configs = $db->query("
         SELECT e.id, e.razon_social, e.rut,
                ewc.phone_number_id,
+               COALESCE(ewc.waba_id, '') AS waba_id,
                CONCAT(LEFT(ewc.access_token,12), '…') AS token_preview,
                ewc.activo,
                ewc.updated_at
@@ -142,6 +150,7 @@ if ($editEmpId > 0 && $tablaOk && $dbOk) {
     $stEdit = $db->prepare("
         SELECT e.id, e.razon_social, e.rut,
                COALESCE(ewc.phone_number_id, '') AS phone_number_id,
+               COALESCE(ewc.waba_id, '')         AS waba_id,
                COALESCE(ewc.access_token, '')    AS access_token,
                COALESCE(ewc.activo, 1)           AS activo
         FROM empresas e
@@ -212,7 +221,19 @@ if ($editEmpId > 0 && $tablaOk && $dbOk) {
                            placeholder="ej: 1181492205043206"
                            value="<?= htmlspecialchars($editData['phone_number_id']) ?>" required>
                     <div class="form-text" style="font-size:.75rem;">
-                        Solo dígitos. Se encuentra en Meta → WhatsApp → API Setup.
+                        Solo dígitos. Meta → WhatsApp → API Setup → "From phone number ID".
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold" style="font-size:.82rem;">
+                        WABA ID <span class="text-muted fw-normal">(opcional pero recomendado)</span>
+                    </label>
+                    <input type="text" name="wa_waba_id" class="form-control form-control-sm"
+                           placeholder="ej: 1659393365272681"
+                           value="<?= htmlspecialchars($editData['waba_id']) ?>">
+                    <div class="form-text" style="font-size:.75rem;">
+                        WhatsApp Business Account ID. Meta Business Manager → WhatsApp Accounts → Identificador.
+                        Necesario para sincronizar templates HSM automáticamente.
                     </div>
                 </div>
                 <div class="col-md-7">
@@ -269,6 +290,7 @@ if ($editEmpId > 0 && $tablaOk && $dbOk) {
                         <th>Empresa</th>
                         <th>RUT</th>
                         <th>Phone Number ID</th>
+                        <th>WABA ID</th>
                         <th>Token</th>
                         <th>Estado</th>
                         <th>Actualizado</th>
@@ -281,6 +303,17 @@ if ($editEmpId > 0 && $tablaOk && $dbOk) {
                         <td class="fw-semibold"><?= htmlspecialchars($cfg['razon_social']) ?></td>
                         <td><code style="font-size:.78rem;"><?= htmlspecialchars($cfg['rut']) ?></code></td>
                         <td><code style="font-size:.78rem;"><?= htmlspecialchars($cfg['phone_number_id']) ?></code></td>
+                        <td>
+                            <?php if ($cfg['waba_id']): ?>
+                                <code style="font-size:.78rem;"><?= htmlspecialchars($cfg['waba_id']) ?></code>
+                            <?php else: ?>
+                                <span style="color:var(--c-text-muted);font-size:.78rem;">—</span>
+                                <a href="dashboard.php?module=whatsapp&editar=<?= $cfg['id'] ?>"
+                                   style="font-size:.72rem; color:#f59e0b; margin-left:4px;" title="Agregar WABA ID para sincronizar templates">
+                                    ⚠ agregar
+                                </a>
+                            <?php endif; ?>
+                        </td>
                         <td><code style="font-size:.78rem; color:var(--c-text-muted);"><?= htmlspecialchars($cfg['token_preview']) ?></code></td>
                         <td>
                             <?php if ($cfg['activo']): ?>
