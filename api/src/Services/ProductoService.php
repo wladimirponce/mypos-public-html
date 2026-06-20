@@ -229,6 +229,22 @@ final class ProductoService
         return ['id' => $id, 'activo' => 0];
     }
 
+    public function activateProducto(int $userId, int $id, int $empresaId): array
+    {
+        $this->tenant($userId, $empresaId);
+        $this->notFoundUnless($this->productos->activate($id, $empresaId));
+
+        return ['id' => $id, 'activo' => 1];
+    }
+
+    public function hardDeleteProducto(int $userId, int $id, int $empresaId): array
+    {
+        $this->tenant($userId, $empresaId);
+        $this->notFoundUnless($this->productos->hardDelete($id, $empresaId));
+
+        return ['id' => $id, 'deleted' => true];
+    }
+
     public function listRelated(int $userId, int $productoId, int $empresaId, string $type): array
     {
         $this->validateProductAccess($userId, $productoId, $empresaId);

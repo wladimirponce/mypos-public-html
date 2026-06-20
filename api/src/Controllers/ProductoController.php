@@ -51,6 +51,16 @@ final class ProductoController
         $this->respond(fn (int $userId): array => $this->service->deleteProducto($userId, (int) $params['id'], $this->queryEmpresaId()), 'Producto desactivado');
     }
 
+    public function activate(array $params): void
+    {
+        $this->respond(fn (int $userId): array => $this->service->activateProducto($userId, (int) $params['id'], $this->queryEmpresaId()), 'Producto activado');
+    }
+
+    public function hardDestroy(array $params): void
+    {
+        $this->respond(fn (int $userId): array => $this->service->hardDeleteProducto($userId, (int) $params['id'], $this->queryEmpresaId()), 'Producto eliminado');
+    }
+
     public function search(): void
     {
         $this->respond(fn (int $userId): array => $this->service->search($userId, $this->queryEmpresaId(), (string) ($_GET['codigo'] ?? '')));

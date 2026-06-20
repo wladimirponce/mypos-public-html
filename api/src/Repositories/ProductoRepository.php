@@ -209,6 +209,28 @@ final class ProductoRepository
         return $statement->rowCount() > 0;
     }
 
+    public function activate(int $id, int $empresaId): bool
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE productos
+             SET activo = 1, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id AND empresa_id = :empresa_id'
+        );
+        $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
+
+        return $statement->rowCount() > 0;
+    }
+
+    public function hardDelete(int $id, int $empresaId): bool
+    {
+        $statement = $this->connection->prepare(
+            'DELETE FROM productos WHERE id = :id AND empresa_id = :empresa_id'
+        );
+        $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
+
+        return $statement->rowCount() > 0;
+    }
+
     public function productExists(int $id, int $empresaId): bool
     {
         $statement = $this->connection->prepare('SELECT 1 FROM productos WHERE id = :id AND empresa_id = :empresa_id LIMIT 1');

@@ -413,6 +413,8 @@ $router->post('/api/v1/productos/{producto_id}/precios-proveedor', protectedRout
 $router->get('/api/v1/productos/{id}', protectedRoute([$productoController, 'show'], 'productos.ver'));
 $router->put('/api/v1/productos/{id}', protectedRoute([$productoController, 'update'], 'productos.editar'));
 $router->delete('/api/v1/productos/{id}', protectedRoute([$productoController, 'destroy'], 'productos.eliminar'));
+$router->post('/api/v1/productos/{id}/activar', protectedRoute([$productoController, 'activate'], 'productos.editar'));
+$router->delete('/api/v1/productos/{id}/hard', protectedRoute([$productoController, 'hardDestroy'], 'productos.eliminar'));
 $router->get('/api/v1/productos/{id}/atributos', protectedRoute([$productoAtributoController, 'productValues'], 'productos.ver'));
 $router->put('/api/v1/productos/{id}/atributos', protectedRoute([$productoAtributoController, 'updateProductValues'], 'productos.editar'));
 $router->get('/api/v1/productos/{id}/codigos-barra', protectedRoute([$productoController, 'listBarcodes'], 'productos.ver'));

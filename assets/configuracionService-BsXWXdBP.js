@@ -1,0 +1,1 @@
+import{af as i,ao as r}from"./index-DirtN532.js";const n={efectiva(e,a){return i.get(r.configuracion.efectiva,{params:{empresa_id:e,sucursal_id:a||void 0}})},getOperacion(e){return i.get(r.configuracion.operacion,{params:{empresa_id:e}})},updateOperacion(e,a){return i.put(r.configuracion.operacion,{empresa_id:e,...a})}};export{n as c};
