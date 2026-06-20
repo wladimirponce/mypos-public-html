@@ -500,6 +500,32 @@ final class ProductoRepository
 
     public function searchByCode(int $empresaId, string $code): ?array
     {
+        $row = $this->queryByCode($empresaId, $code);
+        if ($row !== null) {
+            return $row;
+        }
+
+        // Fallback: EAN-13 de peso variable (prefijo "2", 13 dígitos) — balanzas de carnicería
+        $parsed = $this->parseVariableWeightEan13($code);
+        if ($parsed === null) {
+            return null;
+        }
+
+        foreach ($parsed['plu_candidates'] as $plu) {
+            $row = $this->queryByCode($empresaId, $plu);
+            if ($row !== null) {
+                // El precio del ticket ya incluye el total; no tratar como producto por peso
+                $row['precio_balanza']   = $parsed['precio_total'];
+                $row['es_producto_peso'] = 0;
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    private function queryByCode(int $empresaId, string $code): ?array
+    {
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.codigo, p.nombre, p.precio_venta, p.controla_stock,
                     p.es_producto_peso, p.precio_por_kg,
@@ -527,11 +553,11 @@ final class ProductoRepository
              LIMIT 1'
         );
         $statement->execute([
-            'empresa_id'       => $empresaId,
-            'codigo'           => $code,
-            'sku'              => $code,
+            'empresa_id'        => $empresaId,
+            'codigo'            => $code,
+            'sku'               => $code,
             'codigo_barra_join' => $code,
-            'codigo_barra'     => $code,
+            'codigo_barra'      => $code,
         ]);
         $row = $statement->fetch();
         if (!is_array($row)) {
@@ -540,6 +566,30 @@ final class ProductoRepository
         $row['tiene_variantes']  = (bool) $row['tiene_variantes'];
         $row['es_variante_hijo'] = (bool) $row['es_variante_hijo'];
         return $row;
+    }
+
+    /**
+     * Parsea EAN-13 de peso variable (prefijo 2).
+     * Formato: [2][id_balanza:1][plu:5][precio:5][verificador:1]
+     */
+    private function parseVariableWeightEan13(string $code): ?array
+    {
+        if (strlen($code) !== 13 || $code[0] !== '2' || !ctype_digit($code)) {
+            return null;
+        }
+
+        $pluField   = substr($code, 2, 5);  // p.ej. "00170"
+        $priceField = substr($code, 7, 5);  // p.ej. "29630" → $29.630 sin decimales
+
+        // Candidatos en orden de especificidad: campo completo, primeros 4, sin ceros iniciales
+        $pluFour   = substr($pluField, 0, 4);
+        $stripped5 = ltrim($pluField, '0') ?: '0';
+        $stripped4 = ltrim($pluFour, '0') ?: '0';
+
+        return [
+            'plu_candidates' => array_unique([$pluField, $pluFour, $stripped5, $stripped4]),
+            'precio_total'   => (int) $priceField,
+        ];
     }
 
     private function clearBarcodePrincipal(int $productoId, int $empresaId): void
