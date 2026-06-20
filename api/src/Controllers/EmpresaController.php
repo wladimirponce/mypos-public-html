@@ -76,12 +76,10 @@ final class EmpresaController
 
     public function sucursales(array $params): void
     {
+        // Cualquier usuario autenticado que pertenezca a la empresa puede
+        // consultar sus sucursales — no se requiere configuracion.ver.
         $empresaId = (int) $params['id'];
-        $this->guard(
-            'configuracion.ver',
-            static fn (): int => $empresaId,
-            fn (): array => $this->service->listarSucursales($empresaId)
-        );
+        $this->tenanted($empresaId, fn (): array => $this->service->listarSucursales($empresaId));
     }
 
     public function storeSucursal(array $params): void
@@ -244,6 +242,32 @@ final class EmpresaController
             (new PermissionMiddleware())->handle($userId, $empresaId, $permission);
 
             Response::success($callback($empresaId, $userId));
+        } catch (HttpException $exception) {
+            Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());
+        } catch (Throwable $exception) {
+            error_log($exception->getMessage());
+            Response::error('Error interno del servidor', null, 500);
+        }
+    }
+
+    /**
+     * Ejecuta una acción que requiere autenticación y pertenencia al tenant,
+     * pero sin exigir un permiso específico (adecuado para datos de contexto
+     * como la lista de sucursales propias).
+     */
+    private function tenanted(int $empresaId, callable $callback): void
+    {
+        try {
+            $claims = (new AuthMiddleware())->handle();
+            $userId = (int) $claims['user_id'];
+
+            if ($empresaId <= 0) {
+                throw new HttpException('empresa_id obligatorio', 422);
+            }
+
+            (new TenantMiddleware())->handle($userId, $empresaId);
+
+            Response::success($callback());
         } catch (HttpException $exception) {
             Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());
         } catch (Throwable $exception) {
