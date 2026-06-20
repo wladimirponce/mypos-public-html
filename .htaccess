@@ -54,6 +54,12 @@
   </FilesMatch>
 </IfModule>
 
+# Forzar descarga para archivos del instalador del print server
+<FilesMatch "\.(bat|py)$">
+  ForceType application/octet-stream
+  Header set Content-Disposition "attachment"
+</FilesMatch>
+
 # Headers de Seguridad Básicos
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
