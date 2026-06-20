@@ -440,6 +440,7 @@ $router->get('/api/v1/stock/ubicaciones', protectedRoute([$stockController, 'ubi
 $router->post('/api/v1/stock/ubicaciones', protectedRoute([$stockController, 'crearUbicacion'], 'stock.ubicaciones.administrar'));
 $router->put('/api/v1/stock/ubicaciones/{id}', protectedRoute([$stockController, 'actualizarUbicacion'], 'stock.ubicaciones.administrar'));
 $router->delete('/api/v1/stock/ubicaciones/{id}', protectedRoute([$stockController, 'desactivarUbicacion'], 'stock.ubicaciones.administrar'));
+$router->delete('/api/v1/stock/ubicaciones/{id}/eliminar', protectedRoute([$stockController, 'eliminarUbicacion'], 'stock.ubicaciones.administrar'));
 $router->get('/api/v1/stock/ubicaciones/{ubicacion_id}/productos', protectedRoute([$stockController, 'porUbicacion'], 'stock.ver'));
 $router->post('/api/v1/stock/traslados', protectedRoute([$stockController, 'traslado'], 'stock.ajustar'));
 $router->get('/api/v1/stock', protectedRoute([$stockController, 'index'], 'stock.ver'));

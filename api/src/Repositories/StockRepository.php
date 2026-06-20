@@ -302,7 +302,7 @@ final class StockRepository
     {
         $sql = 'SELECT COUNT(*) FROM productos p
                 WHERE p.empresa_id = :empresa_id AND p.activo = 1 AND p.controla_stock = 1';
-        $params = ['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId];
+        $params = ['empresa_id' => $empresaId];
 
         if ($q !== null && trim($q) !== '') {
             $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
@@ -569,6 +569,46 @@ final class StockRepository
                  deleted_at = CURRENT_TIMESTAMP,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = :id AND empresa_id = :empresa_id'
+        );
+        $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
+
+        return $statement->rowCount() > 0;
+    }
+
+    public function locationHasStock(int $id, int $empresaId): bool
+    {
+        $statement = $this->connection->prepare(
+            'SELECT 1 FROM stock_ubicacion
+             WHERE ubicacion_id = :id AND empresa_id = :empresa_id AND cantidad != 0
+             LIMIT 1'
+        );
+        $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
+
+        return (bool) $statement->fetchColumn();
+    }
+
+    public function locationHasMovements(int $id, int $empresaId): bool
+    {
+        $statement = $this->connection->prepare(
+            'SELECT 1 FROM stock_movimientos
+             WHERE (ubicacion_id = :id OR ubicacion_origen_id = :id OR ubicacion_destino_id = :id)
+               AND empresa_id = :empresa_id
+             LIMIT 1'
+        );
+        $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
+
+        return (bool) $statement->fetchColumn();
+    }
+
+    public function hardDeleteLocation(int $id, int $empresaId): bool
+    {
+        // Borra también la fila de stock_ubicacion (cantidad debe ser 0 per guarda en servicio)
+        $this->connection->prepare(
+            'DELETE FROM stock_ubicacion WHERE ubicacion_id = :id AND empresa_id = :empresa_id'
+        )->execute(['id' => $id, 'empresa_id' => $empresaId]);
+
+        $statement = $this->connection->prepare(
+            'DELETE FROM ubicaciones_stock WHERE id = :id AND empresa_id = :empresa_id'
         );
         $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
 

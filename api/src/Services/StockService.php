@@ -183,6 +183,27 @@ final class StockService
         return ['id' => $id, 'activo' => 0];
     }
 
+    public function eliminarUbicacion(int $empresaId, int $id): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('Error de validacion', 422, ['empresa_id' => ['La empresa_id es obligatoria']]);
+        }
+
+        if ($this->repository->locationHasStock($id, $empresaId)) {
+            throw new HttpException('No se puede eliminar: la bodega tiene stock con cantidad distinta de cero.', 409);
+        }
+
+        if ($this->repository->locationHasMovements($id, $empresaId)) {
+            throw new HttpException('No se puede eliminar: la bodega tiene movimientos de stock registrados. Desactívala en su lugar.', 409);
+        }
+
+        if (!$this->repository->hardDeleteLocation($id, $empresaId)) {
+            throw new HttpException('Bodega no encontrada', 404);
+        }
+
+        return ['id' => $id, 'deleted' => true];
+    }
+
     public function registrarMovimiento(array $data, ?PDO $externalConnection = null): array
     {
         $connection = $externalConnection ?? $this->repository->connection();

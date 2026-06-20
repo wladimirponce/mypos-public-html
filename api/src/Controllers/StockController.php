@@ -110,6 +110,11 @@ final class StockController
         $this->respond(fn (): array => $this->service->desactivarUbicacion($this->queryInt('empresa_id'), (int) $params['id']), 'Ubicacion de stock desactivada');
     }
 
+    public function eliminarUbicacion(array $params): void
+    {
+        $this->respond(fn (): array => $this->service->eliminarUbicacion($this->queryInt('empresa_id'), (int) $params['id']), 'Bodega eliminada permanentemente');
+    }
+
     public function traslado(): void
     {
         $this->respond(function (int $userId): array {
