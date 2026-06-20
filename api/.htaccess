@@ -22,6 +22,7 @@ RewriteRule ^public/instalar\.php$ public/instalar.php [L]
 
 # Descarga del instalador del print server (sin autenticación)
 RewriteRule ^descargar-print-server\.php$ public/descargar-print-server.php [L]
+RewriteRule ^public/descargar-print-server\.php$ public/descargar-print-server.php [L]
 
 # Reenviar todas las demás peticiones al router PHP
 RewriteRule ^ public/index.php [QSA,L]
