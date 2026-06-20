@@ -149,15 +149,20 @@ echo  [6/6] Creando acceso directo en el Escritorio...
     echo echo    Cierra con Ctrl+C para detener.
     echo echo  ==========================================
     echo echo.
-    echo py -3.11 mypos_print_server.py 2^>nul ^|^| python mypos_print_server.py
+    echo py -3.11 mypos_print_server.py ^|^| python mypos_print_server.py
+    echo if %%ERRORLEVEL%% NEQ 0 ^(
+    echo     echo.
+    echo     echo  [ERROR] El servidor no pudo iniciarse. Revisa el mensaje de arriba.
+    echo ^)
     echo pause
 ) > "%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat"
 
-:: Acceso directo en el Escritorio del usuario actual
+:: Acceso directo con cmd.exe explicito para que la ventana siempre sea visible
 powershell -NoProfile -Command ^
     "$ws = New-Object -ComObject WScript.Shell; " ^
     "$s = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\MyPOS Print Server.lnk'); " ^
-    "$s.TargetPath = '%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat'; " ^
+    "$s.TargetPath = [Environment]::SystemDirectory + '\cmd.exe'; " ^
+    "$s.Arguments = '/k \"%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat\"'; " ^
     "$s.WorkingDirectory = '%INSTALL_DIR%'; " ^
     "$s.Description = 'Servidor de impresion MyPOS - Puerto 5555'; " ^
     "$s.Save()"
@@ -178,7 +183,7 @@ echo  ============================================================
 echo.
 set /p "STARTNOW= Iniciar el servidor ahora mismo? [S/N]: "
 if /i "!STARTNOW!"=="S" (
-    start "" "%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat"
+    start cmd /k "%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat"
 )
 
 endlocal
