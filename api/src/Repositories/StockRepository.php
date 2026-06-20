@@ -264,7 +264,7 @@ final class StockRepository
         return is_array($row) ? $row : null;
     }
 
-    public function listStock(int $empresaId, int $sucursalId, ?string $q): array
+    public function listStock(int $empresaId, int $sucursalId, ?string $q, int $limit = 200, int $offset = 0): array
     {
         $sql = 'SELECT p.id AS producto_id, p.codigo, p.nombre, r.nombre AS rubro,
                        COALESCE(ss.cantidad, 0.000) AS cantidad,
@@ -289,14 +289,36 @@ final class StockRepository
             $params['q_sku'] = $term;
         }
 
-        $sql .= ' ORDER BY p.nombre LIMIT 300';
+        $safeLimit  = max(1, min($limit, 500));
+        $safeOffset = max(0, $offset);
+        $sql .= ' ORDER BY p.nombre LIMIT ' . $safeLimit . ' OFFSET ' . $safeOffset;
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
 
         return $statement->fetchAll();
     }
 
-    public function listStockByLocation(int $empresaId, int $ubicacionId, ?string $q): array
+    public function countStock(int $empresaId, int $sucursalId, ?string $q): int
+    {
+        $sql = 'SELECT COUNT(*) FROM productos p
+                WHERE p.empresa_id = :empresa_id AND p.activo = 1 AND p.controla_stock = 1';
+        $params = ['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId];
+
+        if ($q !== null && trim($q) !== '') {
+            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
+            $term = '%' . trim($q) . '%';
+            $params['q_nombre'] = $term;
+            $params['q_codigo'] = $term;
+            $params['q_sku'] = $term;
+        }
+
+        $statement = $this->connection->prepare($sql);
+        $statement->execute($params);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    public function listStockByLocation(int $empresaId, int $ubicacionId, ?string $q, int $limit = 200, int $offset = 0): array
     {
         $sql = 'SELECT p.id AS producto_id, p.codigo, p.nombre, r.nombre AS rubro,
                        u.id AS ubicacion_id, u.codigo AS ubicacion_codigo, u.nombre AS ubicacion_nombre,
@@ -325,7 +347,9 @@ final class StockRepository
             $params['q_sku'] = $term;
         }
 
-        $sql .= ' ORDER BY p.nombre LIMIT 300';
+        $safeLimit  = max(1, min($limit, 500));
+        $safeOffset = max(0, $offset);
+        $sql .= ' ORDER BY p.nombre LIMIT ' . $safeLimit . ' OFFSET ' . $safeOffset;
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
 
@@ -349,7 +373,7 @@ final class StockRepository
             $params['producto_id'] = $productoId;
         }
 
-        $sql .= ' ORDER BY sm.id DESC LIMIT 300';
+        $sql .= ' ORDER BY sm.id DESC LIMIT 300 OFFSET 0';
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
 

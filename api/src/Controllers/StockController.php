@@ -24,10 +24,12 @@ final class StockController
     public function index(): void
     {
         $this->respond(function (): array {
-            $empresaId = $this->queryInt('empresa_id');
+            $empresaId  = $this->queryInt('empresa_id');
             $sucursalId = $this->queryInt('sucursal_id');
+            $page       = max(1, $this->queryInt('page') ?: 1);
+            $perPage    = max(1, min($this->queryInt('per_page') ?: 200, 500));
 
-            return $this->service->listarStock($empresaId, $sucursalId, $_GET['q'] ?? null);
+            return $this->service->listarStock($empresaId, $sucursalId, $_GET['q'] ?? null, $page, $perPage);
         });
     }
 
@@ -73,10 +75,12 @@ final class StockController
     public function porUbicacion(array $params): void
     {
         $this->respond(function () use ($params): array {
-            $empresaId = $this->queryInt('empresa_id');
+            $empresaId   = $this->queryInt('empresa_id');
             $ubicacionId = (int) $params['ubicacion_id'];
+            $page        = max(1, $this->queryInt('page') ?: 1);
+            $perPage     = max(1, min($this->queryInt('per_page') ?: 200, 500));
 
-            return $this->service->listarStockUbicacion($empresaId, $ubicacionId, $_GET['q'] ?? null);
+            return $this->service->listarStockUbicacion($empresaId, $ubicacionId, $_GET['q'] ?? null, $page, $perPage);
         });
     }
 

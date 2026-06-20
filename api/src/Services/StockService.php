@@ -53,7 +53,7 @@ final class StockService
         return $stock;
     }
 
-    public function listarStock(int $empresaId, int $sucursalId, ?string $q = null): array
+    public function listarStock(int $empresaId, int $sucursalId, ?string $q = null, int $page = 1, int $perPage = 200): array
     {
         if ($empresaId <= 0 || $sucursalId <= 0) {
             throw new HttpException('Error de validación', 422, [
@@ -66,10 +66,20 @@ final class StockService
             throw new HttpException('Sucursal no encontrada', 404);
         }
 
-        return ['stock' => $this->repository->listStock($empresaId, $sucursalId, $q)];
+        $limit  = max(1, min($perPage, 500));
+        $offset = max(0, ($page - 1) * $limit);
+        $total  = $this->repository->countStock($empresaId, $sucursalId, $q);
+
+        return [
+            'stock'       => $this->repository->listStock($empresaId, $sucursalId, $q, $limit, $offset),
+            'total'       => $total,
+            'page'        => $page,
+            'per_page'    => $limit,
+            'total_pages' => (int) ceil($total / $limit),
+        ];
     }
 
-    public function listarStockUbicacion(int $empresaId, int $ubicacionId, ?string $q = null): array
+    public function listarStockUbicacion(int $empresaId, int $ubicacionId, ?string $q = null, int $page = 1, int $perPage = 200): array
     {
         if ($empresaId <= 0 || $ubicacionId <= 0) {
             throw new HttpException('Error de validacion', 422);
@@ -79,7 +89,14 @@ final class StockService
             throw new HttpException('Ubicacion no encontrada', 404);
         }
 
-        return ['stock' => $this->repository->listStockByLocation($empresaId, $ubicacionId, $q)];
+        $limit  = max(1, min($perPage, 500));
+        $offset = max(0, ($page - 1) * $limit);
+
+        return [
+            'stock'    => $this->repository->listStockByLocation($empresaId, $ubicacionId, $q, $limit, $offset),
+            'page'     => $page,
+            'per_page' => $limit,
+        ];
     }
 
     /**
