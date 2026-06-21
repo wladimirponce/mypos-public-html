@@ -119,7 +119,7 @@ final class CierreDiarioRepository
     public function reopenClosure(int $id): void
     {
         $statement = $this->connection->prepare(
-            "UPDATE cierres_diarios SET estado = 'ABIERTO' WHERE id = :id"
+            "UPDATE cierres_diarios SET estado = 'ABIERTO', reabierto_at = NOW() WHERE id = :id"
         );
         $statement->execute(['id' => $id]);
     }
