@@ -264,6 +264,129 @@ def append_pdf417(ticket: bytearray, ted_xml: str) -> None:
         ticket.extend(enc("*** TIMBRE NO DISPONIBLE ***\n"))
 
 
+def barcode_to_escpos(code: str, max_width: int = 400) -> bytes:
+    """Genera imagen de código de barras ESC/POS raster. EAN-13 si 12-13 dígitos, Code128 en otro caso."""
+    if Image is None:
+        return b""
+    try:
+        import barcode as python_barcode
+        from barcode.writer import ImageWriter
+
+        code = text(code)
+        if not code:
+            return b""
+
+        # Determinar tipo: EAN-13 si el código tiene 12 o 13 dígitos numéricos
+        if code.isdigit() and len(code) in (12, 13):
+            barcode_type = "ean13"
+            code = code[:12]  # python-barcode calcula el dígito verificador
+        else:
+            barcode_type = "code128"
+
+        writer = ImageWriter()
+        buf = io.BytesIO()
+        bc = python_barcode.get(barcode_type, code, writer=writer)
+        bc.write(buf, options={
+            "module_width": 0.35,
+            "module_height": 10.0,
+            "quiet_zone": 2.0,
+            "font_size": 8,
+            "text_distance": 2.0,
+            "write_text": True,
+            "background": "white",
+            "foreground": "black",
+            "dpi": 200,
+        })
+        buf.seek(0)
+        img = Image.open(buf)
+        return image_to_escpos_raster(img, max_width=max_width)
+    except Exception as exc:
+        print(f"[BARCODE] {exc}")
+        return b""
+
+
+def format_etiqueta_single(item: dict[str, Any], empresa: str, ancho_chars: int = 32) -> bytes:
+    """Formatea una etiqueta individual para impresora ESC/POS de 58mm (ancho_chars=32) u 80mm (ancho_chars=48)."""
+    label = bytearray()
+    label.extend(CMD_INIT)
+    label.extend(CMD_CODEPAGE_PC858)
+
+    # Nombre del local (cabecera)
+    label.extend(CMD_CENTER)
+    label.extend(CMD_BOLD_ON)
+    label.extend(enc(text(empresa, ancho_chars) + "\n"))
+    label.extend(CMD_BOLD_OFF)
+
+    # Nombre del producto (máx 2 líneas)
+    nombre = text(item.get("nombre"), 120)
+    rows = wrap_label(nombre, ancho_chars)
+    label.extend(CMD_BOLD_ON)
+    for row in rows[:2]:
+        label.extend(enc(row + "\n"))
+    label.extend(CMD_BOLD_OFF)
+
+    # Código interno
+    codigo = text(item.get("codigo"), 30)
+    if codigo:
+        label.extend(CMD_LEFT)
+        label.extend(enc(f"COD: {codigo}\n"))
+
+    # Código de barras (EAN o código interno como Code128)
+    ean = text(item.get("ean") or item.get("codigo_barra") or item.get("codigo"), 30)
+    if ean:
+        raster_w = 400 if ancho_chars <= 32 else 576
+        bc_bytes = barcode_to_escpos(ean, max_width=raster_w)
+        if bc_bytes:
+            label.extend(CMD_CENTER)
+            label.extend(bc_bytes)
+            label.extend(b"\n")
+
+    # Precio en tamaño doble
+    precio = number(item.get("precio_venta") or item.get("precio"), 0)
+    label.extend(CMD_CENTER)
+    label.extend(CMD_BOLD_ON)
+    label.extend(CMD_DOUBLE_ON)
+    label.extend(enc(money(precio) + "\n"))
+    label.extend(CMD_DOUBLE_OFF)
+    label.extend(CMD_BOLD_OFF)
+
+    # Fecha de vencimiento (opcional)
+    fecha_vto = text(item.get("fecha_vencimiento"), 20)
+    if fecha_vto:
+        label.extend(CMD_LEFT)
+        label.extend(enc(f"Vto: {fecha_vto}\n"))
+
+    return bytes(label)
+
+
+def format_etiquetas_batch(data: dict[str, Any]) -> bytes:
+    """Genera ESC/POS para un lote de etiquetas con corte entre cada una."""
+    empresa = text(data.get("empresa") or data.get("nombre_fantasia"), 46) or "MyPOS"
+    alto_mm = max(10, min(200, int(number(data.get("alto_mm"), 40))))
+
+    # Cada línea ESC/POS ocupa ~3.5 mm en papel de 203 dpi.
+    # Calculamos cuántas líneas extra agregar para llegar al alto deseado.
+    # El contenido de una etiqueta típica ocupa ~25-30 mm; el resto es espacio.
+    LINEAS_CONTENIDO_EST = 8
+    lineas_por_mm = 1 / 3.5
+    lineas_extra = max(0, int(alto_mm * lineas_por_mm) - LINEAS_CONTENIDO_EST)
+    feed_extra = (ESC + b"d" + bytes([min(lineas_extra, 10)])) if lineas_extra > 0 else b""
+
+    # Ancho: 58 mm → 32 chars, 80 mm → 48 chars
+    ancho_chars = 32
+
+    result = bytearray()
+    for item in data.get("etiquetas") or []:
+        copias = max(1, min(99, int(number(item.get("copias") or item.get("cantidad"), 1))))
+        etiqueta = format_etiqueta_single(item, empresa, ancho_chars)
+        for _ in range(copias):
+            result.extend(etiqueta)
+            result.extend(feed_extra)
+            result.extend(CMD_FEED_CUT)
+
+    return bytes(result)
+
+
 def format_ticket(data: dict[str, Any]) -> bytes:
     ticket = bytearray()
     ticket.extend(CMD_INIT)
@@ -515,6 +638,11 @@ def print_ticket():
     try:
         if kind in ("boleta_electronica_pdf", "pdf"):
             ok, message = print_pdf_job(data)
+            return jsonify({"success": ok, "message": message}), 200 if ok else 500
+
+        if kind == "etiquetas":
+            payload = format_etiquetas_batch(data)
+            ok, message = print_raw(payload, printer)
             return jsonify({"success": ok, "message": message}), 200 if ok else 500
 
         payload = format_boleta_electronica_dte(data) if kind == "boleta_electronica_dte" else format_ticket(data)
