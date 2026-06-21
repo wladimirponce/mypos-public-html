@@ -487,6 +487,7 @@ $router->get('/api/v1/compras', protectedRoute([$compraController, 'index'], 'co
 $router->post('/api/v1/compras', protectedRoute([$compraController, 'store'], 'compras.crear'));
 $router->get('/api/v1/compras/{id}', protectedRoute([$compraController, 'show'], 'compras.ver'));
 $router->post('/api/v1/compras/{id}/confirmar', protectedRoute([$compraController, 'confirm'], 'compras.confirmar'));
+$router->post('/api/v1/compras/{id}/actualizar-precios', protectedRoute([$compraController, 'actualizarPrecios'], 'compras.confirmar'));
 $router->post('/api/v1/compras/{id}/anular', protectedRoute([$compraController, 'cancel'], 'compras.anular'));
 $router->delete('/api/v1/compras/{id}', protectedRoute([$compraController, 'destroy'], 'compras.anular'));
 

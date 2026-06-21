@@ -16,7 +16,7 @@ final class ProductoRepository
     {
         $sql = 'SELECT p.id, p.empresa_id, p.rubro_id, p.centro_costo_id, p.codigo, p.sku,
                        p.nombre, p.descripcion, p.unidad_medida, p.precio_costo,
-                       p.costo_actual, p.precio_venta, p.controla_stock, p.stock_minimo,
+                       p.costo_actual, p.precio_venta, p.margen_ganancia, p.controla_stock, p.stock_minimo,
                        p.es_producto_peso, p.precio_por_kg,
                        p.permite_descuento, p.permite_comision, p.activo,
                        r.nombre AS rubro, cc.nombre AS centro_costo,
@@ -110,7 +110,7 @@ final class ProductoRepository
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.rubro_id, p.centro_costo_id, p.codigo, p.sku,
                     p.nombre, p.descripcion, p.unidad_medida, p.precio_costo,
-                    p.costo_actual, p.precio_venta, p.controla_stock, p.stock_minimo,
+                    p.costo_actual, p.precio_venta, p.margen_ganancia, p.controla_stock, p.stock_minimo,
                     p.es_producto_peso, p.precio_por_kg,
                     p.permite_descuento, p.permite_comision, p.activo,
                     r.nombre AS rubro, cc.nombre AS centro_costo,
@@ -154,11 +154,11 @@ final class ProductoRepository
         $statement = $this->connection->prepare(
             'INSERT INTO productos (
                 empresa_id, rubro_id, centro_costo_id, codigo, sku, nombre, descripcion,
-                unidad_medida, precio_costo, costo_actual, precio_venta, controla_stock,
+                unidad_medida, precio_costo, costo_actual, precio_venta, margen_ganancia, controla_stock,
                 stock_minimo, permite_descuento, permite_comision, activo
              ) VALUES (
                 :empresa_id, :rubro_id, :centro_costo_id, :codigo, :sku, :nombre, :descripcion,
-                :unidad_medida, :precio_costo, :costo_actual, :precio_venta, :controla_stock,
+                :unidad_medida, :precio_costo, :costo_actual, :precio_venta, :margen_ganancia, :controla_stock,
                 :stock_minimo, :permite_descuento, :permite_comision, :activo
              )'
         );
@@ -184,6 +184,7 @@ final class ProductoRepository
                  precio_costo = :precio_costo,
                  costo_actual = :costo_actual,
                  precio_venta = :precio_venta,
+                 margen_ganancia = :margen_ganancia,
                  controla_stock = :controla_stock,
                  stock_minimo = :stock_minimo,
                  permite_descuento = :permite_descuento,
@@ -592,6 +593,38 @@ final class ProductoRepository
         ];
     }
 
+    public function actualizarCostoActual(int $empresaId, int $productoId, int $costoNuevo): void
+    {
+        $this->connection->prepare(
+            'UPDATE productos
+             SET costo_actual = :costo, precio_costo = :costo, updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id AND empresa_id = :empresa_id AND costo_actual != :costo'
+        )->execute(['costo' => $costoNuevo, 'id' => $productoId, 'empresa_id' => $empresaId]);
+    }
+
+    public function actualizarPrecioVenta(int $empresaId, int $productoId, int $precioVenta): void
+    {
+        $this->connection->prepare(
+            'UPDATE productos
+             SET precio_venta = :precio_venta, updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id AND empresa_id = :empresa_id'
+        )->execute(['precio_venta' => $precioVenta, 'id' => $productoId, 'empresa_id' => $empresaId]);
+    }
+
+    public function findParaMargen(int $empresaId, int $productoId): ?array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT id, nombre, costo_actual, precio_venta, margen_ganancia
+             FROM productos
+             WHERE id = :id AND empresa_id = :empresa_id
+             LIMIT 1'
+        );
+        $statement->execute(['id' => $productoId, 'empresa_id' => $empresaId]);
+        $row = $statement->fetch();
+
+        return is_array($row) ? $row : null;
+    }
+
     private function clearBarcodePrincipal(int $productoId, int $empresaId): void
     {
         $this->connection->prepare(
@@ -626,6 +659,9 @@ final class ProductoRepository
             'precio_costo' => $precioCosto,
             'costo_actual' => $precioCosto,
             'precio_venta' => (int) ($data['precio_venta'] ?? 0),
+            'margen_ganancia' => isset($data['margen_ganancia']) && $data['margen_ganancia'] !== '' && $data['margen_ganancia'] !== null
+                ? round((float) $data['margen_ganancia'], 2)
+                : null,
             'controla_stock' => (int) ($data['controla_stock'] ?? 1),
             'stock_minimo' => (string) ($data['stock_minimo'] ?? '0.000'),
             'permite_descuento' => (int) ($data['permite_descuento'] ?? 1),

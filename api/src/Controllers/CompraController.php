@@ -64,6 +64,20 @@ final class CompraController
         }, 'Compra anulada correctamente');
     }
 
+    public function actualizarPrecios(array $params): void
+    {
+        $this->respond(function (int $userId) use ($params): array {
+            $payload = Request::json();
+
+            return $this->service->actualizarPreciosVenta(
+                $userId,
+                (int) $params['id'],
+                (int) ($payload['empresa_id'] ?? 0),
+                $payload['actualizaciones'] ?? []
+            );
+        }, 'Precios actualizados correctamente');
+    }
+
     public function destroy(array $params): void
     {
         $this->respond(function (int $userId) use ($params): array {

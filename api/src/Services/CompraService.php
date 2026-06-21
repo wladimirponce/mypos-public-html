@@ -9,6 +9,7 @@ use Mypos\Config\Database;
 use Mypos\Core\HttpException;
 use Mypos\Repositories\CompraRepository;
 use Mypos\Repositories\LoteRepository;
+use Mypos\Repositories\ProductoRepository;
 use Mypos\Repositories\ProveedorRepository;
 use Mypos\Repositories\StockRepository;
 use Throwable;
@@ -185,6 +186,7 @@ final class CompraService
             $this->repository->markConfirmed($empresaId, $id);
             $this->sumarStock($id, $empresaId, (int) $purchase['sucursal_id'], $userId, $details, $connection);
             $this->registrarPreciosObservados($id, $empresaId, $purchase['proveedor_id'] ?? null, $details, $connection);
+            $propuestas = $this->calcularPropuestasMargen($empresaId, $details, $connection);
             AuditoriaService::registrarEvento([
                 'empresa_id' => $empresaId,
                 'sucursal_id' => (int) $purchase['sucursal_id'],
@@ -199,7 +201,7 @@ final class CompraService
             ], $connection);
             $connection->commit();
 
-            return ['compra_id' => $id, 'estado' => 'CONFIRMADA'];
+            return ['compra_id' => $id, 'estado' => 'CONFIRMADA', 'propuestas_precio' => $propuestas];
         } catch (Throwable $exception) {
             if ($connection->inTransaction()) {
                 $connection->rollBack();
@@ -357,6 +359,88 @@ final class CompraService
                 ], $connection);
             }
         }
+    }
+
+    public function actualizarPreciosVenta(int $userId, int $id, int $empresaId, array $actualizaciones): array
+    {
+        $purchase = $this->repository->findForUpdate($empresaId, $id);
+
+        if ($purchase === null) {
+            throw new HttpException('Compra no encontrada', 404);
+        }
+
+        if ($purchase['estado'] !== 'CONFIRMADA') {
+            throw new HttpException('La compra debe estar en estado CONFIRMADA', 422);
+        }
+
+        $productoRepo = new ProductoRepository(Database::connection());
+        $updated = 0;
+
+        foreach ($actualizaciones as $item) {
+            $productoId = (int) ($item['producto_id'] ?? 0);
+            $precioVenta = (int) ($item['precio_venta'] ?? 0);
+
+            if ($productoId <= 0 || $precioVenta <= 0) {
+                continue;
+            }
+
+            $productoRepo->actualizarPrecioVenta($empresaId, $productoId, $precioVenta);
+            $updated++;
+        }
+
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'usuario_id' => $userId,
+            'modulo' => 'compras',
+            'accion' => 'actualizar_precios',
+            'entidad' => 'compras',
+            'entidad_id' => $id,
+            'descripcion' => "Precios de venta actualizados tras compra #{$id}",
+            'datos_nuevos' => ['precios_actualizados' => $updated],
+        ], $this->repository->connection());
+
+        return ['actualizaciones' => $updated];
+    }
+
+    private function calcularPropuestasMargen(int $empresaId, array $details, $connection): array
+    {
+        $productoRepo = new ProductoRepository($connection);
+        $propuestas = [];
+
+        foreach ($details as $item) {
+            $productoId = (int) ($item['producto_id'] ?? 0);
+            $costoNuevo = (int) ($item['costo_unitario'] ?? 0);
+
+            if ($productoId <= 0 || $costoNuevo <= 0) {
+                continue;
+            }
+
+            $productoRepo->actualizarCostoActual($empresaId, $productoId, $costoNuevo);
+
+            $producto = $productoRepo->findParaMargen($empresaId, $productoId);
+
+            if ($producto === null || $producto['margen_ganancia'] === null || $producto['margen_ganancia'] === '') {
+                continue;
+            }
+
+            $costoAnterior = (int) $producto['costo_actual'];
+            if ($costoNuevo === $costoAnterior) {
+                continue;
+            }
+
+            $margen = (float) $producto['margen_ganancia'];
+            $propuestas[] = [
+                'producto_id'         => $productoId,
+                'nombre'              => $producto['nombre'],
+                'margen_ganancia'     => $margen,
+                'costo_anterior'      => $costoAnterior,
+                'costo_nuevo'         => $costoNuevo,
+                'precio_venta_actual' => (int) $producto['precio_venta'],
+                'precio_venta_sugerido' => (int) round($costoNuevo * (1 + $margen / 100)),
+            ];
+        }
+
+        return $propuestas;
     }
 
     private function registrarPreciosObservados(int $purchaseId, int $empresaId, mixed $proveedorId, array $items, $connection): void
