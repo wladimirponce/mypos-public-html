@@ -1,1 +1,0 @@
-import{aO as t,aV as a}from"./index-DoBS5A5l.js";import{c as u}from"./compraService-PYOR-G5l.js";function i(e){const r=t(o=>o.empresaActiva);return a({queryKey:["compras","productos",r==null?void 0:r.empresa_id,e],queryFn:()=>u.products((r==null?void 0:r.empresa_id)??0,e),enabled:!!(r!=null&&r.empresa_id&&e.trim().length>=2),staleTime:2e4})}export{i as u};
