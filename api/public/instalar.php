@@ -1,6 +1,6 @@
 <?php
 /**
- * Instalador Automático de Base de Datos MyPOS
+ * Instalador / Actualizador de Base de Datos MyPOS
  *
  * SEGURIDAD: deshabilitado por defecto. Solo se ejecuta si INSTALLER_TOKEN está
  * definido en el .env y la petición incluye el mismo token (?token= o campo
@@ -131,13 +131,32 @@ function mypos_execute_sql_file(PDO $pdo, string $archivo): void
     }
 }
 
-function mypos_env_value(string $value): string
+/**
+ * Registra una migración en schema_migrations (idempotente).
+ */
+function mypos_register_migration(PDO $pdo, string $migrationName): void
 {
-    if (preg_match('/^[A-Za-z0-9_.:@\/-]*$/', $value) === 1) {
-        return $value;
-    }
+    $stmt = $pdo->prepare(
+        'INSERT IGNORE INTO schema_migrations (migration) VALUES (:migration)'
+    );
+    $stmt->execute(['migration' => $migrationName]);
+}
 
-    return '"' . addcslashes($value, "\\\"") . '"';
+/**
+ * Devuelve el conjunto de migraciones ya aplicadas.
+ * Si schema_migrations no existe aún, devuelve array vacío.
+ *
+ * @return array<string, true>
+ */
+function mypos_applied_migrations(PDO $pdo): array
+{
+    try {
+        $stmt = $pdo->query('SELECT migration FROM schema_migrations');
+        $rows = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        return array_fill_keys($rows, true);
+    } catch (PDOException) {
+        return [];
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -145,80 +164,110 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $db   = $_POST['db'] ?? '';
     $user = $_POST['user'] ?? '';
     $pass = $_POST['pass'] ?? '';
+    $soloActualizar = ($_POST['solo_actualizar'] ?? '0') === '1';
 
     if (empty($db) || empty($user)) {
         $mensaje = "<div class='alert alert-danger'>La Base de Datos y el Usuario son obligatorios.</div>";
     } else {
         try {
-            // Conexión a la BD
             $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::MYSQL_ATTR_MULTI_STATEMENTS => true, // Necesario para correr archivos con múltiples sentencias
-                PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::MYSQL_ATTR_USE_BUFFERED_QUERY => true,
             ]);
 
-            // Ruta a los archivos SQL (asumiendo que este script está en backend/public/)
             $database_dir = mypos_resolve_dir([
                 __DIR__ . '/../../database',
                 __DIR__ . '/../database',
             ], 'database');
             $sql_dir = mypos_resolve_dir([$database_dir . '/init'], 'database/init');
 
-            // Buscar todos los archivos .sql y ordenarlos alfabéticamente para respetar llaves foráneas
-            $archivos = glob($sql_dir . '/*.sql');
+            $archivos = glob($sql_dir . '/*.sql') ?: [];
             sort($archivos);
 
-            $log = "<ul class='list-group mt-3'>";
-            $exito = 0;
-            $errores = 0;
-            $seedsExitosos = 0;
-            $seedsErrores = 0;
-
-            // Desactivar temporalmente revisiones de llaves foráneas para evitar conflictos
             $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;");
             $pdo->exec("SET collation_connection = 'utf8mb4_unicode_ci';");
             $pdo->exec("SET FOREIGN_KEY_CHECKS=0;");
 
+            // Garantizar que schema_migrations exista antes de consultarla.
+            // (001_schema.sql la crea, pero puede que aún no se haya corrido en una BD vacía.)
+            $pdo->exec(
+                "CREATE TABLE IF NOT EXISTS schema_migrations (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    migration VARCHAR(190) NOT NULL,
+                    executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uq_schema_migrations_migration (migration)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
+            );
+
+            // En modo actualización cargamos las ya aplicadas para saltarlas.
+            $applied = $soloActualizar ? mypos_applied_migrations($pdo) : [];
+
+            $log            = "<ul class='list-group mt-3'>";
+            $aplicadas      = 0;
+            $saltadas       = 0;
+            $errores        = 0;
+            $seedsExitosos  = 0;
+            $seedsErrores   = 0;
+
             foreach ($archivos as $archivo) {
+                $migrationName = pathinfo($archivo, PATHINFO_FILENAME);
+
+                // Modo actualización: saltar migraciones ya registradas.
+                if ($soloActualizar && isset($applied[$migrationName])) {
+                    $log .= "<li class='list-group-item list-group-item-secondary text-muted'>"
+                          . "⏭ <b>{$migrationName}</b> — ya aplicada, saltada.</li>";
+                    $saltadas++;
+                    continue;
+                }
+
                 $sql = file_get_contents($archivo);
-                if (!empty(trim($sql))) {
-                    try {
-                        mypos_execute_sql_file($pdo, $archivo);
-                        $log .= "<li class='list-group-item list-group-item-success'>✔️ " . basename($archivo) . " instalado.</li>";
-                        $exito++;
-                    } catch (PDOException $e) {
-                        $log .= "<li class='list-group-item list-group-item-danger'>❌ Error en " . basename($archivo) . ": " . $e->getMessage() . "</li>";
-                        $errores++;
-                    }
+                if (empty(trim((string) $sql))) {
+                    continue;
+                }
+
+                try {
+                    mypos_execute_sql_file($pdo, $archivo);
+                    // Registrar en schema_migrations si el archivo no lo hace él mismo.
+                    mypos_register_migration($pdo, $migrationName);
+                    $log .= "<li class='list-group-item list-group-item-success'>"
+                          . "✔ <b>{$migrationName}</b> — aplicada.</li>";
+                    $aplicadas++;
+                } catch (PDOException $e) {
+                    $log .= "<li class='list-group-item list-group-item-danger'>"
+                          . "✖ <b>{$migrationName}</b>: " . htmlspecialchars($e->getMessage()) . "</li>";
+                    $errores++;
                 }
             }
 
-            $soloActualizar = $_POST['solo_actualizar'] ?? '0';
-
-            // Solo el seed maestro global puede ejecutarse desde el instalador.
-            // Los seeds demo o de empresas deben ejecutarse manualmente en ambientes controlados.
-            if ($soloActualizar !== '1') {
+            // Seeds: solo en instalación fresca.
+            if (!$soloActualizar) {
                 $seed_dir = realpath($database_dir . '/seeds');
                 if ($seed_dir && is_dir($seed_dir)) {
                     $seedBase = mypos_resolve_file([$seed_dir . '/001_seed_base.sql']);
-                    $seeds = $seedBase !== null ? [$seedBase] : [];
-                    foreach ($seeds as $seed) {
+                    foreach ($seedBase !== null ? [$seedBase] : [] as $seed) {
                         $sql = file_get_contents($seed);
-                        if (!empty(trim($sql))) {
+                        if (!empty(trim((string) $sql))) {
                             try {
                                 mypos_execute_sql_file($pdo, $seed);
-                                $log .= "<li class='list-group-item list-group-item-info'>🌱 Seed: " . basename($seed) . " instalado.</li>";
+                                $log .= "<li class='list-group-item list-group-item-info'>"
+                                      . "🌱 Seed: " . basename($seed) . " instalado.</li>";
                                 $seedsExitosos++;
                             } catch (PDOException $e) {
-                                $log .= "<li class='list-group-item list-group-item-danger'>❌ Error en seed " . basename($seed) . ": " . $e->getMessage() . "</li>";
+                                $log .= "<li class='list-group-item list-group-item-danger'>"
+                                      . "✖ Seed " . basename($seed) . ": " . htmlspecialchars($e->getMessage()) . "</li>";
                                 $seedsErrores++;
                             }
                         }
                     }
-                    $log .= "<li class='list-group-item list-group-item-primary'>ℹ️ Los seeds demo y de empresas fueron omitidos por seguridad.</li>";
+                    $log .= "<li class='list-group-item list-group-item-primary'>"
+                          . "ℹ️ Seeds demo y de empresas omitidos por seguridad.</li>";
                 }
             } else {
-                $log .= "<li class='list-group-item list-group-item-primary'>ℹ️ Modo de actualización: se omitió la ejecución de seeds.</li>";
+                $log .= "<li class='list-group-item list-group-item-primary'>"
+                      . "ℹ️ Modo actualización: seeds omitidos · "
+                      . "<b>{$aplicadas}</b> nuevas · <b>{$saltadas}</b> ya aplicadas · <b>{$errores}</b> errores.</li>";
             }
 
             $pdo->exec("SET FOREIGN_KEY_CHECKS=1;");
@@ -226,20 +275,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $totalErrores = $errores + $seedsErrores;
             if ($totalErrores === 0) {
-                $mensaje = "<div class='alert alert-success'><h5>¡Instalación Finalizada!</h5>Se instalaron $exito archivos base y $seedsExitosos seeds sin errores. Detalles: $log</div>";
+                $resumen = $soloActualizar
+                    ? "Actualización finalizada: <b>{$aplicadas}</b> migraciones nuevas aplicadas, "
+                      . "<b>{$saltadas}</b> ya estaban al día."
+                    : "Instalación finalizada: <b>{$aplicadas}</b> archivos base y <b>{$seedsExitosos}</b> seeds.";
+                $mensaje = "<div class='alert alert-success'><h5>✅ {$resumen}</h5>{$log}</div>";
             } else {
-                $mensaje = "<div class='alert alert-danger'><h5>Instalación incompleta</h5>Se instalaron $exito archivos base y $seedsExitosos seeds, con $totalErrores errores. Corrige los errores antes de usar el sistema. Detalles: $log</div>";
+                $resumen = $soloActualizar
+                    ? "Actualización incompleta: <b>{$aplicadas}</b> aplicadas, <b>{$saltadas}</b> saltadas, "
+                      . "<b>{$errores}</b> errores."
+                    : "Instalación incompleta: <b>{$aplicadas}</b> archivos base, <b>{$seedsExitosos}</b> seeds, "
+                      . "<b>{$totalErrores}</b> errores. Corrige los errores antes de usar el sistema.";
+                $mensaje = "<div class='alert alert-danger'><h5>⚠️ {$resumen}</h5>{$log}</div>";
             }
 
-            // SEGURIDAD: el instalador ya NO reescribe el .env con datos
-            // recibidos por web (era un vector de toma de control). Configure
-            // las credenciales de BD directamente en el archivo .env del servidor.
-            $mensaje .= "<div class='alert alert-info'>Recuerde configurar las credenciales de BD en el archivo <b>.env</b> del servidor.</div>";
+            $mensaje .= "<div class='alert alert-info mt-2'>"
+                      . "Configure las credenciales de BD en el archivo <b>.env</b> del servidor.</div>";
 
         } catch (PDOException $e) {
-            $mensaje = "<div class='alert alert-danger'><b>Error de Conexión:</b> Verifica que el usuario y la clave sean correctos. " . $e->getMessage() . "</div>";
+            $mensaje = "<div class='alert alert-danger'><b>Error de Conexión:</b> "
+                     . htmlspecialchars($e->getMessage()) . "</div>";
         } catch (Exception $e) {
-            $mensaje = "<div class='alert alert-danger'><b>Error:</b> " . $e->getMessage() . "</div>";
+            $mensaje = "<div class='alert alert-danger'><b>Error:</b> "
+                     . htmlspecialchars($e->getMessage()) . "</div>";
         }
     }
 }
@@ -249,17 +307,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instalador de Base de Datos - MyPOS</title>
-    <!-- Usamos Bootstrap por CDN para que sea rápido y bonito -->
+    <title>Instalador de Base de Datos — MyPOS</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background-color: #f8f9fa; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-        .card { width: 100%; max-width: 500px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: none; border-radius: 12px; }
+        .card { width: 100%; max-width: 540px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: none; border-radius: 12px; }
         .card-header { background-color: #0d6efd; color: white; border-radius: 12px 12px 0 0 !important; text-align: center; padding: 20px; }
+        .list-group-item-secondary { font-size: .85rem; }
     </style>
 </head>
 <body>
-
 <div class="container my-5 d-flex justify-content-center">
     <div class="card">
         <div class="card-header">
@@ -267,7 +324,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <p class="mb-0 text-white-50">Configuración de Base de Datos</p>
         </div>
         <div class="card-body p-4">
-            
+
             <?php if (!empty($mensaje)) echo $mensaje; ?>
 
             <form method="POST" action="">
@@ -276,7 +333,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input type="text" name="host" class="form-control" value="localhost" required>
                     <div class="form-text">En cPanel casi siempre es "localhost".</div>
                 </div>
-                
+
                 <div class="mb-3">
                     <label class="form-label fw-bold">Nombre de la Base de Datos</label>
                     <input type="text" name="db" class="form-control" placeholder="ej: zylajdcb_mypos" required>
@@ -292,22 +349,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input type="password" name="pass" class="form-control" placeholder="Tu contraseña">
                 </div>
 
-                <div class="mb-4 form-check bg-light p-3 border rounded">
-                    <input type="checkbox" name="solo_actualizar" class="form-check-input ms-1" id="soloActualizar" value="1">
-                    <label class="form-check-label fw-bold text-primary ms-2" for="soloActualizar">
-                        Solo actualizar sistema (Ejecuta nuevas tablas y omite el seed maestro)
-                    </label>
+                <div class="mb-4 p-3 border rounded">
+                    <div class="form-check">
+                        <input type="checkbox" name="solo_actualizar" class="form-check-input"
+                               id="soloActualizar" value="1">
+                        <label class="form-check-label fw-bold text-primary" for="soloActualizar">
+                            Modo actualización (recomendado para sistemas en uso)
+                        </label>
+                    </div>
+                    <div class="form-text ms-4 mt-1">
+                        <b>Marcado:</b> consulta <code>schema_migrations</code> y aplica solo las migraciones
+                        nuevas que no han sido ejecutadas aún. Los seeds se omiten.<br>
+                        <b>Desmarcado:</b> instalación fresca — ejecuta todos los archivos SQL y el seed
+                        base maestro. Úsalo solo en una base de datos vacía.
+                    </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">Ejecutar Instalación / Actualización</button>
+                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">
+                    Ejecutar Instalación / Actualización
+                </button>
             </form>
-            
+
             <div class="mt-4 text-center text-muted small">
-                ⚠️ <b>Importante:</b> Una vez que termine la instalación, elimina este archivo (<code>instalar.php</code>) de tu servidor cPanel por seguridad.
+                ⚠️ <b>Importante:</b> Una vez finalizada la instalación, elimina
+                <code>instalar.php</code> del servidor y vacía <code>INSTALLER_TOKEN</code> en el
+                <code>.env</code>.
             </div>
         </div>
     </div>
 </div>
-
 </body>
 </html>
