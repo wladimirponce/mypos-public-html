@@ -85,6 +85,17 @@ final class DteIntegrationRepository
         return is_array($row) ? $row : null;
     }
 
+    public function ventaIdFromDocument(int $documentId): ?int
+    {
+        $statement = $this->connection->prepare(
+            'SELECT venta_id FROM documentos_emitidos WHERE id = :id LIMIT 1'
+        );
+        $statement->execute(['id' => $documentId]);
+        $value = $statement->fetchColumn();
+
+        return $value !== false && $value !== null ? (int) $value : null;
+    }
+
     public function documentDetails(int $documentId): array
     {
         $statement = $this->connection->prepare(

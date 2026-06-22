@@ -10,6 +10,7 @@ ini_set('error_log', dirname(__DIR__) . '/storage/logs/php_errors.log');
 
 use Mypos\Config\Database;
 use Mypos\Controllers\AnulacionController;
+use Mypos\Controllers\AgentController;
 use Mypos\Controllers\ConfiguracionSiiController;
 use Mypos\Controllers\AuditoriaController;
 use Mypos\Controllers\AuthController;
@@ -257,6 +258,9 @@ $router->post('/api/v1/crm/conversations/iniciar',         [$crmController, 'ini
 $whatsappController = new \Mypos\Controllers\WhatsappController();
 $router->post('/api/v1/whatsapp/token', [$whatsappController, 'generateToken']);
 $router->get('/api/v1/whatsapp/status', [$whatsappController, 'status']);
+
+$agentController = new AgentController();
+$router->post('/api/v1/agent/chat', [$agentController, 'chat']);
 
 $suscripcionController = new SuscripcionController();
 $comunicacionVentasController = new ComunicacionVentasController();

@@ -44,11 +44,17 @@ final class ConfiguracionRepository
     public function empresaConfig(int $empresaId): ?array
     {
         $statement = $this->connection->prepare(
-            'SELECT empresa_id, rut_empresa, razon_social, nombre_fantasia, giro,
-                    email_contacto, telefono_contacto, direccion, comuna, ciudad,
-                    region, logo_url, sitio_web, metadata_json
-             FROM empresa_configuracion
-             WHERE empresa_id = :empresa_id
+            'SELECT ec.empresa_id, ec.rut_empresa, ec.razon_social, ec.nombre_fantasia, ec.giro,
+                    ec.email_contacto, ec.telefono_contacto, ec.direccion, ec.comuna, ec.ciudad,
+                    ec.region, ec.logo_url, ec.sitio_web, ec.metadata_json,
+                    (SELECT a.id FROM archivos_subidos a
+                     WHERE a.empresa_id = ec.empresa_id
+                       AND a.modulo = \'CONFIGURACION\'
+                       AND a.entidad = \'empresa_configuracion\'
+                       AND a.estado = \'ACTIVO\'
+                     ORDER BY a.id DESC LIMIT 1) AS logo_archivo_id
+             FROM empresa_configuracion ec
+             WHERE ec.empresa_id = :empresa_id
              LIMIT 1'
         );
         $statement->execute(['empresa_id' => $empresaId]);

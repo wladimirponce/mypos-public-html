@@ -160,13 +160,6 @@ final class DocumentoTributarioService
 
             $connection->commit();
 
-            // Notificación fire-and-forget: falla silenciosa para no afectar la respuesta al POS
-            try {
-                (new NotificacionVentaService($connection))->notificar($saleId, $documentId, $empresaId);
-            } catch (Throwable $notifException) {
-                error_log('[DTE] Notificacion fallo (no critico): ' . $notifException->getMessage());
-            }
-
             return [
                 'documento_emitido_id' => $documentId,
                 'venta_id' => $saleId,

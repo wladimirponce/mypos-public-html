@@ -161,6 +161,16 @@ final class DteIntegrationService
 
             $connection->commit();
 
+            // Notificación al cliente (email/WhatsApp) — fire-and-forget, no bloquea la respuesta
+            try {
+                $ventaId = $this->repository->ventaIdFromDocument((int) $document['id']);
+                if ($ventaId !== null) {
+                    (new NotificacionVentaService($connection))->notificar($ventaId, (int) $document['id'], $empresaId);
+                }
+            } catch (Throwable $notifException) {
+                error_log('[DTE] Notificacion fallo (no critico): ' . $notifException->getMessage());
+            }
+
             return [
                 'documento_emitido_id' => (int) $document['id'],
                 'dte_emision_id' => $emissionId,
