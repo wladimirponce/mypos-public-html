@@ -37,6 +37,8 @@ use Mypos\Controllers\EgresoController;
 use Mypos\Controllers\FolioController;
 use Mypos\Controllers\IaController;
 use Mypos\Controllers\ImportacionCatalogoController;
+use Mypos\Controllers\ProductoImportController;
+use Mypos\Controllers\F29Controller;
 use Mypos\Controllers\LibroController;
 use Mypos\Controllers\OnboardingController;
 use Mypos\Controllers\PermissionController;
@@ -386,6 +388,7 @@ $router->delete('/api/v1/centros-costo/{id}', protectedRoute([$centroCostoContro
 $productoController = new ProductoController();
 $productoAtributoController = new ProductoAtributoController();
 $importacionCatalogoController = new ImportacionCatalogoController();
+$productoImportController = new ProductoImportController();
 $catalogoMaestroController = new CatalogoMaestroController();
 $router->get('/api/v1/catalogos-maestros/buscar', protectedRoute([$catalogoMaestroController, 'search'], 'productos.ver'));
 $router->get('/api/v1/catalogos-maestros/buscar-codigo', protectedRoute([$catalogoMaestroController, 'barcode'], 'productos.ver'));
@@ -397,6 +400,9 @@ $router->post('/api/v1/importaciones/catalogo', protectedRoute([$importacionCata
 $router->get('/api/v1/importaciones/catalogo/{id}', protectedRoute([$importacionCatalogoController, 'show'], 'productos.ver'));
 $router->post('/api/v1/importaciones/catalogo/{id}/validar', protectedRoute([$importacionCatalogoController, 'validate'], 'productos.editar'));
 $router->post('/api/v1/importaciones/catalogo/{id}/aplicar', protectedRoute([$importacionCatalogoController, 'apply'], 'productos.editar'));
+$router->post('/api/v1/importaciones/maestro', protectedRoute([$productoImportController, 'store'], 'productos.editar'));
+$router->get('/api/v1/importaciones/maestro/{id}', protectedRoute([$productoImportController, 'show'], 'productos.ver'));
+$router->post('/api/v1/importaciones/maestro/{id}/aplicar', protectedRoute([$productoImportController, 'apply'], 'productos.editar'));
 $router->get('/api/v1/productos/buscar', protectedRoute([$productoController, 'search'], 'productos.ver'));
 $router->get('/api/v1/productos', protectedRoute([$productoController, 'index'], 'productos.ver'));
 $router->post('/api/v1/productos', protectedRoute([$productoController, 'store'], 'productos.crear'));
@@ -579,6 +585,12 @@ $router->get('/api/v1/dte/emisiones/{id}', protectedRoute([$dteController, 'emis
 $router->post('/api/v1/dte/emisiones/{id}/reintentar', protectedRoute([$dteController, 'retry'], 'dte.reintentar'));
 $router->post('/api/v1/dte/emisiones/{id}/marcar-aceptado', protectedRoute([$dteController, 'markAccepted'], 'dte.emitir'));
 $router->post('/api/v1/dte/emisiones/{id}/marcar-rechazado', protectedRoute([$dteController, 'markRejected'], 'dte.emitir'));
+
+$f29Controller = new F29Controller();
+$router->get('/api/v1/f29/calcular', protectedRoute([$f29Controller, 'calcular'], 'libros.resumen_iva.ver'));
+$router->get('/api/v1/f29/historial', protectedRoute([$f29Controller, 'historial'], 'libros.resumen_iva.ver'));
+$router->post('/api/v1/f29', protectedRoute([$f29Controller, 'guardar'], 'libros.resumen_iva.ver'));
+$router->post('/api/v1/f29/{periodo}/declarar', protectedRoute([$f29Controller, 'declarar'], 'libros.resumen_iva.ver'));
 
 $libroController = new LibroController();
 $router->get('/api/v1/libros/ventas', protectedRoute([$libroController, 'ventas'], 'libros.ventas.ver'));

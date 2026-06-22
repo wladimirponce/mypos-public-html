@@ -190,7 +190,7 @@ final class ImportParserService
                 if ($textVal !== '') {
                     $hasData = true;
                     // Limpieza específica para campos numéricos/dinero
-                    if (in_array($field, ['precio_compra', 'precio_venta', 'factor_conversion'], true)) {
+                    if (in_array($field, ['precio_compra', 'precio_costo', 'precio_venta', 'stock_minimo', 'factor_conversion'], true)) {
                         $item[$field] = $this->cleanNumber($textVal);
                     } else {
                         $item[$field] = $textVal;
@@ -268,8 +268,12 @@ final class ImportParserService
             'codigo_barra' => ['codigo_barra', 'barra', 'ean', 'upc', 'barcode', 'código de barra', 'código barras', 'codigo barra', 'codigo de barra', 'barras'],
             'nombre' => ['nombre', 'descripcion', 'producto', 'item', 'title', 'nombre producto', 'nombre_producto', 'nombre comercial', 'mercaderia'],
             'descripcion' => ['descripcion_larga', 'detalle', 'observacion', 'long_description', 'detalles', 'observaciones'],
-            'precio_compra' => ['precio_compra', 'valor_compra', 'costo', 'compra', 'cost', 'costo unitario', 'precio costo', 'valor compra', 'costo neto'],
+            'precio_compra' => ['precio_compra', 'valor_compra', 'compra', 'cost', 'costo unitario', 'valor compra', 'costo neto'],
+            'precio_costo' => ['precio_costo', 'costo', 'precio costo', 'p.costo', 'p costo'],
             'precio_venta' => ['precio_venta', 'valor_venta', 'venta', 'precio', 'price', 'precio venta', 'valor venta', 'p.venta', 'p venta'],
+            'rubro' => ['rubro', 'categoria', 'categoría', 'category', 'departamento', 'familia'],
+            'stock_minimo' => ['stock_minimo', 'stock minimo', 'minimo', 'mínimo', 'stock_min', 'min_stock', 'stock min'],
+            'activo' => ['activo', 'active', 'estado', 'habilitado', 'vigente'],
             'proveedor' => ['proveedor', 'marca', 'provider', 'brand', 'proveedor_identificado', 'proveedores'],
             'codigo_proveedor' => ['codigo_proveedor', 'codigo_prov', 'prov_code', 'ref_proveedor', 'codigo prov', 'código proveedor', 'codigo de proveedor'],
             'unidad_compra' => ['unidad_compra', 'unidad', 'embalaje', 'unit', 'unidad de compra', 'medida'],
