@@ -631,6 +631,42 @@ final class StockRepository
         return is_array($row) ? $row : null;
     }
 
+    /**
+     * Productos cuyo stock disponible está en cero o por debajo del mínimo configurado.
+     * Filtra por sucursal si se indica; si no, muestra todas las sucursales de la empresa.
+     */
+    public function listAlertas(int $empresaId, ?int $sucursalId, int $limit = 200): array
+    {
+        $sql = 'SELECT p.id AS producto_id, p.codigo, p.nombre, r.nombre AS rubro,
+                       s.id AS sucursal_id, s.nombre AS sucursal_nombre,
+                       COALESCE(ss.cantidad, 0.000) AS cantidad,
+                       COALESCE(ss.reservado, 0.000) AS reservado,
+                       (COALESCE(ss.cantidad, 0.000) - COALESCE(ss.reservado, 0.000)) AS disponible,
+                       COALESCE(ss.stock_minimo, p.stock_minimo, 0.000) AS stock_minimo
+                FROM productos p
+                INNER JOIN stock_sucursal ss ON ss.producto_id = p.id AND ss.empresa_id = p.empresa_id
+                INNER JOIN sucursales s ON s.id = ss.sucursal_id AND s.empresa_id = ss.empresa_id AND s.activo = 1
+                LEFT JOIN rubros r ON r.id = p.rubro_id
+                WHERE p.empresa_id = :empresa_id
+                  AND p.activo = 1
+                  AND p.controla_stock = 1
+                  AND COALESCE(ss.stock_minimo, p.stock_minimo, 0.000) > 0
+                  AND (COALESCE(ss.cantidad, 0.000) - COALESCE(ss.reservado, 0.000))
+                      <= COALESCE(ss.stock_minimo, p.stock_minimo, 0.000)';
+        $params = ['empresa_id' => $empresaId];
+
+        if ($sucursalId !== null && $sucursalId > 0) {
+            $sql .= ' AND ss.sucursal_id = :sucursal_id';
+            $params['sucursal_id'] = $sucursalId;
+        }
+
+        $sql .= ' ORDER BY disponible ASC, p.nombre LIMIT ' . (int) $limit;
+        $statement = $this->connection->prepare($sql);
+        $statement->execute($params);
+
+        return $statement->fetchAll();
+    }
+
     private function locationParams(array $data): array
     {
         return [

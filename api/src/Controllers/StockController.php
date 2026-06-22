@@ -54,6 +54,18 @@ final class StockController
         }, 'Ajuste de stock registrado');
     }
 
+    public function alertas(): void
+    {
+        $this->respond(function (): array {
+            $empresaId  = $this->queryInt('empresa_id');
+            $sucursalId = isset($_GET['sucursal_id']) && (int) $_GET['sucursal_id'] > 0
+                ? (int) $_GET['sucursal_id']
+                : null;
+
+            return $this->service->alertas($empresaId, $sucursalId);
+        });
+    }
+
     public function integridad(): void
     {
         $this->respond(function (): array {

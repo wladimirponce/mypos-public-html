@@ -394,6 +394,20 @@ final class StockService
         }
     }
 
+    public function alertas(int $empresaId, ?int $sucursalId): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        $rows = $this->repository->listAlertas($empresaId, $sucursalId);
+
+        return [
+            'total'   => count($rows),
+            'alertas' => $rows,
+        ];
+    }
+
     public function descontarPorVenta(array $data, ?PDO $connection = null): array
     {
         $data['tipo'] = 'VENTA';

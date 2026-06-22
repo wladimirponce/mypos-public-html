@@ -39,6 +39,7 @@ use Mypos\Controllers\IaController;
 use Mypos\Controllers\ImportacionCatalogoController;
 use Mypos\Controllers\ProductoImportController;
 use Mypos\Controllers\F29Controller;
+use Mypos\Controllers\InventarioFisicoController;
 use Mypos\Controllers\LibroController;
 use Mypos\Controllers\OnboardingController;
 use Mypos\Controllers\PermissionController;
@@ -455,6 +456,14 @@ $router->post('/api/v1/stock/ajustes', protectedRoute([$stockController, 'ajuste
 $router->post('/api/v1/stock/merma', protectedRoute([$stockController, 'merma'], 'stock.ajustar'));
 $router->get('/api/v1/stock/movimientos', protectedRoute([$stockController, 'movimientos'], 'stock.movimientos.ver'));
 $router->get('/api/v1/stock/integridad', protectedRoute([$stockController, 'integridad'], 'stock.movimientos.ver'));
+$router->get('/api/v1/stock/alertas', protectedRoute([$stockController, 'alertas'], 'stock.ver'));
+
+$inventarioFisicoController = new InventarioFisicoController();
+$router->get('/api/v1/inventario-fisico', protectedRoute([$inventarioFisicoController, 'index'], 'stock.ver'));
+$router->post('/api/v1/inventario-fisico', protectedRoute([$inventarioFisicoController, 'create'], 'stock.ajustar'));
+$router->get('/api/v1/inventario-fisico/{id}', protectedRoute([$inventarioFisicoController, 'show'], 'stock.ver'));
+$router->put('/api/v1/inventario-fisico/{id}/conteos', protectedRoute([$inventarioFisicoController, 'saveConteos'], 'stock.ajustar'));
+$router->post('/api/v1/inventario-fisico/{id}/aplicar', protectedRoute([$inventarioFisicoController, 'apply'], 'stock.ajustar'));
 
 $cajaController = new CajaController();
 $router->get('/api/v1/cajas/estado', protectedRoute([$cajaController, 'status'], 'cajas.ver'));
