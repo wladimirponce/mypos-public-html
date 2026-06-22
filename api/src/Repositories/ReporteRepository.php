@@ -171,6 +171,38 @@ final class ReporteRepository
         return $statement->fetchAll();
     }
 
+    /** @return array<int, array<string, mixed>> */
+    public function stockBajo(int $empresaId, ?int $sucursalId): array
+    {
+        $where = 'ss.empresa_id = :empresa_id
+            AND p.controla_stock = 1
+            AND p.activo = 1
+            AND p.stock_minimo IS NOT NULL
+            AND CAST(p.stock_minimo AS DECIMAL(20,3)) >= 0
+            AND ss.cantidad <= CAST(p.stock_minimo AS DECIMAL(20,3))';
+        $params = ['empresa_id' => $empresaId];
+        if ($sucursalId !== null) {
+            $where .= ' AND ss.sucursal_id = :sucursal_id';
+            $params['sucursal_id'] = $sucursalId;
+        }
+
+        $statement = $this->connection->prepare(
+            "SELECT p.id, p.codigo, p.nombre,
+                    COALESCE(r.nombre, 'Sin rubro') AS rubro,
+                    CAST(ss.cantidad AS DECIMAL(20,3)) AS stock_actual,
+                    CAST(p.stock_minimo AS DECIMAL(20,3)) AS stock_minimo
+             FROM stock_sucursal ss
+             INNER JOIN productos p ON p.id = ss.producto_id AND p.empresa_id = ss.empresa_id
+             LEFT JOIN rubros r ON r.id = p.rubro_id
+             WHERE {$where}
+             ORDER BY (ss.cantidad - CAST(p.stock_minimo AS DECIMAL(20,3))) ASC
+             LIMIT 20"
+        );
+        $statement->execute($params);
+
+        return $statement->fetchAll();
+    }
+
     private function cantidadProductos(int $empresaId, ?int $sucursalId, string $from, string $to): string
     {
         $statement = $this->connection->prepare(

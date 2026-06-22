@@ -159,22 +159,64 @@ final class ReporteService
 
     public function dashboard(array $filters): array
     {
+        [$empresaId, $sucursalId, $from, $to] = $this->filters($filters);
+
         $summary = $this->resumenVentas($filters);
         $quantity = (int) $summary['cantidad_ventas'];
+        $totalVentas = (int) $summary['total_ventas'];
+
+        $comparativo = $this->comparativoPeriodoAnterior($empresaId, $sucursalId, $from, $to);
+
+        $stockBajo = array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'codigo' => (string) $row['codigo'],
+            'nombre' => (string) $row['nombre'],
+            'rubro' => (string) $row['rubro'],
+            'stock_actual' => (float) $row['stock_actual'],
+            'stock_minimo' => (float) $row['stock_minimo'],
+        ], $this->repository->stockBajo($empresaId, $sucursalId));
 
         return [
             'resumen' => [
-                'total_ventas' => (int) $summary['total_ventas'],
+                'total_ventas' => $totalVentas,
                 'cantidad_ventas' => $quantity,
-                'ticket_promedio' => $quantity > 0 ? (int) round($summary['total_ventas'] / $quantity) : 0,
+                'ticket_promedio' => $quantity > 0 ? (int) round($totalVentas / $quantity) : 0,
                 'total_margen_estimado' => (int) $summary['total_margen_estimado'],
+                'cantidad_productos' => (string) $summary['cantidad_productos'],
+                'dias_parciales' => (int) $summary['dias_parciales'],
                 'parcial' => (bool) $summary['parcial'],
                 'advertencia' => $summary['advertencia'],
             ],
+            'comparativo' => $comparativo,
             'metodos_pago' => $this->ventasPorMetodoPago($filters),
             'top_productos' => $this->ventasPorProducto(['limit' => 5, 'orden' => 'total'] + $filters),
             'top_usuarios' => $this->ventasPorUsuario($filters, 5),
+            'rubros' => $this->ventasPorRubro($filters),
             'ventas_por_dia' => $this->ventasPorDia($filters),
+            'stock_bajo' => $stockBajo,
+        ];
+    }
+
+    private function comparativoPeriodoAnterior(int $empresaId, ?int $sucursalId, string $from, string $to): array
+    {
+        $start = new DateTimeImmutable($from);
+        $end = new DateTimeImmutable($to);
+        $days = (int) $start->diff($end)->days + 1;
+
+        $prevTo = $start->sub(new DateInterval('P1D'))->format('Y-m-d');
+        $prevFrom = $start->sub(new DateInterval("P{$days}D"))->format('Y-m-d');
+
+        $prev = $this->repository->resumenVentas($empresaId, $sucursalId, $prevFrom, $prevTo);
+        $prevQty = (int) ($prev['cantidad_ventas'] ?? 0);
+        $prevTotal = (int) ($prev['total_ventas'] ?? 0);
+
+        return [
+            'total_ventas' => $prevTotal,
+            'cantidad_ventas' => $prevQty,
+            'ticket_promedio' => $prevQty > 0 ? (int) round($prevTotal / $prevQty) : 0,
+            'total_margen_estimado' => (int) ($prev['total_margen_estimado'] ?? 0),
+            'fecha_desde' => $prevFrom,
+            'fecha_hasta' => $prevTo,
         ];
     }
 
