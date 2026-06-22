@@ -19,6 +19,7 @@ use Mypos\Controllers\CentroCostoController;
 use Mypos\Controllers\CierreDiarioController;
 use Mypos\Controllers\CompraController;
 use Mypos\Controllers\CompraInteligenteController;
+use Mypos\Controllers\OrdenCompraController;
 use Mypos\Controllers\FarmaciaController;
 use Mypos\Controllers\PerfilNegocioController;
 use Mypos\Controllers\ReporteCapacidadController;
@@ -505,6 +506,17 @@ $router->post('/api/v1/compras/{id}/confirmar', protectedRoute([$compraControlle
 $router->post('/api/v1/compras/{id}/actualizar-precios', protectedRoute([$compraController, 'actualizarPrecios'], 'compras.confirmar'));
 $router->post('/api/v1/compras/{id}/anular', protectedRoute([$compraController, 'cancel'], 'compras.anular'));
 $router->delete('/api/v1/compras/{id}', protectedRoute([$compraController, 'destroy'], 'compras.anular'));
+
+$ordenCompraController = new OrdenCompraController();
+// sugerencias ANTES de /{id} para evitar conflicto de rutas
+$router->get('/api/v1/ordenes-compra/sugerencias', protectedRoute([$ordenCompraController, 'sugerencias'], 'compras.ver'));
+$router->get('/api/v1/ordenes-compra',              protectedRoute([$ordenCompraController, 'index'],       'compras.ver'));
+$router->post('/api/v1/ordenes-compra',             protectedRoute([$ordenCompraController, 'store'],       'compras.crear'));
+$router->get('/api/v1/ordenes-compra/{id}',         protectedRoute([$ordenCompraController, 'show'],        'compras.ver'));
+$router->post('/api/v1/ordenes-compra/{id}/enviar', protectedRoute([$ordenCompraController, 'enviar'],      'compras.crear'));
+$router->post('/api/v1/ordenes-compra/{id}/recibir',protectedRoute([$ordenCompraController, 'recibir'],     'compras.confirmar'));
+$router->post('/api/v1/ordenes-compra/{id}/cerrar', protectedRoute([$ordenCompraController, 'cerrar'],      'compras.crear'));
+$router->post('/api/v1/ordenes-compra/{id}/cancelar',protectedRoute([$ordenCompraController,'cancelar'],    'compras.anular'));
 
 $compraInteligenteController = new CompraInteligenteController();
 $router->get('/api/v1/compras-inteligentes/sugerencias', protectedRoute([$compraInteligenteController, 'sugerencias'], 'compras_inteligentes.ver'));
