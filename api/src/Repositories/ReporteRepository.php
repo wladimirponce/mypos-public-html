@@ -178,7 +178,7 @@ final class ReporteRepository
             AND p.controla_stock = 1
             AND p.activo = 1
             AND p.stock_minimo IS NOT NULL
-            AND CAST(p.stock_minimo AS DECIMAL(20,3)) >= 0
+            AND CAST(p.stock_minimo AS DECIMAL(20,3)) > 0
             AND ss.cantidad <= CAST(p.stock_minimo AS DECIMAL(20,3))';
         $params = ['empresa_id' => $empresaId];
         if ($sucursalId !== null) {
