@@ -96,6 +96,79 @@ final class MailService
         }
     }
 
+    public function enviarDte(
+        string $toEmail,
+        string $nombreCliente,
+        string $tipoDocumento,
+        int    $folio,
+        string $razonSocialEmpresa,
+        int    $total,
+        string $fecha,
+        string $rutEmpresa = '',
+    ): void {
+        try {
+            $mail = $this->getMailer();
+            $mail->addAddress($toEmail, $nombreCliente);
+
+            $tipoLabel = match ($tipoDocumento) {
+                'BOLETA'  => 'Boleta Electrónica',
+                'FACTURA' => 'Factura Electrónica',
+                default   => $tipoDocumento,
+            };
+
+            $folioStr   = $folio > 0 ? 'N° ' . number_format($folio, 0, '', '') : '';
+            $totalStr   = '$' . number_format($total, 0, ',', '.');
+            [$y, $m, $d] = array_pad(explode('-', $fecha), 3, '');
+            $fechaLocal = $d && $m && $y ? "{$d}/{$m}/{$y}" : $fecha;
+            $year       = date('Y');
+
+            $mail->isHTML(true);
+            $mail->Subject = "{$tipoLabel} {$folioStr} — {$razonSocialEmpresa}";
+            $mail->Body    = '
+<div style="background-color:#f8fafc;padding:40px 20px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
+    <!-- Header -->
+    <div style="background-color:#1e1b4b;padding:24px;text-align:center;">
+      <img src="https://www.mypos.cl/img/isotipo.png" alt="MyPOS" style="height:40px;width:auto;vertical-align:middle;" />
+      <span style="color:#fff;font-size:22px;font-weight:800;letter-spacing:-0.5px;margin-left:8px;vertical-align:middle;">My<span style="color:#f97316;">POS</span></span>
+    </div>
+    <!-- Body -->
+    <div style="padding:32px 28px;color:#334155;">
+      <p style="font-size:15px;margin-top:0;">Hola <strong>' . htmlspecialchars($nombreCliente) . '</strong>,</p>
+      <p style="font-size:15px;line-height:1.6;margin-bottom:24px;">
+        <strong>' . htmlspecialchars($razonSocialEmpresa) . '</strong> te ha emitido un documento tributario.
+      </p>
+      <!-- Document card -->
+      <div style="background:#f1f5f9;border-radius:10px;padding:20px 24px;margin-bottom:24px;">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <tr><td style="padding:5px 0;color:#64748b;">Documento</td>
+              <td style="padding:5px 0;text-align:right;font-weight:600;color:#0f172a;">' . htmlspecialchars($tipoLabel) . ' ' . htmlspecialchars($folioStr) . '</td></tr>
+          <tr><td style="padding:5px 0;color:#64748b;">Fecha</td>
+              <td style="padding:5px 0;text-align:right;color:#0f172a;">' . htmlspecialchars($fechaLocal) . '</td></tr>
+          ' . ($rutEmpresa !== '' ? '<tr><td style="padding:5px 0;color:#64748b;">RUT Emisor</td>
+              <td style="padding:5px 0;text-align:right;color:#0f172a;">' . htmlspecialchars($rutEmpresa) . '</td></tr>' : '') . '
+          <tr><td style="padding:10px 0 0;font-size:16px;font-weight:700;color:#0f172a;border-top:1px solid #cbd5e1;">Total</td>
+              <td style="padding:10px 0 0;text-align:right;font-size:20px;font-weight:800;color:#1e1b4b;border-top:1px solid #cbd5e1;">' . htmlspecialchars($totalStr) . '</td></tr>
+        </table>
+      </div>
+      <p style="font-size:13px;color:#64748b;margin-bottom:0;">
+        Este es un comprobante automático. Si tienes dudas, comunícate directamente con <strong>' . htmlspecialchars($razonSocialEmpresa) . '</strong>.
+      </p>
+    </div>
+    <!-- Footer -->
+    <div style="background:#f1f5f9;padding:16px 24px;text-align:center;font-size:12px;color:#64748b;border-top:1px solid #e2e8f0;">
+      <p style="margin:0 0 4px;">Procesado por <strong>MyPOS</strong> · Desarrollado por Agentika SpA · Hecho en Chile 🇨🇱</p>
+      <p style="margin:0;">© ' . $year . ' MyPOS. Todos los derechos reservados.</p>
+    </div>
+  </div>
+</div>';
+
+            $mail->send();
+        } catch (\Throwable $e) {
+            error_log('[MailService] enviarDte error: ' . $e->getMessage());
+        }
+    }
+
     public function enviarBoletaPago(string $toEmail, string $nombreUsuario, float $monto, array $dteData = []): void
     {
         try {

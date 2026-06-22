@@ -65,7 +65,8 @@ final class ConfiguracionRepository
                     exigir_cliente_en_factura, tipo_documento_default, metodo_pago_default_id,
                     alerta_stock_bajo_default, alerta_folios_bajos_default,
                     dias_alerta_vencimiento_caf, ia_documentos_habilitada,
-                    documentos_tributarios_habilitados, modo_offline_habilitado
+                    documentos_tributarios_habilitados, modo_offline_habilitado,
+                    notif_email_activo, notif_whatsapp_activo
              FROM empresa_configuracion_operativa
              WHERE empresa_id = :empresa_id
              LIMIT 1'
@@ -129,13 +130,15 @@ final class ConfiguracionRepository
                 permitir_venta_sin_cliente, permitir_credito_clientes, exigir_cliente_en_factura,
                 tipo_documento_default, metodo_pago_default_id, alerta_stock_bajo_default,
                 alerta_folios_bajos_default, dias_alerta_vencimiento_caf,
-                ia_documentos_habilitada, documentos_tributarios_habilitados, modo_offline_habilitado
+                ia_documentos_habilitada, documentos_tributarios_habilitados, modo_offline_habilitado,
+                notif_email_activo, notif_whatsapp_activo
              ) VALUES (
                 :empresa_id, :permitir_stock_negativo, :exigir_caja_abierta_para_vender,
                 :permitir_venta_sin_cliente, :permitir_credito_clientes, :exigir_cliente_en_factura,
                 :tipo_documento_default, :metodo_pago_default_id, :alerta_stock_bajo_default,
                 :alerta_folios_bajos_default, :dias_alerta_vencimiento_caf,
-                :ia_documentos_habilitada, :documentos_tributarios_habilitados, :modo_offline_habilitado
+                :ia_documentos_habilitada, :documentos_tributarios_habilitados, :modo_offline_habilitado,
+                :notif_email_activo, :notif_whatsapp_activo
              )
              ON DUPLICATE KEY UPDATE
                 permitir_stock_negativo = VALUES(permitir_stock_negativo),
@@ -151,6 +154,8 @@ final class ConfiguracionRepository
                 ia_documentos_habilitada = VALUES(ia_documentos_habilitada),
                 documentos_tributarios_habilitados = VALUES(documentos_tributarios_habilitados),
                 modo_offline_habilitado = VALUES(modo_offline_habilitado),
+                notif_email_activo = VALUES(notif_email_activo),
+                notif_whatsapp_activo = VALUES(notif_whatsapp_activo),
                 updated_at = CURRENT_TIMESTAMP'
         );
         $statement->execute($data);

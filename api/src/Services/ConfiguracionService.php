@@ -85,6 +85,8 @@ final class ConfiguracionService
             'ia_documentos_habilitada' => $this->bool($payload, 'ia_documentos_habilitada'),
             'documentos_tributarios_habilitados' => $this->bool($payload, 'documentos_tributarios_habilitados'),
             'modo_offline_habilitado' => $this->bool($payload, 'modo_offline_habilitado'),
+            'notif_email_activo' => $this->bool($payload, 'notif_email_activo'),
+            'notif_whatsapp_activo' => $this->bool($payload, 'notif_whatsapp_activo'),
         ];
         $this->repository->upsertOperacionConfig($data);
         $current = $this->operacion($empresaId);
@@ -195,8 +197,9 @@ final class ConfiguracionService
             'permitir_venta_sin_cliente', 'permitir_credito_clientes',
             'exigir_cliente_en_factura', 'ia_documentos_habilitada',
             'documentos_tributarios_habilitados', 'modo_offline_habilitado',
+            'notif_email_activo', 'notif_whatsapp_activo',
         ] as $field) {
-            $row[$field] = (bool) (int) $row[$field];
+            $row[$field] = (bool) (int) ($row[$field] ?? 0);
         }
         $row['alerta_stock_bajo_default'] = number_format((float) $row['alerta_stock_bajo_default'], 3, '.', '');
         $row['alerta_folios_bajos_default'] = (int) $row['alerta_folios_bajos_default'];
@@ -236,6 +239,8 @@ final class ConfiguracionService
             'dias_alerta_vencimiento_caf' => 30,
             'ia_documentos_habilitada' => 1,
             'documentos_tributarios_habilitados' => 1,
+            'notif_email_activo' => 0,
+            'notif_whatsapp_activo' => 0,
             'modo_offline_habilitado' => 0,
         ];
     }
