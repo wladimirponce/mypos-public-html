@@ -1,15 +1,33 @@
-from tools.ventas import resumen_ventas_hoy, ventas_por_producto
-from tools.stock import consultar_stock, buscar_producto
+from tools.ventas import ventas_periodo, ventas_por_producto
+from tools.stock import buscar_producto, consultar_stock, stock_critico
+from tools.clientes import buscar_cliente
+from tools.cierres import cierres_pendientes
+from tools.libros import resumen_iva
+from tools.compras import compras_pendientes, sugerencias_reposicion
 from tools.folios import estado_folios_sii
 from tools.caja import estado_cajas
 from tools.escalate import solicitar_aprobacion_humana
 
 ALL_TOOLS = [
-    resumen_ventas_hoy,
+    # Ventas
+    ventas_periodo,
     ventas_por_producto,
-    consultar_stock,
+    # Stock y productos
     buscar_producto,
-    estado_folios_sii,
+    consultar_stock,
+    stock_critico,
+    # Clientes
+    buscar_cliente,
+    # Operación
     estado_cajas,
+    cierres_pendientes,
+    # Compras
+    compras_pendientes,
+    sugerencias_reposicion,
+    # Finanzas
+    resumen_iva,
+    # SII
+    estado_folios_sii,
+    # Escalación
     solicitar_aprobacion_humana,
 ]

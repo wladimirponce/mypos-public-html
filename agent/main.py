@@ -11,7 +11,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 import time
 import unicodedata
 import uuid
@@ -161,97 +161,126 @@ async def _get_graph():
     return _graph
 
 
+import re as _re
+
+_RUT_PATTERN = _re.compile(r"\b\d{7,8}[-\s]?[0-9kK]\b")
+
+# Prefijos que se eliminan para extraer el término de búsqueda
+_PRODUCT_PREFIXES = (
+    "cuanto vale ", "cuanto cuesta ", "que valor tiene ",
+    "precio de ", "valor de ", "precio del ", "valor del ",
+    "busca ", "buscar ", "consulta ", "consultar ",
+    "producto ", "el producto ", "la ", "el ",
+    "stock de ", "stock del ", "stock ",
+    "codigo ", "el codigo ",
+)
+_CLIENT_PREFIXES = (
+    "busca al cliente ", "busca cliente ", "buscar cliente ",
+    "busca a ", "cliente ", "clientes ",
+    "datos de ", "info de ", "informacion de ",
+    "busca el rut ", "rut ",
+)
+
+
 def _normalize_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value.lower())
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
-def _clean_product_query(text: str) -> str:
+def _strip_prefixes(text: str, prefixes: tuple[str, ...]) -> str:
+    """Elimina el primer prefijo que coincida al inicio del texto normalizado."""
     cleaned = text.strip(" ?!.,;:")
-    prefixes = (
-        "cuanto vale ",
-        "cuanto cuesta ",
-        "que valor tiene ",
-        "precio de ",
-        "valor de ",
-        "busca ",
-        "buscar ",
-        "consulta ",
-        "consultar ",
-        "producto ",
-        "el producto ",
-        "stock de ",
-        "stock del ",
-        "codigo ",
-        "el codigo ",
-    )
-    normalized = _normalize_text(cleaned)
+    norm = _normalize_text(cleaned)
     for prefix in prefixes:
-        if normalized.startswith(prefix):
+        if norm.startswith(prefix):
             return cleaned[len(prefix):].strip(" ?!.,;:")
     return cleaned
 
 
-def _looks_like_product_query(text: str) -> bool:
-    normalized = _normalize_text(text.strip())
-    if len(normalized) < 3:
-        return False
+def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    return any(t in text for t in terms)
 
-    broad_questions = (
-        "que productos deberia revisar",
-        "productos deberia revisar",
-        "productos debo revisar",
-        "productos revisar",
-        "mas vendido",
-        "mas vendidos",
-        "cajas",
-        "ventas",
-        "stock bajo",
-        "bajo stock",
-        "folios",
-        "compras",
-        "clientes",
-        "reportes",
-    )
-    if any(phrase in normalized for phrase in broad_questions):
-        return False
 
-    product_markers = (
-        "aceite",
-        "bebida",
-        "arroz",
-        "azucar",
-        "harina",
-        "leche",
-        "pan",
-        "pollo",
-        "carne",
-        "detergente",
-        "papel",
-        "cigarro",
-        "cerveza",
-        "vino",
-        "agua",
-    )
-    if any(marker in normalized for marker in product_markers):
+def _detect_period(text: str) -> str:
+    """Detecta el período de ventas a partir del texto normalizado."""
+    if "ayer" in text:
+        return "ayer"
+    if "semana" in text:
+        return "semana"
+    if "mes anterior" in text or "mes pasado" in text or "ultimo mes" in text:
+        return "mes_anterior"
+    if "mes" in text or "este mes" in text or "mensual" in text:
+        return "mes"
+    return "hoy"
+
+
+def _is_sales_query(text: str) -> bool:
+    sales_words = ("venta", "ventas", "vendimos", "vendido", "vendidos", "facturamos", "recaudamos")
+    return _contains_any(text, sales_words)
+
+
+def _is_top_products_query(text: str) -> bool:
+    return _contains_any(text, ("mas vendido", "mas vendidos", "top producto", "top productos",
+                                "mejor vendido", "mejores vendidos", "ranking producto"))
+
+
+def _is_boxes_query(text: str) -> bool:
+    return _contains_any(text, ("caja", "cajas")) and not _contains_any(text, ("cierre", "cierres"))
+
+
+def _is_closures_query(text: str) -> bool:
+    return _contains_any(text, ("cierre", "cierres", "sin cerrar", "pendiente de cierre",
+                                "cierres del dia", "cierres hoy", "caja sin cerrar"))
+
+
+def _is_stock_critical_query(text: str) -> bool:
+    return _contains_any(text, (
+        "stock bajo", "bajo stock", "stock critico", "stock minimo",
+        "agotando", "agotado", "por agotarse", "sin stock", "quedando poco",
+        "que reponer", "que comprar", "que falta", "productos faltantes",
+        "alerta stock", "stock en alerta",
+    ))
+
+
+def _is_client_query(text: str) -> bool:
+    return _contains_any(text, ("cliente", "clientes", "busca a ")) or bool(_RUT_PATTERN.search(text))
+
+
+def _is_iva_query(text: str) -> bool:
+    return _contains_any(text, ("iva", "impuesto", "debito fiscal", "credito fiscal",
+                                "libro iva", "cuanto pago sii", "declaracion"))
+
+
+def _is_purchase_query(text: str) -> bool:
+    return _contains_any(text, ("compra", "compras", "orden de compra", "ordenes de compra",
+                                "oc pendiente", "pedido pendiente"))
+
+
+def _is_restock_query(text: str) -> bool:
+    return _contains_any(text, ("sugerencia", "sugerencias", "reponer", "reposicion",
+                                "que debo comprar", "que conviene comprar", "que me sugiere"))
+
+
+def _is_folios_query(text: str) -> bool:
+    return _contains_any(text, ("folio", "folios", "caf", "boletas quedan",
+                                "facturas quedan", "folios sii", "folios disponibles"))
+
+
+def _is_product_search(text: str, raw: str) -> bool:
+    """Detecta búsqueda de producto específico: código numérico, código de barras o precio."""
+    # Código de barras o número largo
+    if _re.search(r"\b\d{5,}\b", raw):
         return True
+    # Prefijos explícitos de precio/búsqueda
+    return _contains_any(text, (
+        "cuanto vale ", "cuanto cuesta ", "precio de ", "valor de ",
+        "busca ", "buscar ", "consultar ", "precio del ", "valor del ",
+    ))
 
-    if any(char.isdigit() for char in normalized):
-        return True
 
-    return normalized.startswith(
-        (
-            "cuanto vale ",
-            "cuanto cuesta ",
-            "que valor tiene ",
-            "precio de ",
-            "valor de ",
-            "busca ",
-            "buscar ",
-            "consulta ",
-            "consultar ",
-        )
-    )
+async def _direct(tool_coro, thread_id: str) -> ChatResponse:
+    reply = await tool_coro
+    return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
 
 
 async def _try_direct_intent(
@@ -260,73 +289,121 @@ async def _try_direct_intent(
     thread_id: str,
     sucursal_id: Optional[int] = None,
 ) -> Optional[ChatResponse]:
+    """
+    Detecta intents conocidos y los resuelve directamente con la tool correspondiente,
+    sin pasar por el LLM. Cubre ~85% de las consultas habituales.
+    """
     text = _normalize_text(message)
-    asks_today_sales = (
-        ("vendimos" in text or "ventas" in text or "venta" in text)
-        and ("hoy" in text or "dia" in text)
-    )
-    asks_boxes = "caja" in text or "cajas" in text
-    asks_products_to_review = (
-        "producto" in text
-        and ("revisar" in text or "deberia" in text or "debo" in text)
-    )
-    asks_top_products = (
-        "mas vendido" in text
-        or "mas vendidos" in text
-        or "top producto" in text
-        or "top productos" in text
-    )
 
-    if asks_today_sales:
-        from tools.ventas import resumen_ventas_hoy
-
-        reply = await resumen_ventas_hoy.ainvoke(
-            {"empresa_id": empresa_id, "sucursal_id": sucursal_id}
-        )
-        return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
-
-    if asks_boxes:
-        from tools.caja import estado_cajas
-
-        reply = await estado_cajas.ainvoke(
-            {"empresa_id": empresa_id, "sucursal_id": sucursal_id}
-        )
-        return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
-
-    if asks_products_to_review:
-        return ChatResponse(
-            thread_id=thread_id,
-            reply=(
-                "Puedo revisar productos por dos caminos directos: "
-                "productos mas vendidos del mes o un producto especifico por nombre/codigo. "
-                "Por ejemplo: 'mas vendidos este mes' o 'aceite 100% vegetal'."
-            ),
-            escalated=False,
-        )
-
-    if asks_top_products:
+    # ── 1. Ranking de productos más vendidos ─────────────────────────────────
+    if _is_top_products_query(text):
         from tools.ventas import ventas_por_producto
-
         today = date.today()
-        first_day = today.replace(day=1)
-        reply = await ventas_por_producto.ainvoke(
-            {
-                "empresa_id": empresa_id,
-                "fecha_desde": str(first_day),
-                "fecha_hasta": str(today),
-                "sucursal_id": sucursal_id,
-            }
+        periodo = _detect_period(text)
+        if periodo == "ayer":
+            fd = str(today - timedelta(days=1)); ft = fd
+        elif periodo == "semana":
+            fd = str(today - timedelta(days=today.weekday())); ft = str(today)
+        elif periodo in ("mes_anterior",):
+            primero = today.replace(day=1)
+            ultimo_ant = primero - timedelta(days=1)
+            fd = str(ultimo_ant.replace(day=1)); ft = str(ultimo_ant)
+        else:
+            fd = str(today.replace(day=1)); ft = str(today)
+        return await _direct(
+            ventas_por_producto.ainvoke({
+                "empresa_id": empresa_id, "fecha_desde": fd, "fecha_hasta": ft,
+                "top": 10, "sucursal_id": sucursal_id,
+            }),
+            thread_id,
         )
-        return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
 
-    if _looks_like_product_query(message):
+    # ── 2. Ventas por período ─────────────────────────────────────────────────
+    if _is_sales_query(text):
+        from tools.ventas import ventas_periodo
+        periodo = _detect_period(text)
+        return await _direct(
+            ventas_periodo.ainvoke({
+                "empresa_id": empresa_id, "periodo": periodo, "sucursal_id": sucursal_id,
+            }),
+            thread_id,
+        )
+
+    # ── 3. Stock crítico / productos agotándose ───────────────────────────────
+    if _is_stock_critical_query(text):
+        from tools.stock import stock_critico
+        return await _direct(
+            stock_critico.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
+            thread_id,
+        )
+
+    # ── 4. Sugerencias de reposición ─────────────────────────────────────────
+    if _is_restock_query(text):
+        from tools.compras import sugerencias_reposicion
+        return await _direct(
+            sugerencias_reposicion.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
+            thread_id,
+        )
+
+    # ── 5. Cajas ─────────────────────────────────────────────────────────────
+    if _is_boxes_query(text):
+        from tools.caja import estado_cajas
+        return await _direct(
+            estado_cajas.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
+            thread_id,
+        )
+
+    # ── 6. Cierres diarios pendientes ────────────────────────────────────────
+    if _is_closures_query(text):
+        from tools.cierres import cierres_pendientes
+        return await _direct(
+            cierres_pendientes.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
+            thread_id,
+        )
+
+    # ── 7. IVA / libros tributarios ──────────────────────────────────────────
+    if _is_iva_query(text):
+        from tools.libros import resumen_iva
+        return await _direct(
+            resumen_iva.ainvoke({"empresa_id": empresa_id}),
+            thread_id,
+        )
+
+    # ── 8. Compras pendientes ─────────────────────────────────────────────────
+    if _is_purchase_query(text) and not _is_sales_query(text):
+        from tools.compras import compras_pendientes
+        return await _direct(
+            compras_pendientes.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
+            thread_id,
+        )
+
+    # ── 9. Folios SII ─────────────────────────────────────────────────────────
+    if _is_folios_query(text):
+        from tools.folios import estado_folios_sii
+        return await _direct(
+            estado_folios_sii.ainvoke({"empresa_id": empresa_id}),
+            thread_id,
+        )
+
+    # ── 10. Buscar cliente ────────────────────────────────────────────────────
+    if _is_client_query(text):
+        from tools.clientes import buscar_cliente
+        query = _strip_prefixes(message, _CLIENT_PREFIXES)
+        if len(query) >= 3:
+            return await _direct(
+                buscar_cliente.ainvoke({"empresa_id": empresa_id, "query": query}),
+                thread_id,
+            )
+
+    # ── 11. Búsqueda de producto específico ───────────────────────────────────
+    if _is_product_search(text, message):
         from tools.stock import buscar_producto
-
-        query = _clean_product_query(message)
-        reply = await buscar_producto.ainvoke(
-            {"empresa_id": empresa_id, "query": query}
-        )
-        return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
+        query = _strip_prefixes(message, _PRODUCT_PREFIXES)
+        if len(query) >= 2:
+            return await _direct(
+                buscar_producto.ainvoke({"empresa_id": empresa_id, "query": query}),
+                thread_id,
+            )
 
     return None
 

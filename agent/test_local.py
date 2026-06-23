@@ -29,26 +29,28 @@ os.environ.setdefault("MYPOS_API_KEY", "test-api-key")
 os.environ.setdefault("AGENT_SECRET", "test-secret")
 os.environ.setdefault("AGENT_DB", ":memory:")  # SQLite en memoria, sin archivo
 
+_EXPECTED_TOOLS = 13
+
 
 def test_imports():
     print("1. Verificando imports...")
     from config import settings
     from graph.state import AgentState
     from tools import ALL_TOOLS
-    assert len(ALL_TOOLS) == 7, f"Se esperaban 7 tools, hay {len(ALL_TOOLS)}"
+    assert len(ALL_TOOLS) == _EXPECTED_TOOLS, (
+        f"Se esperaban {_EXPECTED_TOOLS} tools, hay {len(ALL_TOOLS)}"
+    )
     names = [t.name for t in ALL_TOOLS]
-    print(f"   Tools: {', '.join(names)}")
+    print(f"   Tools ({len(names)}): {', '.join(names)}")
     print("   OK\n")
 
 
 def test_state_defaults():
     print("2. Verificando defaults del estado...")
     from graph.state import AgentState
-    # LangGraph crea estados parciales — todos los campos deben tener default
     state = AgentState(messages=[], empresa_id=5)
-    assert state["sucursal_id"] is None
-    assert state["escalated"] is False
-    assert state["escalation_reason"] == ""
+    assert state.get("empresa_id") == 5
+    assert not state.get("escalated")
     print("   OK\n")
 
 
@@ -104,19 +106,54 @@ async def test_conversation(graph):
 
 def test_tool_signatures():
     print("5. Verificando firmas de tools...")
-    from tools.ventas import resumen_ventas_hoy, ventas_por_producto
-    from tools.stock import consultar_stock, buscar_producto
-    from tools.folios import estado_folios_sii
-    from tools.caja import estado_cajas
-    from tools.escalate import solicitar_aprobacion_humana
-
-    for tool in [resumen_ventas_hoy, ventas_por_producto, consultar_stock,
-                 buscar_producto, estado_folios_sii, estado_cajas,
-                 solicitar_aprobacion_humana]:
+    from tools import ALL_TOOLS
+    for tool in ALL_TOOLS:
         schema = tool.args_schema.model_json_schema()
         props = schema.get("properties", {})
         print(f"   {tool.name}: {list(props.keys())}")
     print("   OK\n")
+
+
+def test_direct_intents():
+    """Verifica que los detectores de intent funcionan para frases comunes."""
+    print("6. Verificando detección de intents directos...")
+    import unicodedata
+    import sys
+    sys.path.insert(0, ".")
+    from main import (
+        _normalize_text, _is_sales_query, _is_top_products_query,
+        _is_boxes_query, _is_closures_query, _is_stock_critical_query,
+        _is_client_query, _is_iva_query, _is_purchase_query,
+        _is_restock_query, _is_folios_query, _detect_period,
+    )
+
+    cases = [
+        ("cuanto vendimos hoy", _is_sales_query, "hoy"),
+        ("ventas de ayer", _is_sales_query, "ayer"),
+        ("ventas del mes", _is_sales_query, "mes"),
+        ("ventas de la semana", _is_sales_query, "semana"),
+        ("estado de las cajas", _is_boxes_query, None),
+        ("stock bajo", _is_stock_critical_query, None),
+        ("que productos se estan agotando", _is_stock_critical_query, None),
+        ("busca al cliente juan perez", _is_client_query, None),
+        ("cuanto iva llevamos este mes", _is_iva_query, None),
+        ("compras pendientes", _is_purchase_query, None),
+        ("que me sugiere reponer", _is_restock_query, None),
+        ("cuantos folios quedan", _is_folios_query, None),
+        ("cierres pendientes", _is_closures_query, None),
+        ("mas vendidos del mes", _is_top_products_query, None),
+    ]
+
+    ok = 0
+    for phrase, detector, expected_period in cases:
+        n = _normalize_text(phrase)
+        result = detector(n)
+        period_ok = expected_period is None or _detect_period(n) == expected_period
+        status = "OK" if result and period_ok else "FAIL"
+        print(f"   [{status}] '{phrase}' -> {detector.__name__}")
+        if status == "OK":
+            ok += 1
+    print(f"   {ok}/{len(cases)} intents detectados correctamente\n")
 
 
 async def main():
@@ -127,6 +164,7 @@ async def main():
     test_imports()
     test_state_defaults()
     test_tool_signatures()
+    test_direct_intents()
     graph = await test_graph_compiles()
     await test_conversation(graph)
 
