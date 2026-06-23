@@ -48,12 +48,29 @@ final class AgentService
                 . ' body='
                 . $this->safeSnippet($response)
             );
-            throw new HttpException('El agente IA devolvio una respuesta no JSON. Revisa /agent/health y los logs de la Python App en cPanel.', 502);
+            throw new HttpException('El asistente no pudo responder en este momento. Intenta nuevamente en unos minutos.', 502);
         }
 
         if ($statusCode >= 400) {
             $detail = is_string($decoded['detail'] ?? null) ? (string) $decoded['detail'] : 'El agente IA no pudo responder';
-            throw new HttpException($detail, $statusCode >= 500 ? 502 : $statusCode);
+            error_log(
+                'Error del agente IA: HTTP '
+                . $statusCode
+                . ' url='
+                . $effectiveUrl
+                . ' detail='
+                . $this->safeSnippet($detail)
+            );
+
+            throw new HttpException(
+                $this->friendlyAgentMessage($statusCode, $detail),
+                $statusCode >= 500 ? 502 : $statusCode,
+                [
+                    'agent_status' => [(string) $statusCode],
+                    'agent_detail' => [$this->safeSnippet($detail)],
+                    'agent_error_type' => [is_string($decoded['error_type'] ?? null) ? (string) $decoded['error_type'] : ''],
+                ]
+            );
         }
 
         return [
@@ -148,5 +165,38 @@ final class AgentService
         }
 
         return substr(trim($snippet), 0, 300);
+    }
+
+    private function friendlyAgentMessage(int $statusCode, string $detail): string
+    {
+        $text = strtolower($detail);
+
+        if (
+            str_contains($text, 'resource_exhausted')
+            || str_contains($text, 'quota')
+            || str_contains($text, '429')
+            || str_contains($text, 'rate limit')
+        ) {
+            return 'La IA alcanzo su limite temporal. Espera unos minutos o usa una consulta directa como ventas de hoy, cajas, stock o producto.';
+        }
+
+        if (
+            str_contains($text, 'unavailable')
+            || str_contains($text, 'high demand')
+            || str_contains($text, '503')
+            || str_contains($text, 'overloaded')
+        ) {
+            return 'El servicio de IA esta con alta demanda. Intentemos de nuevo en unos minutos.';
+        }
+
+        if ($statusCode === 504 || str_contains($text, 'timeout') || str_contains($text, 'no respondio')) {
+            return 'La IA tardo demasiado en responder. Intenta con una pregunta mas directa o vuelve a probar en unos minutos.';
+        }
+
+        if ($statusCode >= 500) {
+            return 'El asistente no pudo responder en este momento. Intenta nuevamente en unos minutos.';
+        }
+
+        return $detail !== '' ? $detail : 'No se pudo completar la consulta al asistente.';
     }
 }

@@ -29,11 +29,16 @@ _SECRET_HEADER = APIKeyHeader(name="X-Agent-Secret", auto_error=False)
 _RUN_TIMEOUT_SECONDS = 35
 _last_llm_call_at = 0.0
 _quota_blocked_until = 0.0
+_provider_busy_until = 0.0
 _quota_lock = asyncio.Lock()
 
 
 def _quota_seconds_left() -> int:
     return max(0, int(_quota_blocked_until - time.time()))
+
+
+def _provider_busy_seconds_left() -> int:
+    return max(0, int(_provider_busy_until - time.time()))
 
 
 def _quota_message(seconds: int) -> str:
@@ -42,6 +47,16 @@ def _quota_message(seconds: int) -> str:
         "Gemini alcanzo su cuota temporal. "
         f"Voy a evitar nuevas llamadas IA por aproximadamente {minutes} min. "
         "Mientras tanto puedo responder consultas directas como: ventas de hoy, "
+        "producto por codigo/nombre, stock y cajas."
+    )
+
+
+def _provider_busy_message(seconds: int) -> str:
+    minutes = max(1, (seconds + 59) // 60)
+    return (
+        "El servicio de IA esta con alta demanda en este momento. "
+        f"Intentemos de nuevo en aproximadamente {minutes} min. "
+        "Mientras tanto puedo responder consultas directas como ventas de hoy, "
         "producto por codigo/nombre, stock y cajas."
     )
 
@@ -56,8 +71,27 @@ def _is_quota_error(exc: Exception) -> bool:
     )
 
 
+def _is_provider_busy_error(exc: Exception) -> bool:
+    text = f"{exc.__class__.__name__}: {exc}".lower()
+    return (
+        "503" in text
+        or "unavailable" in text
+        or "high demand" in text
+        or "overloaded" in text
+        or "temporarily unavailable" in text
+    )
+
+
 async def _reserve_llm_slot() -> Optional[ChatResponse]:
     global _last_llm_call_at
+
+    busy_seconds_left = _provider_busy_seconds_left()
+    if busy_seconds_left > 0:
+        return ChatResponse(
+            thread_id="",
+            reply=_provider_busy_message(busy_seconds_left),
+            escalated=False,
+        )
 
     seconds_left = _quota_seconds_left()
     if seconds_left > 0:
@@ -98,6 +132,13 @@ def _mark_quota_exhausted() -> int:
     global _quota_blocked_until
     cooldown = max(60, int(settings.llm_quota_cooldown_seconds))
     _quota_blocked_until = time.time() + cooldown
+    return cooldown
+
+
+def _mark_provider_busy() -> int:
+    global _provider_busy_until
+    cooldown = min(max(60, int(settings.llm_quota_cooldown_seconds)), 180)
+    _provider_busy_until = time.time() + cooldown
     return cooldown
 
 
@@ -273,6 +314,13 @@ async def _run(
                 reply=_quota_message(cooldown),
                 escalated=False,
             )
+        if _is_provider_busy_error(exc):
+            cooldown = _mark_provider_busy()
+            return ChatResponse(
+                thread_id=thread_id,
+                reply=_provider_busy_message(cooldown),
+                escalated=False,
+            )
         raise
 
     snapshot = await graph.aget_state(config)
@@ -364,6 +412,7 @@ async def health():
         "provider": settings.llm_provider,
         "provider_key_configured": provider_key_configured,
         "quota_cooldown_seconds_left": _quota_seconds_left(),
+        "provider_busy_seconds_left": _provider_busy_seconds_left(),
         "llm_min_interval_seconds": settings.llm_min_interval_seconds,
         "required_config": required_config,
         "graph_loaded": _graph is not None,
