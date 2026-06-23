@@ -22,5 +22,6 @@ Despues de subir:
 Notas:
 - Este distribuible usa /api en el mismo dominio; no requiere api.mypos.cl.
 - Incluye public_html/agent para el Agente IA; no subas ni copies un .env local con secretos.
+- Si antes copiaste el agente dentro de public_html/api, este deploy Git limpia los archivos Python mal ubicados: api/graph, api/tools, api/persistence, api/config.py, api/main.py y api/passenger_wsgi.py.
 - No borres public_html/api/.htaccess.
 - Activa "Show Hidden Files" en cPanel para ver .htaccess y .env.example.

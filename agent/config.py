@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     # ── MyPOS Web Backend (JWT Bearer) ────────────────────────────────────────
     # En producción usar 127.0.0.1 (misma máquina, evita DNS y TLS extra)
     mypos_web_url: str = Field(default="http://127.0.0.1/api", alias="MYPOS_WEB_URL")
-    mypos_service_email: str = Field(alias="MYPOS_SERVICE_EMAIL")
-    mypos_service_password: str = Field(alias="MYPOS_SERVICE_PASSWORD")
+    mypos_service_email: str = Field(default="", alias="MYPOS_SERVICE_EMAIL")
+    mypos_service_password: str = Field(default="", alias="MYPOS_SERVICE_PASSWORD")
 
     # ── MyPOS Admin / FB API (X-API-KEY) ─────────────────────────────────────
     mypos_admin_url: str = Field(
@@ -30,11 +30,11 @@ class Settings(BaseSettings):
     mypos_fb_url: str = Field(
         default="http://127.0.0.1/admin/fb", alias="MYPOS_FB_URL"
     )
-    mypos_api_key: str = Field(alias="MYPOS_API_KEY")
+    mypos_api_key: str = Field(default="", alias="MYPOS_API_KEY")
 
     # ── Seguridad del agente ──────────────────────────────────────────────────
     # Header X-Agent-Secret requerido en cada request al agente
-    agent_secret: str = Field(alias="AGENT_SECRET")
+    agent_secret: str = Field(default="", alias="AGENT_SECRET")
 
     # ── Persistencia ─────────────────────────────────────────────────────────
     db_path: str = Field(default="persistence/agent.db", alias="AGENT_DB")

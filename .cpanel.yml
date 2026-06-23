@@ -3,6 +3,8 @@ deployment:
   tasks:
     - export DEPLOYPATH=/home/zylajdcb/public_html
     - /bin/mkdir -p $DEPLOYPATH
+    - /bin/rm -rf $DEPLOYPATH/api/graph $DEPLOYPATH/api/tools $DEPLOYPATH/api/persistence $DEPLOYPATH/api/__pycache__
+    - /bin/rm -f $DEPLOYPATH/api/config.py $DEPLOYPATH/api/main.py $DEPLOYPATH/api/passenger_wsgi.py $DEPLOYPATH/api/requirements.txt $DEPLOYPATH/api/test_local.py
     - /bin/cp -R assets $DEPLOYPATH/
     - /bin/cp -R img $DEPLOYPATH/
     - /bin/cp -R admin $DEPLOYPATH/

@@ -1,21 +1,19 @@
 """
-FastAPI — agente MyPOS.
-Corre en www.mypos.cl, expuesto vía Passenger (passenger_wsgi.py).
+FastAPI agent for MyPOS.
 
 Endpoints:
-  POST /chat                              → mensaje desde el dashboard React
-  POST /escalaciones/{thread_id}/responder → operador aprueba/rechaza
-  GET  /escalaciones                      → conversaciones pausadas
+  POST /chat
+  GET  /escalaciones
+  POST /escalaciones/{thread_id}/responder
   GET  /health
 """
 
 import uuid
-from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Security
-from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
 
 from config import settings
@@ -24,44 +22,40 @@ _graph = None
 _SECRET_HEADER = APIKeyHeader(name="X-Agent-Secret", auto_error=False)
 
 
-# ─── Auth ─────────────────────────────────────────────────────────────────────
-
 def _require_secret(key: Optional[str] = Security(_SECRET_HEADER)) -> None:
+    if not settings.agent_secret:
+        raise HTTPException(status_code=503, detail="AGENT_SECRET no configurado")
     if key != settings.agent_secret:
-        raise HTTPException(status_code=401, detail="X-Agent-Secret inválido o ausente")
+        raise HTTPException(status_code=401, detail="X-Agent-Secret invalido o ausente")
 
 
-# ─── Lifespan ─────────────────────────────────────────────────────────────────
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+async def _get_graph():
     global _graph
+    if _graph is not None:
+        return _graph
+
     from graph.builder import build_graph
+
     _graph = await build_graph()
-    yield
+    return _graph
 
 
-# ─── App ──────────────────────────────────────────────────────────────────────
+app = FastAPI(title="MyPOS Agent", docs_url=None, redoc_url=None)
 
-app = FastAPI(title="MyPOS Agent", lifespan=lifespan, docs_url=None, redoc_url=None)
-
-# Solo el frontend de www.mypos.cl puede llamar al agente
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://www.mypos.cl"],
+    allow_origins=["https://www.mypos.cl", "https://mypos.cl"],
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type", "X-Agent-Secret"],
 )
 
-
-# ─── Schemas ──────────────────────────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
     message: str
     empresa_id: int
     sucursal_id: Optional[int] = None
     operator_name: str = ""
-    thread_id: Optional[str] = None  # None = nueva conversación
+    thread_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -71,11 +65,9 @@ class ChatResponse(BaseModel):
 
 
 class EscalationReply(BaseModel):
-    decision: str       # "aprobado" | "rechazado"
+    decision: str
     comentario: str = ""
 
-
-# ─── Helper ───────────────────────────────────────────────────────────────────
 
 async def _run(
     message: str,
@@ -84,6 +76,7 @@ async def _run(
     sucursal_id: Optional[int] = None,
     operator_name: str = "",
 ) -> ChatResponse:
+    graph = await _get_graph()
     config = {"configurable": {"thread_id": thread_id}}
 
     state = {
@@ -96,30 +89,26 @@ async def _run(
         "escalation_reason": "",
     }
 
-    result = await _graph.ainvoke(state, config=config)
+    result = await graph.ainvoke(state, config=config)
 
-    snapshot = await _graph.aget_state(config)
+    snapshot = await graph.aget_state(config)
     if "escalate" in (snapshot.next or []):
         last = result["messages"][-1]
         reason = ""
-        for tc in getattr(last, "tool_calls", []):
-            if tc["name"] == "solicitar_aprobacion_humana":
-                reason = tc["args"].get("motivo", "")
+        for tool_call in getattr(last, "tool_calls", []):
+            if tool_call["name"] == "solicitar_aprobacion_humana":
+                reason = tool_call["args"].get("motivo", "")
                 break
+
         return ChatResponse(
             thread_id=thread_id,
-            reply=f"Esta acción requiere aprobación de un supervisor: {reason}",
+            reply=f"Esta accion requiere aprobacion de un supervisor: {reason}",
             escalated=True,
         )
 
     last = result["messages"][-1]
-    return ChatResponse(
-        thread_id=thread_id,
-        reply=getattr(last, "content", "") or "",
-    )
+    return ChatResponse(thread_id=thread_id, reply=getattr(last, "content", "") or "")
 
-
-# ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, _: None = Security(_require_secret)):
@@ -135,10 +124,6 @@ async def chat(req: ChatRequest, _: None = Security(_require_secret)):
 
 @app.get("/escalaciones")
 async def listar_escalaciones(_: None = Security(_require_secret)):
-    """
-    Retorna threads pausados esperando aprobación.
-    Pendiente: implementar query directo sobre el SQLite del checkpointer.
-    """
     return {"escalaciones": [], "nota": "implementar query sobre agent.db"}
 
 
@@ -148,21 +133,21 @@ async def responder_escalacion(
     body: EscalationReply,
     _: None = Security(_require_secret),
 ):
+    graph = await _get_graph()
     config = {"configurable": {"thread_id": thread_id}}
 
-    snapshot = await _graph.aget_state(config)
+    snapshot = await graph.aget_state(config)
     if "escalate" not in (snapshot.next or []):
-        raise HTTPException(404, "No hay escalación pendiente para este thread")
+        raise HTTPException(404, "No hay escalacion pendiente para este thread")
 
-    # Actualizar el estado con la decisión del operador y reanudar
-    await _graph.aupdate_state(
+    await graph.aupdate_state(
         config,
         {
             "escalation_reason": f"{body.decision}: {body.comentario}",
             "escalated": False,
         },
     )
-    result = await _graph.ainvoke(None, config=config)
+    result = await graph.ainvoke(None, config=config)
     last = result["messages"][-1]
 
     return {
@@ -174,4 +159,26 @@ async def responder_escalacion(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "agent": "MyPOS Agent", "host": "www.mypos.cl"}
+    required_config = {
+        "AGENT_SECRET": bool(settings.agent_secret),
+        "MYPOS_SERVICE_EMAIL": bool(settings.mypos_service_email),
+        "MYPOS_SERVICE_PASSWORD": bool(settings.mypos_service_password),
+        "MYPOS_API_KEY": bool(settings.mypos_api_key),
+    }
+    provider_key_configured = {
+        "anthropic": bool(settings.anthropic_api_key),
+        "openai": bool(settings.openai_api_key),
+        "google_genai": bool(settings.google_api_key),
+        "ollama": True,
+    }.get(settings.llm_provider, False)
+
+    return {
+        "status": "ok",
+        "agent": "MyPOS Agent",
+        "host": "www.mypos.cl",
+        "model": settings.llm_model,
+        "provider": settings.llm_provider,
+        "provider_key_configured": provider_key_configured,
+        "required_config": required_config,
+        "graph_loaded": _graph is not None,
+    }
