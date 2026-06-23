@@ -129,8 +129,33 @@ final class EmpresaService
     public function listarSucursales(int $empresaId): array
     {
         $this->obtenerEmpresa($empresaId);
+        $this->ensureSucursalPredeterminada($empresaId);
 
         return ['sucursales' => $this->repository->listSucursales($empresaId)];
+    }
+
+    /**
+     * Garantiza que la empresa tenga al menos una sucursal activa.
+     *
+     * Toda la cadena de stock (stock_ubicacion -> stock_sucursal) cuelga de una
+     * sucursal con su ubicacion SUCURSAL_VENTA. Una empresa sin sucursales deja
+     * inutilizable el ingreso de stock, inventario fisico, cajas y ventas. El
+     * flujo normal de registro crea "Casa Matriz", pero empresas dadas de alta
+     * por otras vias pueden quedar sin ella; aqui se crea de forma perezosa la
+     * primera vez que se listan las sucursales (post-login), auto-reparando esos
+     * casos. Mismo patron ensure-on-read que ubicaciones/stock.
+     */
+    private function ensureSucursalPredeterminada(int $empresaId): void
+    {
+        if ($this->repository->countSucursalesActivas($empresaId) > 0) {
+            return;
+        }
+
+        $this->crearSucursal($empresaId, [
+            'nombre' => 'Casa Matriz',
+            'codigo' => 'MATRIZ',
+            'activo' => 1,
+        ]);
     }
 
     public function obtenerSucursal(int $id): array
