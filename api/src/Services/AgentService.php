@@ -27,10 +27,15 @@ final class AgentService
             throw new HttpException('No se pudo preparar la solicitud al agente', 422);
         }
 
-        [$statusCode, $response, $effectiveUrl] = $this->postJson($agentUrl . '/chat', $body, $secret);
+        [$statusCode, $response, $effectiveUrl, $transportError] = $this->postJson($agentUrl . '/chat', $body, $secret);
 
         if ($response === false) {
-            throw new HttpException('No se pudo conectar con el agente IA', 503);
+            error_log('No se pudo conectar con el agente IA: url=' . $effectiveUrl . ' error=' . $transportError);
+            throw new HttpException(
+                'No se pudo conectar con el agente IA'
+                . ($transportError !== '' ? ': ' . $transportError : ''),
+                503
+            );
         }
 
         $decoded = json_decode($response, true);
@@ -59,7 +64,7 @@ final class AgentService
     }
 
     /**
-     * @return array{0:int,1:string|false,2:string}
+     * @return array{0:int,1:string|false,2:string,3:string}
      */
     private function postJson(string $url, string $body, string $secret): array
     {
@@ -79,13 +84,22 @@ final class AgentService
                     CURLOPT_FOLLOWLOCATION => true,
                     CURLOPT_MAXREDIRS => 3,
                 ]);
+                if (defined('CURL_IPRESOLVE_V4')) {
+                    curl_setopt($handle, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+                }
 
                 $response = curl_exec($handle);
                 $statusCode = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
                 $effectiveUrl = (string) curl_getinfo($handle, CURLINFO_EFFECTIVE_URL);
+                $transportError = $response === false ? curl_error($handle) : '';
                 curl_close($handle);
 
-                return [$statusCode > 0 ? $statusCode : 503, $response, $effectiveUrl !== '' ? $effectiveUrl : $url];
+                return [
+                    $statusCode > 0 ? $statusCode : 503,
+                    $response,
+                    $effectiveUrl !== '' ? $effectiveUrl : $url,
+                    $transportError,
+                ];
             }
         }
 
@@ -105,7 +119,12 @@ final class AgentService
 
         $response = @file_get_contents($url, false, $context);
 
-        return [$this->statusCode($http_response_header ?? []), $response, $url];
+        return [
+            $this->statusCode($http_response_header ?? []),
+            $response,
+            $url,
+            $response === false ? 'file_get_contents fallo al abrir la URL del agente' : '',
+        ];
     }
 
     /**
