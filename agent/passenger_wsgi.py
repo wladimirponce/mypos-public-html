@@ -68,6 +68,8 @@ def _health_app(environ, start_response):
             "model": _env_value(values, "LLM_MODEL", "claude-opus-4-8"),
             "provider": provider,
             "provider_key_configured": provider_key,
+            "llm_min_interval_seconds": int(_env_value(values, "LLM_MIN_INTERVAL_SECONDS", "8") or 8),
+            "llm_quota_cooldown_seconds": int(_env_value(values, "LLM_QUOTA_COOLDOWN_SECONDS", "300") or 300),
             "required_config": {
                 "AGENT_SECRET": bool(_env_value(values, "AGENT_SECRET")),
                 "MYPOS_SERVICE_EMAIL": bool(_env_value(values, "MYPOS_SERVICE_EMAIL")),

@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
+    llm_min_interval_seconds: int = Field(default=8, alias="LLM_MIN_INTERVAL_SECONDS")
+    llm_quota_cooldown_seconds: int = Field(default=300, alias="LLM_QUOTA_COOLDOWN_SECONDS")
 
     # ── MyPOS Web Backend (JWT Bearer) ────────────────────────────────────────
     # En producción usar 127.0.0.1 (misma máquina, evita DNS y TLS extra)

@@ -11,6 +11,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import time
 import unicodedata
 import uuid
 from typing import Optional
@@ -26,6 +27,78 @@ from config import settings
 _graph = None
 _SECRET_HEADER = APIKeyHeader(name="X-Agent-Secret", auto_error=False)
 _RUN_TIMEOUT_SECONDS = 35
+_last_llm_call_at = 0.0
+_quota_blocked_until = 0.0
+_quota_lock = asyncio.Lock()
+
+
+def _quota_seconds_left() -> int:
+    return max(0, int(_quota_blocked_until - time.time()))
+
+
+def _quota_message(seconds: int) -> str:
+    minutes = max(1, (seconds + 59) // 60)
+    return (
+        "Gemini alcanzo su cuota temporal. "
+        f"Voy a evitar nuevas llamadas IA por aproximadamente {minutes} min. "
+        "Mientras tanto puedo responder consultas directas como: ventas de hoy, "
+        "producto por codigo/nombre, stock y cajas."
+    )
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    text = f"{exc.__class__.__name__}: {exc}".lower()
+    return (
+        "resource_exhausted" in text
+        or "429" in text
+        or "quota" in text
+        or "rate limit" in text
+    )
+
+
+async def _reserve_llm_slot() -> Optional[ChatResponse]:
+    global _last_llm_call_at
+
+    seconds_left = _quota_seconds_left()
+    if seconds_left > 0:
+        return ChatResponse(
+            thread_id="",
+            reply=_quota_message(seconds_left),
+            escalated=False,
+        )
+
+    async with _quota_lock:
+        seconds_left = _quota_seconds_left()
+        if seconds_left > 0:
+            return ChatResponse(
+                thread_id="",
+                reply=_quota_message(seconds_left),
+                escalated=False,
+            )
+
+        elapsed = time.time() - _last_llm_call_at
+        min_interval = max(0, int(settings.llm_min_interval_seconds))
+        if elapsed < min_interval:
+            wait = max(1, int(min_interval - elapsed))
+            return ChatResponse(
+                thread_id="",
+                reply=(
+                    "Estoy regulando las consultas IA para no agotar la cuota. "
+                    f"Espera {wait} segundos o usa una consulta directa "
+                    "(ventas de hoy, cajas, producto o stock)."
+                ),
+                escalated=False,
+            )
+
+        _last_llm_call_at = time.time()
+        return None
+
+
+def _mark_quota_exhausted() -> int:
+    global _quota_blocked_until
+    cooldown = max(60, int(settings.llm_quota_cooldown_seconds))
+    _quota_blocked_until = time.time() + cooldown
+    return cooldown
 
 
 def _require_secret(key: Optional[str] = Security(_SECRET_HEADER)) -> None:
@@ -158,6 +231,11 @@ async def _run(
     if not ready:
         raise HTTPException(status_code=503, detail=reason)
 
+    quota_response = await _reserve_llm_slot()
+    if quota_response is not None:
+        quota_response.thread_id = thread_id
+        return quota_response
+
     try:
         graph = await asyncio.wait_for(_get_graph(), timeout=10)
     except asyncio.TimeoutError as exc:
@@ -187,6 +265,15 @@ async def _run(
             status_code=504,
             detail=f"El proveedor IA no respondio en {_RUN_TIMEOUT_SECONDS} segundos",
         ) from exc
+    except Exception as exc:
+        if _is_quota_error(exc):
+            cooldown = _mark_quota_exhausted()
+            return ChatResponse(
+                thread_id=thread_id,
+                reply=_quota_message(cooldown),
+                escalated=False,
+            )
+        raise
 
     snapshot = await graph.aget_state(config)
     if "escalate" in (snapshot.next or []):
@@ -276,6 +363,8 @@ async def health():
         "model": settings.llm_model,
         "provider": settings.llm_provider,
         "provider_key_configured": provider_key_configured,
+        "quota_cooldown_seconds_left": _quota_seconds_left(),
+        "llm_min_interval_seconds": settings.llm_min_interval_seconds,
         "required_config": required_config,
         "graph_loaded": _graph is not None,
     }
