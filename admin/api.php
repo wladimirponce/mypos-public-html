@@ -1755,6 +1755,11 @@ function sendDTE(array $data): array {
         'trackId' => $resultado['trackId'] ?? null,
         'estado'  => $resultado['estado']  ?? null,
         'mensaje' => $resultado['mensaje'] ?? 'Enviado al SII',
+        // Exponer el error real del SII cuando falla (antes solo iba en 'mensaje'
+        // y runOneCase mostraba el genérico "Error en envío SII").
+        'error'   => empty($resultado['ok'])
+            ? ($resultado['error'] ?? $resultado['mensaje'] ?? $resultado['estado'] ?? 'Error en envío SII')
+            : null,
     ];
 }
 

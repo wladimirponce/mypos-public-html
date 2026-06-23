@@ -6,6 +6,25 @@
 ini_set('display_errors', '0');
 error_reporting(0);
 
+// Capturar fatales (memoria, timeout, TypeError no atrapado, etc.) y devolverlos
+// como JSON. Sin esto, un fatal deja la respuesta vacía → el front muestra
+// "Unexpected end of JSON input" sin pista del motivo real.
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=UTF-8');
+        }
+        while (ob_get_level() > 0) { ob_end_clean(); }
+        echo json_encode([
+            'ok'    => false,
+            'error' => 'Error fatal del servidor: ' . $e['message']
+                       . ' (' . basename($e['file']) . ':' . $e['line'] . ')',
+            'fatal' => true,
+        ]);
+    }
+});
+
 ob_start();
 define('DTE_API_BOOTSTRAP_ONLY', true);
 
