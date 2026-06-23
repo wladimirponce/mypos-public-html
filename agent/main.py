@@ -11,6 +11,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 import time
 import unicodedata
 import uuid
@@ -165,6 +166,94 @@ def _normalize_text(value: str) -> str:
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
+def _clean_product_query(text: str) -> str:
+    cleaned = text.strip(" ?!.,;:")
+    prefixes = (
+        "cuanto vale ",
+        "cuanto cuesta ",
+        "que valor tiene ",
+        "precio de ",
+        "valor de ",
+        "busca ",
+        "buscar ",
+        "consulta ",
+        "consultar ",
+        "producto ",
+        "el producto ",
+        "stock de ",
+        "stock del ",
+        "codigo ",
+        "el codigo ",
+    )
+    normalized = _normalize_text(cleaned)
+    for prefix in prefixes:
+        if normalized.startswith(prefix):
+            return cleaned[len(prefix):].strip(" ?!.,;:")
+    return cleaned
+
+
+def _looks_like_product_query(text: str) -> bool:
+    normalized = _normalize_text(text.strip())
+    if len(normalized) < 3:
+        return False
+
+    broad_questions = (
+        "que productos deberia revisar",
+        "productos deberia revisar",
+        "productos debo revisar",
+        "productos revisar",
+        "mas vendido",
+        "mas vendidos",
+        "cajas",
+        "ventas",
+        "stock bajo",
+        "bajo stock",
+        "folios",
+        "compras",
+        "clientes",
+        "reportes",
+    )
+    if any(phrase in normalized for phrase in broad_questions):
+        return False
+
+    product_markers = (
+        "aceite",
+        "bebida",
+        "arroz",
+        "azucar",
+        "harina",
+        "leche",
+        "pan",
+        "pollo",
+        "carne",
+        "detergente",
+        "papel",
+        "cigarro",
+        "cerveza",
+        "vino",
+        "agua",
+    )
+    if any(marker in normalized for marker in product_markers):
+        return True
+
+    if any(char.isdigit() for char in normalized):
+        return True
+
+    return normalized.startswith(
+        (
+            "cuanto vale ",
+            "cuanto cuesta ",
+            "que valor tiene ",
+            "precio de ",
+            "valor de ",
+            "busca ",
+            "buscar ",
+            "consulta ",
+            "consultar ",
+        )
+    )
+
+
 async def _try_direct_intent(
     message: str,
     empresa_id: int,
@@ -176,12 +265,66 @@ async def _try_direct_intent(
         ("vendimos" in text or "ventas" in text or "venta" in text)
         and ("hoy" in text or "dia" in text)
     )
+    asks_boxes = "caja" in text or "cajas" in text
+    asks_products_to_review = (
+        "producto" in text
+        and ("revisar" in text or "deberia" in text or "debo" in text)
+    )
+    asks_top_products = (
+        "mas vendido" in text
+        or "mas vendidos" in text
+        or "top producto" in text
+        or "top productos" in text
+    )
 
     if asks_today_sales:
         from tools.ventas import resumen_ventas_hoy
 
         reply = await resumen_ventas_hoy.ainvoke(
             {"empresa_id": empresa_id, "sucursal_id": sucursal_id}
+        )
+        return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
+
+    if asks_boxes:
+        from tools.caja import estado_cajas
+
+        reply = await estado_cajas.ainvoke(
+            {"empresa_id": empresa_id, "sucursal_id": sucursal_id}
+        )
+        return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
+
+    if asks_products_to_review:
+        return ChatResponse(
+            thread_id=thread_id,
+            reply=(
+                "Puedo revisar productos por dos caminos directos: "
+                "productos mas vendidos del mes o un producto especifico por nombre/codigo. "
+                "Por ejemplo: 'mas vendidos este mes' o 'aceite 100% vegetal'."
+            ),
+            escalated=False,
+        )
+
+    if asks_top_products:
+        from tools.ventas import ventas_por_producto
+
+        today = date.today()
+        first_day = today.replace(day=1)
+        reply = await ventas_por_producto.ainvoke(
+            {
+                "empresa_id": empresa_id,
+                "fecha_desde": str(first_day),
+                "fecha_hasta": str(today),
+                "sucursal_id": sucursal_id,
+            }
+        )
+        return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
+
+    if _looks_like_product_query(message):
+        from tools.stock import buscar_producto
+
+        query = _clean_product_query(message)
+        reply = await buscar_producto.ainvoke(
+            {"empresa_id": empresa_id, "query": query}
         )
         return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
 

@@ -1,12 +1,13 @@
 """
-Herramientas de stock y productos — solo lectura.
+Herramientas de stock y productos, solo lectura.
 Endpoints usados:
-  GET /api/v1/productos/buscar              → buscar por codigo exacto
-  GET /api/v1/productos?q=texto             → buscar por nombre/codigo/barra
-  GET /api/v1/stock/producto/{id}           → stock consolidado
+  GET /api/v1/productos/buscar              -> buscar por codigo exacto
+  GET /api/v1/productos?q=texto             -> buscar por nombre/codigo/barra
+  GET /api/v1/stock/producto/{id}           -> stock consolidado
 """
 
 from typing import Optional
+
 from langchain_core.tools import tool
 
 from tools.mypos_client import web_get
@@ -30,19 +31,19 @@ def _product_line(product: dict) -> str:
     )
     price = product.get("precio_venta") or product.get("precio") or 0
     stock = product.get("stock_total")
-    stock_label = f" · stock {stock}" if stock is not None else ""
+    stock_label = f" - stock {stock}" if stock is not None else ""
     return f"  - [{code}] {product.get('nombre', '?')} - {_money(price)}{stock_label}"
 
 
 @tool
 async def buscar_producto(empresa_id: int, query: str) -> str:
     """
-    Busca un producto por nombre o código de barras.
-    Retorna nombre, precio y código de barras de los primeros resultados.
+    Busca un producto por nombre o codigo de barras.
+    Retorna nombre, precio y codigo de barras de los primeros resultados.
 
     Args:
         empresa_id: ID de la empresa del operador autenticado.
-        query: Texto de búsqueda o código de barras.
+        query: Texto de busqueda o codigo de barras.
     """
     query = query.strip()
     if not query:
@@ -81,8 +82,8 @@ async def buscar_producto(empresa_id: int, query: str) -> str:
         return f"No se encontraron productos para '{query}'."
 
     lines = [f"Productos encontrados para '{query}':"]
-    for p in items:
-        lines.append(_product_line(p))
+    for product in items:
+        lines.append(_product_line(product))
     return "\n".join(lines)
 
 
@@ -99,9 +100,8 @@ async def consultar_stock(
     Args:
         empresa_id: ID de la empresa del operador autenticado.
         producto_id: ID del producto a consultar.
-        sucursal_id: ID de sucursal (opcional).
+        sucursal_id: ID de sucursal opcional.
     """
-    # Stock consolidado (via web backend, fuente de verdad: stock_ubicacion)
     try:
         data = await web_get(
             f"/v1/stock/producto/{producto_id}",
@@ -116,18 +116,18 @@ async def consultar_stock(
     ubicaciones = data.get("data") or []
     if sucursal_id:
         ubicaciones = [
-            u for u in ubicaciones
-            if int(u.get("sucursal_id") or 0) == int(sucursal_id)
+            item for item in ubicaciones
+            if int(item.get("sucursal_id") or 0) == int(sucursal_id)
         ]
 
     if not ubicaciones:
         scope = f" en sucursal {sucursal_id}" if sucursal_id else ""
         return f"Producto {producto_id} sin stock registrado{scope}."
 
-    total = sum(u.get("cantidad", 0) for u in ubicaciones)
+    total = sum(item.get("cantidad", 0) for item in ubicaciones)
     lines = [f"Stock producto {producto_id} (total: {total} uds):"]
-    for u in ubicaciones:
+    for item in ubicaciones:
         lines.append(
-            f"  • {u.get('nombre_ubicacion', '?')}: {u.get('cantidad', 0)} uds"
+            f"  - {item.get('nombre_ubicacion', '?')}: {item.get('cantidad', 0)} uds"
         )
     return "\n".join(lines)
