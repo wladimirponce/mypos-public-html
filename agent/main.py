@@ -170,8 +170,10 @@ _PRODUCT_PREFIXES = (
     "cuanto vale ", "cuanto cuesta ", "que valor tiene ",
     "precio de ", "valor de ", "precio del ", "valor del ",
     "busca ", "buscar ", "consulta ", "consultar ",
-    "producto ", "el producto ", "la ", "el ",
-    "stock de ", "stock del ", "stock ",
+    "producto ", "el producto ",
+    "dame el stock del ", "dame el stock de ", "dame stock del ", "dame stock de ",
+    "ver stock de ", "ver stock del ", "muestra el stock de ", "muestra stock de ",
+    "stock del ", "stock de ", "stock ",
     "codigo ", "el codigo ",
 )
 _CLIENT_PREFIXES = (
@@ -267,14 +269,20 @@ def _is_folios_query(text: str) -> bool:
 
 
 def _is_product_search(text: str, raw: str) -> bool:
-    """Detecta búsqueda de producto específico: código numérico, código de barras o precio."""
-    # Código de barras o número largo
+    """Detecta búsqueda de producto específico: código, nombre o precio."""
+    # Código de barras o número largo (EAN, UPC, etc.)
     if _re.search(r"\b\d{5,}\b", raw):
+        return True
+    # "stock de/del [producto]" o "dame el stock de [producto]"
+    if _contains_any(text, ("stock de ", "stock del ", "dame el stock", "dame stock",
+                            "ver stock de ", "muestra stock de ")):
         return True
     # Prefijos explícitos de precio/búsqueda
     return _contains_any(text, (
         "cuanto vale ", "cuanto cuesta ", "precio de ", "valor de ",
-        "busca ", "buscar ", "consultar ", "precio del ", "valor del ",
+        "precio del ", "valor del ",
+        "busca ", "buscar ", "consultar ",
+        "dame el precio", "dame el valor",
     ))
 
 
@@ -293,7 +301,34 @@ async def _try_direct_intent(
     Detecta intents conocidos y los resuelve directamente con la tool correspondiente,
     sin pasar por el LLM. Cubre ~85% de las consultas habituales.
     """
+    # Mensajes demasiado cortos — no tienen suficiente contexto para el LLM tampoco
+    if len(message.strip()) < 3:
+        return ChatResponse(
+            thread_id=thread_id,
+            reply=(
+                "Puedo ayudarte con: ventas, stock, cajas, clientes, compras, IVA y folios SII. "
+                "Intenta con: 'ventas de hoy', 'stock del aceite 1L', 'cierres pendientes'."
+            ),
+            escalated=False,
+        )
+
     text = _normalize_text(message)
+
+    # ── 0. Intent ambiguo: "qué productos debería revisar" ───────────────────
+    if _contains_any(text, ("que producto", "que productos")) and _contains_any(
+        text, ("revisar", "deberia", "debo", "tengo que", "ver", "mirar")
+    ):
+        return ChatResponse(
+            thread_id=thread_id,
+            reply=(
+                "Puedo mostrarte varias vistas de productos:\n"
+                "• 'stock critico' o 'que se esta agotando' — productos bajo minimo\n"
+                "• 'mas vendidos del mes' — top 10 por ventas\n"
+                "• 'que me sugiere reponer' — sugerencias de reposicion inteligente\n"
+                "• 'precio del aceite 1L' — busqueda de producto especifico"
+            ),
+            escalated=False,
+        )
 
     # ── 1. Ranking de productos más vendidos ─────────────────────────────────
     if _is_top_products_query(text):
