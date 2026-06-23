@@ -227,15 +227,20 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
       </button>
     </div>
     <!-- Reenvío selectivo por tipo: un solo sobre con folios nuevos -->
-    <div style="border:1px solid var(--c-border); border-radius:6px; padding:10px 12px; margin-bottom:10px; display:flex; gap:14px; align-items:center; flex-wrap:wrap">
-      <span style="font-size:.82rem; font-weight:600" title="Reenvía solo los tipos marcados, todos juntos en UN sobre con folios nuevos. Útil cuando el SII rechazó parte del set.">Reenviar por tipo:</span>
-      <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="33" checked> T33 Facturas</label>
-      <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="61" checked> T61 NC</label>
-      <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="56" checked> T56 ND</label>
-      <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="52"> T52 Guías</label>
-      <button class="d-btn d-btn-sm d-btn-primary" onclick="certRunTipos()">
-        <i class="bi bi-send"></i> Reenviar en un sobre
-      </button>
+    <div style="border:1px solid var(--c-border); border-radius:6px; padding:10px 12px; margin-bottom:10px">
+      <div style="font-size:.82rem; font-weight:700; color:var(--c-primary,#2563eb); margin-bottom:8px">
+        <i class="bi bi-award"></i> Certificación Nivel 3 · Etapa 3 — Reenviar en un sobre
+      </div>
+      <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap">
+        <span style="font-size:.78rem; color:var(--c-text-muted)" title="Reenvía solo los tipos marcados, todos juntos en UN sobre con folios nuevos. Útil cuando el SII rechazó parte del set.">Tipos a incluir:</span>
+        <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="33" checked> T33 Facturas</label>
+        <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="61" checked> T61 NC</label>
+        <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="56" checked> T56 ND</label>
+        <label style="font-size:.8rem; cursor:pointer"><input type="checkbox" class="rt-tipo" value="52"> T52 Guías</label>
+        <button class="d-btn d-btn-sm d-btn-primary" onclick="certRunTipos()">
+          <i class="bi bi-send"></i> Reenviar en un sobre
+        </button>
+      </div>
     </div>
     <!-- Folio quemado: avanza el high-water para no repetir folios que el SII ya recibió -->
     <div style="border:1px dashed var(--c-border); border-radius:6px; padding:10px 12px; margin-bottom:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap">
@@ -1143,12 +1148,51 @@ async function certRunTipos() {
     const res = await api('cert_run_tipos', { tipos: tipos.join(',') });
     if (!res.ok) throw new Error(res.error || 'Error desconocido');
     applyState(res.estado);
-    Object.entries(res.resultados || {}).forEach(([cid, r]) => {
-      if (!r || typeof r !== 'object') return;
+    const rows = Object.entries(res.resultados || {}).filter(([,r]) => r && typeof r === 'object');
+    rows.forEach(([cid, r]) => {
       log(`${cid}: ${r.status||'?'} — folio ${r.folio||'-'} TRK ${r.trackId||'-'} ${r.error?'| '+r.error:''}`, r.status==='ok'?'ok':'error');
     });
-    const trks = [...new Set(Object.values(res.resultados||{}).map(r=>r&&r.trackId).filter(Boolean))];
-    status.innerHTML = `<div class="d-alert success"><i class="bi bi-check-circle"></i> Reenvío completado. TrackID: ${trks.join(', ')||'—'}</div>`;
+    const trks = [...new Set(rows.map(([,r])=>r.trackId).filter(Boolean))];
+    const nOk  = rows.filter(([,r]) => r.status==='ok').length;
+    const nTot = rows.length;
+    const todoOk = nOk === nTot && nTot > 0;
+
+    // Tabla de resultados: caso, tipo, folio, TrackID, estado
+    const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const tipoNom = { '33':'Factura','34':'Fact. Exenta','46':'Fact. Compra','52':'Guía','56':'ND','61':'NC' };
+    const bodyRows = rows.map(([cid, r]) => {
+      const ok = r.status === 'ok';
+      const badge = ok
+        ? '<span style="color:#16a34a; font-weight:600">✓ Aceptado</span>'
+        : `<span style="color:#dc2626; font-weight:600" title="${esc(r.error||'')}">✗ ${esc((r.error||'Error').slice(0,40))}</span>`;
+      return `<tr>
+        <td style="padding:4px 8px">${esc(cid)}</td>
+        <td style="padding:4px 8px">${tipoNom[String(r.tipo)]||('T'+(r.tipo||'?'))}</td>
+        <td style="padding:4px 8px; text-align:right">${r.folio||'—'}</td>
+        <td style="padding:4px 8px"><code>${esc(r.trackId||'—')}</code></td>
+        <td style="padding:4px 8px">${badge}</td>
+      </tr>`;
+    }).join('');
+
+    status.innerHTML = `
+      <div class="d-alert ${todoOk?'success':'warning'}" style="margin-bottom:8px">
+        <i class="bi bi-${todoOk?'check-circle':'exclamation-triangle'}"></i>
+        <strong>${todoOk ? '✓ Sobre enviado — todos aceptados' : `Enviado con observaciones (${nOk}/${nTot} aceptados)`}</strong>
+        · TrackID: <code>${trks.join(', ')||'—'}</code>
+      </div>
+      <table style="width:100%; border-collapse:collapse; font-size:.74rem; border:1px solid var(--c-border)">
+        <thead><tr style="background:var(--c-bg-subtle,#f1f5f9); text-align:left">
+          <th style="padding:5px 8px">Caso</th>
+          <th style="padding:5px 8px">Tipo</th>
+          <th style="padding:5px 8px; text-align:right">Folio</th>
+          <th style="padding:5px 8px">TrackID</th>
+          <th style="padding:5px 8px">Estado</th>
+        </tr></thead>
+        <tbody>${bodyRows||'<tr><td colspan="5" style="padding:8px; text-align:center; color:#999">Sin resultados</td></tr>'}</tbody>
+      </table>
+      ${todoOk ? `<div style="font-size:.72rem; color:var(--c-text-muted); margin-top:6px">
+        Declare este TrackID en <strong>www.sii.cl → Menú Postulantes</strong> (SET BÁSICO o SET GUÍA según corresponda).
+      </div>` : ''}`;
   } catch(e) {
     status.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
     log('Error reenvío por tipos: ' + e.message, 'error');
