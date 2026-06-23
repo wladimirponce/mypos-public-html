@@ -3151,7 +3151,7 @@ function siiCaratulaResolucion(): array {
     $emp = $globalContext ? $globalContext->getEmpresa() : [];
     $fecha = (string)($emp['fecha_resolucion'] ?? $emp['fch_resol'] ?? FCH_RESOL);
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
-        return [0, siiFormatDate($fecha)];
+        return [0, siiFormatDate($fecha, date('Y-m-d'))];
     }
 
     $numero = $emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL;
@@ -3167,7 +3167,7 @@ function buildEnvioDTE(string $dteXml, int $tipo, int $folio, string $certPem): 
     $emp = $globalContext ? $globalContext->getEmpresa() : [];
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $nroResol = 0;
-        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL);
+        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL, date('Y-m-d'));
     } else {
         $nroResol = $emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL;
         $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? $emp['fch_resol'] ?? FCH_RESOL);
@@ -3229,7 +3229,7 @@ function buildEnvioDTESet(array $dtes, string $certPem): string {
     $emp = $globalContext ? $globalContext->getEmpresa() : [];
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $nroResol = 0;
-        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL);
+        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL, date('Y-m-d'));
     } else {
         $nroResol = $emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL;
         $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? $emp['fch_resol'] ?? FCH_RESOL);
@@ -3283,7 +3283,7 @@ function buildEnvioBoletaSet(array $dtesXml, string $certPem): string {
     $emp = $globalContext ? $globalContext->getEmpresa() : [];
     if ($globalContext && $globalContext->getAmbiente() === 'CERTIFICACION') {
         $nroResol = 0;
-        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL);
+        $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL, date('Y-m-d'));
     } else {
         $nroResol = $emp['numero_resolucion'] ?? NRO_RESOL;
         $fchResol = siiFormatDate($emp['fecha_resolucion'] ?? FCH_RESOL);
