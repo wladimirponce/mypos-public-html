@@ -151,6 +151,19 @@ final class EmpresaService
             return;
         }
 
+        // Caso comun: la empresa ya tiene una sucursal (p.ej. "Casa Matriz" del
+        // registro) pero quedo inactiva. Reactivarla es preferible a crear otra:
+        // evita la colision UNIQUE por codigo/nombre y respeta el limite de plan,
+        // ya que pasar de 0 a 1 sucursal activa esta permitido en cualquier plan.
+        $reactivadaId = $this->repository->reactivarSucursalInactiva($empresaId);
+        if ($reactivadaId !== null) {
+            $sucursal = $this->repository->getSucursalById($reactivadaId);
+            $nombre = is_array($sucursal) ? (string) $sucursal['nombre'] : 'Casa Matriz';
+            $this->repository->ensureSucursalVentaLocation($empresaId, $reactivadaId, $nombre, 1);
+
+            return;
+        }
+
         $this->crearSucursal($empresaId, [
             'nombre' => 'Casa Matriz',
             'codigo' => 'MATRIZ',

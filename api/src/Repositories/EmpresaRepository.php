@@ -414,6 +414,39 @@ final class EmpresaRepository
         return (int) $statement->fetchColumn();
     }
 
+    /**
+     * Reactiva la sucursal inactiva mas antigua de la empresa y devuelve su id.
+     * Devuelve null si la empresa no tiene ninguna sucursal inactiva.
+     *
+     * Se usa para auto-reparar empresas que quedaron sin sucursal activa pero que
+     * ya tienen una creada (p.ej. "Casa Matriz" del registro desactivada): reactivar
+     * la existente evita chocar con la restriccion UNIQUE (empresa_id, codigo)
+     * /(empresa_id, nombre) que ocurriria al intentar insertar una nueva con el
+     * mismo codigo.
+     */
+    public function reactivarSucursalInactiva(int $empresaId): ?int
+    {
+        $select = $this->connection->prepare(
+            'SELECT id FROM sucursales
+             WHERE empresa_id = :empresa_id AND activo = 0
+             ORDER BY id
+             LIMIT 1'
+        );
+        $select->execute(['empresa_id' => $empresaId]);
+        $id = $select->fetchColumn();
+
+        if ($id === false) {
+            return null;
+        }
+
+        $update = $this->connection->prepare(
+            'UPDATE sucursales SET activo = 1 WHERE id = :id AND empresa_id = :empresa_id'
+        );
+        $update->execute(['id' => (int) $id, 'empresa_id' => $empresaId]);
+
+        return (int) $id;
+    }
+
     public function countUsuariosActivos(int $empresaId): int
     {
         $statement = $this->connection->prepare(
