@@ -107,10 +107,13 @@ async def build_graph():
     # init_chat_model acepta cualquier proveedor LangChain.
     # La API key la lee automáticamente de la variable de entorno estándar
     # (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY…).
-    model = init_chat_model(
-        model=settings.llm_model,
-        model_provider=settings.llm_provider,
-    ).bind_tools(ALL_TOOLS)
+    model_kwargs = {
+        "model": settings.llm_model,
+        "model_provider": settings.llm_provider,
+        "timeout": 25,
+        "max_retries": 1,
+    }
+    model = init_chat_model(**model_kwargs).bind_tools(ALL_TOOLS)
 
     workflow = StateGraph(AgentState)
     workflow.add_node("assistant", _make_assistant(model))

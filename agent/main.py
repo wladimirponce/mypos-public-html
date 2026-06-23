@@ -8,6 +8,7 @@ Endpoints:
   GET  /health
 """
 
+import asyncio
 import uuid
 from typing import Optional
 
@@ -21,6 +22,7 @@ from config import settings
 
 _graph = None
 _SECRET_HEADER = APIKeyHeader(name="X-Agent-Secret", auto_error=False)
+_RUN_TIMEOUT_SECONDS = 35
 
 
 def _require_secret(key: Optional[str] = Security(_SECRET_HEADER)) -> None:
@@ -39,6 +41,26 @@ async def _get_graph():
 
     _graph = await build_graph()
     return _graph
+
+
+def _provider_ready() -> tuple[bool, str]:
+    required_keys = {
+        "anthropic": ("ANTHROPIC_API_KEY", settings.anthropic_api_key),
+        "openai": ("OPENAI_API_KEY", settings.openai_api_key),
+        "google_genai": ("GOOGLE_API_KEY", settings.google_api_key),
+    }
+
+    if settings.llm_provider == "ollama":
+        return True, ""
+
+    if settings.llm_provider not in required_keys:
+        return False, f"LLM_PROVIDER no soportado: {settings.llm_provider}"
+
+    key_name, key_value = required_keys[settings.llm_provider]
+    if not key_value:
+        return False, f"{key_name} no configurado para LLM_PROVIDER={settings.llm_provider}"
+
+    return True, ""
 
 
 app = FastAPI(title="MyPOS Agent", docs_url=None, redoc_url=None)
@@ -92,6 +114,10 @@ async def _run(
     sucursal_id: Optional[int] = None,
     operator_name: str = "",
 ) -> ChatResponse:
+    ready, reason = _provider_ready()
+    if not ready:
+        raise HTTPException(status_code=503, detail=reason)
+
     graph = await _get_graph()
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -105,7 +131,16 @@ async def _run(
         "escalation_reason": "",
     }
 
-    result = await graph.ainvoke(state, config=config)
+    try:
+        result = await asyncio.wait_for(
+            graph.ainvoke(state, config=config),
+            timeout=_RUN_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail=f"El proveedor IA no respondio en {_RUN_TIMEOUT_SECONDS} segundos",
+        ) from exc
 
     snapshot = await graph.aget_state(config)
     if "escalate" in (snapshot.next or []):

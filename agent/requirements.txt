@@ -17,3 +17,4 @@ a2wsgi>=1.10.0          # ASGI→WSGI para Passenger de cPanel
 # LLM_PROVIDER=google_genai → pip install langchain-google-genai
 # LLM_PROVIDER=ollama     →  pip install langchain-ollama  (sin API key)
 langchain-anthropic>=0.3.0
+langchain-google-genai>=2.0.0
