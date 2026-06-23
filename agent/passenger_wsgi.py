@@ -1,29 +1,49 @@
 """
-Entrada para cPanel Passenger (WSGI).
-Passenger espera WSGI; FastAPI es ASGI → a2wsgi los convierte.
+cPanel Passenger entrypoint.
 
-Configuración en cPanel → Setup Python App:
-  Application root:    /home/<user>/mypos/agent
-  Application URL:     /agent              (o subdominio agent.mypos.cl)
-  Application startup: passenger_wsgi.py
-  Python version:      3.11+
-
-Instalar dependencias:
-  pip install -r requirements.txt
-  pip install langchain-anthropic   # o el proveedor que uses
-
-Variables de entorno: agregar en cPanel → Setup Python App → Environment variables
-  (todas las de .env.example)
+Passenger loads a WSGI callable named `application`. The real app is FastAPI
+(ASGI), adapted through a2wsgi. If dependencies are not installed yet, return a
+small JSON diagnostic instead of crashing Passenger in a restart loop.
 """
 
-import sys
+import json
 import os
+import sys
+import traceback
 
-# Asegura que el directorio del agente esté en el path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from a2wsgi import ASGIMiddleware
-from main import app
 
-# Passenger llama a `application` como punto de entrada WSGI
-application = ASGIMiddleware(app)
+def _diagnostic_app(error):
+    def application(environ, start_response):
+        payload = {
+            "status": "error",
+            "agent": "MyPOS Agent",
+            "detail": "Python dependencies are not installed or failed to load.",
+            "error_type": error.__class__.__name__,
+            "error": str(error),
+            "hint": "Activate the cPanel Python virtualenv and run: pip install -r requirements.txt",
+        }
+        if environ.get("QUERY_STRING") == "debug=1":
+            payload["traceback"] = traceback.format_exception_only(error.__class__, error)
+
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        start_response(
+            "503 Service Unavailable",
+            [
+                ("Content-Type", "application/json; charset=utf-8"),
+                ("Content-Length", str(len(body))),
+            ],
+        )
+        return [body]
+
+    return application
+
+
+try:
+    from a2wsgi import ASGIMiddleware
+    from main import app
+
+    application = ASGIMiddleware(app)
+except Exception as exc:
+    application = _diagnostic_app(exc)

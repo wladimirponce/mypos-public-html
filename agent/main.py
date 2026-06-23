@@ -11,8 +11,9 @@ Endpoints:
 import uuid
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Security
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
 
@@ -48,6 +49,21 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type", "X-Agent-Secret"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    detail = str(exc).strip() or exc.__class__.__name__
+    if len(detail) > 240:
+        detail = detail[:240] + "..."
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"Error interno del agente IA: {detail}",
+            "error_type": exc.__class__.__name__,
+        },
+    )
 
 
 class ChatRequest(BaseModel):

@@ -35,7 +35,8 @@ final class AgentService
 
         $decoded = json_decode($response, true);
         if (!is_array($decoded)) {
-            throw new HttpException('Respuesta invalida del agente IA', 502);
+            error_log('Respuesta invalida del agente IA: HTTP ' . $statusCode . ' body=' . $this->safeSnippet($response));
+            throw new HttpException('El agente IA devolvio una respuesta no JSON. Revisa /agent/health y los logs de la Python App en cPanel.', 502);
         }
 
         if ($statusCode >= 400) {
@@ -108,5 +109,15 @@ final class AgentService
         }
 
         return (int) $matches[1];
+    }
+
+    private function safeSnippet(string $response): string
+    {
+        $snippet = preg_replace('/\s+/', ' ', strip_tags($response));
+        if (!is_string($snippet)) {
+            return '';
+        }
+
+        return substr(trim($snippet), 0, 300);
     }
 }
