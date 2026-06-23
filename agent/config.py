@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # ── Persistencia ─────────────────────────────────────────────────────────
     db_path: str = Field(default="persistence/agent.db", alias="AGENT_DB")
 
-    model_config = {"env_file": ".env", "populate_by_name": True}
+    model_config = {"env_file": ".env", "populate_by_name": True, "extra": "ignore"}
 
 
 settings = Settings()
