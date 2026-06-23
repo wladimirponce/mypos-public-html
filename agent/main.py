@@ -118,7 +118,13 @@ async def _run(
     if not ready:
         raise HTTPException(status_code=503, detail=reason)
 
-    graph = await _get_graph()
+    try:
+        graph = await asyncio.wait_for(_get_graph(), timeout=10)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="No se pudo inicializar el proveedor IA en 10 segundos",
+        ) from exc
     config = {"configurable": {"thread_id": thread_id}}
 
     state = {
