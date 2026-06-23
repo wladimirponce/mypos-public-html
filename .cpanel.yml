@@ -7,6 +7,7 @@ deployment:
     - /bin/cp -R img $DEPLOYPATH/
     - /bin/cp -R admin $DEPLOYPATH/
     - /bin/cp -R api $DEPLOYPATH/
+    - /bin/cp -R agent $DEPLOYPATH/
     - /bin/cp -R whatsapp $DEPLOYPATH/
     - /bin/cp -R descargas $DEPLOYPATH/
     - /bin/cp .htaccess $DEPLOYPATH/.htaccess

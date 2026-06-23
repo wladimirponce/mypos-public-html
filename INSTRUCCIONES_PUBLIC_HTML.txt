@@ -12,8 +12,15 @@ Despues de subir:
 3. Abre temporalmente https://www.mypos.cl/api/instalar.php.
 4. Elimina public_html/api/public/instalar.php al terminar.
 5. Prueba https://www.mypos.cl.
+6. Configura cPanel Setup Python App:
+   - Application root: /home/TU_USUARIO/public_html/agent
+   - Application URL: /agent
+   - Startup file: passenger_wsgi.py
+   - Entry point: application
+   - Variables: las de public_html/agent/.env.example, con AGENT_SECRET igual al de public_html/api/.env.
 
 Notas:
 - Este distribuible usa /api en el mismo dominio; no requiere api.mypos.cl.
+- Incluye public_html/agent para el Agente IA; no subas ni copies un .env local con secretos.
 - No borres public_html/api/.htaccess.
 - Activa "Show Hidden Files" en cPanel para ver .htaccess y .env.example.

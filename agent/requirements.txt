@@ -1,0 +1,18 @@
+# ── Core (siempre requerido) ──────────────────────────────────────────────────
+langchain-core>=0.3.0
+langchain>=0.3.0
+langgraph>=0.2.50
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+pydantic>=2.0.0
+pydantic-settings>=2.4.0
+aiosqlite>=0.20.0
+a2wsgi>=1.10.0          # ASGI→WSGI para Passenger de cPanel
+
+# ── Proveedores LLM — instala solo el que uses ────────────────────────────────
+# LLM_PROVIDER=anthropic  →  pip install langchain-anthropic
+# LLM_PROVIDER=openai     →  pip install langchain-openai
+# LLM_PROVIDER=google_genai → pip install langchain-google-genai
+# LLM_PROVIDER=ollama     →  pip install langchain-ollama  (sin API key)
+langchain-anthropic>=0.3.0

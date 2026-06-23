@@ -27,22 +27,7 @@ final class AgentService
             throw new HttpException('No se pudo preparar la solicitud al agente', 422);
         }
 
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'POST',
-                'header' => [
-                    'Content-Type: application/json',
-                    'Accept: application/json',
-                    'X-Agent-Secret: ' . $secret,
-                ],
-                'content' => $body,
-                'timeout' => 45,
-                'ignore_errors' => true,
-            ],
-        ]);
-
-        $response = @file_get_contents($agentUrl . '/chat', false, $context);
-        $statusCode = $this->statusCode($http_response_header ?? []);
+        [$statusCode, $response] = $this->postJson($agentUrl . '/chat', $body, $secret);
 
         if ($response === false) {
             throw new HttpException('No se pudo conectar con el agente IA', 503);
@@ -63,6 +48,53 @@ final class AgentService
             'reply' => (string) ($decoded['reply'] ?? ''),
             'escalated' => (bool) ($decoded['escalated'] ?? false),
         ];
+    }
+
+    /**
+     * @return array{0:int,1:string|false}
+     */
+    private function postJson(string $url, string $body, string $secret): array
+    {
+        if (function_exists('curl_init')) {
+            $handle = curl_init($url);
+            if ($handle !== false) {
+                curl_setopt_array($handle, [
+                    CURLOPT_POST => true,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_HTTPHEADER => [
+                        'Content-Type: application/json',
+                        'Accept: application/json',
+                        'X-Agent-Secret: ' . $secret,
+                    ],
+                    CURLOPT_POSTFIELDS => $body,
+                    CURLOPT_TIMEOUT => 45,
+                ]);
+
+                $response = curl_exec($handle);
+                $statusCode = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+                curl_close($handle);
+
+                return [$statusCode > 0 ? $statusCode : 503, $response];
+            }
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => [
+                    'Content-Type: application/json',
+                    'Accept: application/json',
+                    'X-Agent-Secret: ' . $secret,
+                ],
+                'content' => $body,
+                'timeout' => 45,
+                'ignore_errors' => true,
+            ],
+        ]);
+
+        $response = @file_get_contents($url, false, $context);
+
+        return [$this->statusCode($http_response_header ?? []), $response];
     }
 
     /**

@@ -10,8 +10,9 @@
   # RewriteCond %{HTTP:X-Forwarded-Proto} !https
   RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
-  # Dejar que el backend en /api maneje sus propias rutas.
+  # Dejar que backend PHP y Python App manejen sus propias rutas.
   RewriteRule ^api(/.*)?$ - [L]
+  RewriteRule ^agent(/.*)?$ - [L]
 
   # 2. Enrutamiento para SPA (React Router)
   # Si el archivo o directorio existe físicamente, servirlo directamente
