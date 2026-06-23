@@ -2418,7 +2418,7 @@ function buildExportacionXML(
         $emp = $globalContext->getEmpresa();
         $rE = $h($emp['rut'] ?? RUT_EMISOR);
         $rsE = $h($emp['razon_social'] ?? RAZON_SOCIAL);
-        $gE = $h($emp['giro'] ?? GIRO_EMISOR);
+        $gE = $h(mb_substr($emp['giro'] ?? GIRO_EMISOR, 0, 80));
         $dE = $h($emp['direccion'] ?? DIRECCION);
         $cE = $h($emp['comuna_origen'] ?? COMUNA);
         $ciE = $h($emp['ciudad_origen'] ?? CIUDAD);
@@ -2427,7 +2427,7 @@ function buildExportacionXML(
     } else {
         $rE = $h(RUT_EMISOR);
         $rsE = $h(RAZON_SOCIAL);
-        $gE = $h(GIRO_EMISOR);
+        $gE = $h(mb_substr(GIRO_EMISOR, 0, 80));
         $dE = $h(DIRECCION);
         $cE = $h(COMUNA);
         $ciE = $h(CIUDAD);
@@ -2449,8 +2449,9 @@ function buildExportacionXML(
             . "</Extranjero>\n";
     }
     $xmlRecep = "<Receptor>\n  <RUTRecep>$rRut</RUTRecep>\n  <RznSocRecep>$rNom</RznSocRecep>\n$xmlExtr";
+    $tagMaxLen = ['GiroRecep' => 40, 'DirRecep' => 80, 'CmnaRecep' => 20, 'CiudadRecep' => 20];
     foreach (['GiroRecep' => 'giro', 'DirRecep' => 'direccion', 'CmnaRecep' => 'comuna', 'CiudadRecep' => 'ciudad'] as $tag => $key) {
-        if (!empty($recep[$key])) $xmlRecep .= "  <$tag>" . $h($recep[$key]) . "</$tag>\n";
+        if (!empty($recep[$key])) $xmlRecep .= "  <$tag>" . $h(mb_substr($recep[$key], 0, $tagMaxLen[$tag])) . "</$tag>\n";
     }
     $xmlRecep .= "</Receptor>";
 
@@ -2563,7 +2564,7 @@ function buildDocumentoXML(
         $emp = $globalContext->getEmpresa();
         $rE  = $h($emp['rut']);
         $rsE = $h($emp['razon_social']);
-        $gE  = $h($emp['giro']);
+        $gE  = $h(mb_substr($emp['giro'], 0, 80));
         $dE  = $h($emp['direccion_origen']);
         $cE  = $h($emp['comuna_origen'] ?? '');
         $ciE = $h($emp['ciudad_origen'] ?? '');
@@ -2572,7 +2573,7 @@ function buildDocumentoXML(
     } else {
         $rE  = $h(RUT_EMISOR);
         $rsE = $h(RAZON_SOCIAL);
-        $gE  = $h(GIRO_EMISOR);
+        $gE  = $h(mb_substr(GIRO_EMISOR, 0, 80));
         $dE  = $h(DIRECCION);
         $cE  = $h(COMUNA);
         $ciE = $h(CIUDAD);
@@ -2786,7 +2787,7 @@ function buildLiquidacionXML(
         $emp = $globalContext->getEmpresa();
         $rE  = $h($emp['rut']);
         $rsE = $h($emp['razon_social']);
-        $gE  = $h($emp['giro']);
+        $gE  = $h(mb_substr($emp['giro'], 0, 80));
         $dE  = $h($emp['direccion_origen']);
         $cE  = $h($emp['comuna_origen'] ?? '');
         $ciE = $h($emp['ciudad_origen'] ?? '');
@@ -2794,7 +2795,7 @@ function buildLiquidacionXML(
     } else {
         $rE  = $h(RUT_EMISOR);
         $rsE = $h(RAZON_SOCIAL);
-        $gE  = $h(GIRO_EMISOR);
+        $gE  = $h(mb_substr(GIRO_EMISOR, 0, 80));
         $dE  = $h(DIRECCION);
         $cE  = $h(COMUNA);
         $ciE = $h(CIUDAD);
