@@ -27,7 +27,7 @@ final class AgentService
             throw new HttpException('No se pudo preparar la solicitud al agente', 422);
         }
 
-        [$statusCode, $response] = $this->postJson($agentUrl . '/chat', $body, $secret);
+        [$statusCode, $response, $effectiveUrl] = $this->postJson($agentUrl . '/chat', $body, $secret);
 
         if ($response === false) {
             throw new HttpException('No se pudo conectar con el agente IA', 503);
@@ -35,7 +35,14 @@ final class AgentService
 
         $decoded = json_decode($response, true);
         if (!is_array($decoded)) {
-            error_log('Respuesta invalida del agente IA: HTTP ' . $statusCode . ' body=' . $this->safeSnippet($response));
+            error_log(
+                'Respuesta invalida del agente IA: HTTP '
+                . $statusCode
+                . ' url='
+                . $effectiveUrl
+                . ' body='
+                . $this->safeSnippet($response)
+            );
             throw new HttpException('El agente IA devolvio una respuesta no JSON. Revisa /agent/health y los logs de la Python App en cPanel.', 502);
         }
 
@@ -52,7 +59,7 @@ final class AgentService
     }
 
     /**
-     * @return array{0:int,1:string|false}
+     * @return array{0:int,1:string|false,2:string}
      */
     private function postJson(string $url, string $body, string $secret): array
     {
@@ -69,13 +76,16 @@ final class AgentService
                     ],
                     CURLOPT_POSTFIELDS => $body,
                     CURLOPT_TIMEOUT => 45,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_MAXREDIRS => 3,
                 ]);
 
                 $response = curl_exec($handle);
                 $statusCode = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+                $effectiveUrl = (string) curl_getinfo($handle, CURLINFO_EFFECTIVE_URL);
                 curl_close($handle);
 
-                return [$statusCode > 0 ? $statusCode : 503, $response];
+                return [$statusCode > 0 ? $statusCode : 503, $response, $effectiveUrl !== '' ? $effectiveUrl : $url];
             }
         }
 
@@ -95,7 +105,7 @@ final class AgentService
 
         $response = @file_get_contents($url, false, $context);
 
-        return [$this->statusCode($http_response_header ?? []), $response];
+        return [$this->statusCode($http_response_header ?? []), $response, $url];
     }
 
     /**
