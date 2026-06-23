@@ -8,7 +8,10 @@ Endpoints:
   GET  /health
 """
 
+from __future__ import annotations
+
 import asyncio
+import unicodedata
 import uuid
 from typing import Optional
 
@@ -41,6 +44,34 @@ async def _get_graph():
 
     _graph = await build_graph()
     return _graph
+
+
+def _normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value.lower())
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+async def _try_direct_intent(
+    message: str,
+    empresa_id: int,
+    thread_id: str,
+    sucursal_id: Optional[int] = None,
+) -> Optional[ChatResponse]:
+    text = _normalize_text(message)
+    asks_today_sales = (
+        ("vendimos" in text or "ventas" in text or "venta" in text)
+        and ("hoy" in text or "dia" in text)
+    )
+
+    if asks_today_sales:
+        from tools.ventas import resumen_ventas_hoy
+
+        reply = await resumen_ventas_hoy.ainvoke(
+            {"empresa_id": empresa_id, "sucursal_id": sucursal_id}
+        )
+        return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
+
+    return None
 
 
 def _provider_ready() -> tuple[bool, str]:
@@ -114,6 +145,15 @@ async def _run(
     sucursal_id: Optional[int] = None,
     operator_name: str = "",
 ) -> ChatResponse:
+    direct = await _try_direct_intent(
+        message=message,
+        empresa_id=empresa_id,
+        thread_id=thread_id,
+        sucursal_id=sucursal_id,
+    )
+    if direct is not None:
+        return direct
+
     ready, reason = _provider_ready()
     if not ready:
         raise HTTPException(status_code=503, detail=reason)
