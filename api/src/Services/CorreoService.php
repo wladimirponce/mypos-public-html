@@ -318,7 +318,7 @@ final class CorreoService
     {
         $messageNo ??= $this->messageNumber($imap, $uid);
         try {
-            $structure = @imap_fetchstructure($imap, (string) $messageNo);
+            $structure = @imap_fetchstructure($imap, $messageNo);
             if (!is_object($structure)) {
                 return ['text' => $this->safeFetchRawBody($imap, $uid, $messageNo), 'html' => null];
             }
@@ -367,9 +367,9 @@ final class CorreoService
         }
 
         $section = $sectionPrefix === '' ? '1' : $sectionPrefix;
-        $content = @imap_fetchbody($imap, (string) $messageNo, $section, FT_PEEK);
+        $content = @imap_fetchbody($imap, $messageNo, $section, FT_PEEK);
         if (!is_string($content) || $content === '') {
-            $content = @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+            $content = @imap_fetchbody($imap, $uid, $section, FT_UID | FT_PEEK);
         }
         if (!is_string($content) || $content === '') {
             return;
@@ -406,14 +406,14 @@ final class CorreoService
         $candidates = ['', '1', '1.1', '1.2', '1.3', '2', '2.1', '2.2', '3', 'TEXT'];
         foreach ($candidates as $section) {
             $text = $section === ''
-                ? @imap_body($imap, (string) $messageNo, FT_PEEK)
-                : @imap_fetchbody($imap, (string) $messageNo, $section, FT_PEEK);
+                ? @imap_body($imap, $messageNo, FT_PEEK)
+                : @imap_fetchbody($imap, $messageNo, $section, FT_PEEK);
 
             if ((!is_string($text) || trim($text) === '') && $section === '') {
-                $text = @imap_body($imap, (string) $uid, FT_UID | FT_PEEK);
+                $text = @imap_body($imap, $uid, FT_UID | FT_PEEK);
             }
             if ((!is_string($text) || trim($text) === '') && $section !== '') {
-                $text = @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+                $text = @imap_fetchbody($imap, $uid, $section, FT_UID | FT_PEEK);
             }
 
             if (!is_string($text) || trim($text) === '') {
@@ -435,9 +435,9 @@ final class CorreoService
         $messageNo ??= $this->messageNumber($imap, $uid);
         $sections = ['1', '1.1', '1.2', '1.3', '2', '2.1', '2.2', '3', 'TEXT'];
         foreach ($sections as $section) {
-            $raw = @imap_fetchbody($imap, (string) $messageNo, $section, FT_PEEK);
+            $raw = @imap_fetchbody($imap, $messageNo, $section, FT_PEEK);
             if (!is_string($raw) || trim($raw) === '') {
-                $raw = @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+                $raw = @imap_fetchbody($imap, $uid, $section, FT_UID | FT_PEEK);
             }
             if (!is_string($raw) || trim($raw) === '') {
                 continue;
@@ -455,9 +455,9 @@ final class CorreoService
             }
         }
 
-        $header = @imap_fetchheader($imap, (string) $messageNo, FT_PREFETCHTEXT);
+        $header = @imap_fetchheader($imap, $messageNo, FT_PREFETCHTEXT);
         if (!is_string($header) || trim($header) === '') {
-            $header = @imap_fetchheader($imap, (string) $uid, FT_UID | FT_PREFETCHTEXT);
+            $header = @imap_fetchheader($imap, $uid, FT_UID | FT_PREFETCHTEXT);
         }
         if (is_string($header) && trim($header) !== '') {
             return "Este mensaje no contiene un cuerpo legible para IMAP.\n\n" . $this->summarizeHeaders($header);
@@ -515,9 +515,9 @@ final class CorreoService
     private function emptyBodyMessage(mixed $imap, int $uid, array $overview, ?int $messageNo = null): string
     {
         $messageNo ??= $this->messageNumber($imap, $uid);
-        $header = @imap_fetchheader($imap, (string) $messageNo, FT_PREFETCHTEXT);
+        $header = @imap_fetchheader($imap, $messageNo, FT_PREFETCHTEXT);
         if (!is_string($header) || trim($header) === '') {
-            $header = @imap_fetchheader($imap, (string) $uid, FT_UID | FT_PREFETCHTEXT);
+            $header = @imap_fetchheader($imap, $uid, FT_UID | FT_PREFETCHTEXT);
         }
         $summary = is_string($header) && trim($header) !== ''
             ? $this->summarizeHeaders($header)
