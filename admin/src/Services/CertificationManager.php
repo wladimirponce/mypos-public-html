@@ -1848,9 +1848,18 @@ class CertificationManager
             $key     = "t$tipo";
             $simInfo = $state['simulacion'][$key] ?? null;
             $agregadas = 0;
-            // El upload SII valida que el documento haya sido recibido. Por eso
-            // solo son elegibles folios cuyo envío terminó correctamente.
-            $foliosDisponibles = array_values(array_unique($simInfo['folios_ok'] ?? []));
+            // El upload SII valida que el documento haya sido RECIBIDO (aceptado).
+            // folios_ok puede quedar contaminado con folios que el SII rechazó
+            // individualmente (DTE-3-101 por reuso) aunque el envío diera EPR, y
+            // con folios de sobres viejos tras reenvíos. Se excluyen los folios
+            // marcados como failed y se prefieren los MÁS ALTOS (= sobre más
+            // reciente/limpio), evitando los folios bajos de intentos rechazados.
+            $failed = array_map('intval', array_column($simInfo['folios_failed'] ?? [], 'folio'));
+            $foliosDisponibles = array_values(array_diff(
+                array_unique(array_map('intval', $simInfo['folios_ok'] ?? [])),
+                $failed
+            ));
+            rsort($foliosDisponibles);
             foreach ($foliosDisponibles as $folio) {
                 $xmlFile = $this->simulationXmlPath((int)$tipo, (int)$folio);
                 if (!file_exists($xmlFile)) {
