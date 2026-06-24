@@ -3021,7 +3021,12 @@ function signDTE(string $xml, string $certPem, $privKey, string $idToSign): stri
     $digest  = base64_encode(sha1($c14n, true));
 
     preg_match('/-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----/s', $certPem, $mc);
-    $certB64 = preg_replace('/\s+/', '', $mc[1] ?? '');
+    // El base64 del certificado se re-parte en líneas de 64 (formato PEM estándar)
+    // para que ninguna línea del XML supere el límite del parser del SII
+    // (CHR-00002 "Line too long (4090)"). Seguro: base64 ignora el whitespace y
+    // X509Certificate no está dentro del SignedInfo firmado → no invalida la firma.
+    // Sin esto, los certificados RSA 4096 producen una línea de <Signature> > 4090.
+    $certB64 = trim(chunk_split(preg_replace('/\s+/', '', $mc[1] ?? ''), 64, "\n"));
 
     // Siempre usar xmldsig# — el SII valida server-side con ese namespace para todos
     // los tipos de documento (LibroCV, LibroGuia, EnvioDTE…). El LibroGuia_v10.xsd local
@@ -6416,7 +6421,12 @@ function buildSignedTokenXml(string $semilla, string $certPem, $privKey): string
 
     $digest = base64_encode(sha1($dom->documentElement->C14N(), true));
     preg_match('/-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----/s', $certPem, $mc);
-    $certB64 = preg_replace('/\s+/', '', $mc[1] ?? '');
+    // El base64 del certificado se re-parte en líneas de 64 (formato PEM estándar)
+    // para que ninguna línea del XML supere el límite del parser del SII
+    // (CHR-00002 "Line too long (4090)"). Seguro: base64 ignora el whitespace y
+    // X509Certificate no está dentro del SignedInfo firmado → no invalida la firma.
+    // Sin esto, los certificados RSA 4096 producen una línea de <Signature> > 4090.
+    $certB64 = trim(chunk_split(preg_replace('/\s+/', '', $mc[1] ?? ''), 64, "\n"));
 
     $signedInfoXml = '<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">'
                    . '<CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>'
@@ -6532,7 +6542,12 @@ function getToken(string $semilla, string $certPem, $privKey): string {
 
         // Certificado
         preg_match('/-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----/s', $certPem, $mc);
-        $certB64 = preg_replace('/\s+/', '', $mc[1] ?? '');
+        // El base64 del certificado se re-parte en líneas de 64 (formato PEM estándar)
+    // para que ninguna línea del XML supere el límite del parser del SII
+    // (CHR-00002 "Line too long (4090)"). Seguro: base64 ignora el whitespace y
+    // X509Certificate no está dentro del SignedInfo firmado → no invalida la firma.
+    // Sin esto, los certificados RSA 4096 producen una línea de <Signature> > 4090.
+    $certB64 = trim(chunk_split(preg_replace('/\s+/', '', $mc[1] ?? ''), 64, "\n"));
 
         // SignedInfo
         $signedInfoXml = '<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">'
