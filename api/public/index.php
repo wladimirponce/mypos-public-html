@@ -69,6 +69,8 @@ use Mypos\Middleware\RateLimitMiddleware;
 use Mypos\Middleware\SecurityHeadersMiddleware;
 use Mypos\Middleware\SubscriptionMiddleware;
 use Mypos\Middleware\TenantMiddleware;
+use Mypos\Services\AuditoriaService;
+use Mypos\Services\PermissionService;
 use Mypos\Support\AppConfig;
 use Mypos\Support\Env;
 use Mypos\Support\SafeLogger;
@@ -176,6 +178,66 @@ function protectedRoute(callable $handler, string $permission): callable
         }
 
         $handler($params);
+    };
+}
+
+function protectedAnyRoute(callable $handler, array $permissions): callable
+{
+    return static function (array $params = []) use ($handler, $permissions): void {
+        $claims = (new AuthMiddleware())->handle();
+        $userId = (int) $claims['user_id'];
+        $empresaId = 0;
+
+        if (isset($_GET['empresa_id'])) {
+            $empresaId = (int) $_GET['empresa_id'];
+        }
+
+        if ($empresaId <= 0 && isset($_POST['empresa_id'])) {
+            $empresaId = (int) $_POST['empresa_id'];
+        }
+
+        if ($empresaId <= 0) {
+            $payload = Request::json();
+            $empresaId = (int) ($payload['empresa_id'] ?? 0);
+        }
+
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        (new TenantMiddleware())->handle($userId, $empresaId);
+        (new SubscriptionMiddleware())->handle();
+
+        $permissionService = new PermissionService();
+        foreach ($permissions as $permission) {
+            if ($permissionService->userHasPermission($userId, $empresaId, (string) $permission)) {
+                if ($params === []) {
+                    $handler();
+                    return;
+                }
+
+                $handler($params);
+                return;
+            }
+        }
+
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'usuario_id' => $userId,
+            'modulo' => 'seguridad',
+            'accion' => 'permiso_denegado',
+            'entidad' => 'permisos',
+            'descripcion' => 'Acceso denegado por permiso insuficiente',
+            'metadata' => [
+                'permisos_requeridos' => $permissions,
+                'ruta' => $_SERVER['REQUEST_URI'] ?? null,
+                'metodo' => $_SERVER['REQUEST_METHOD'] ?? null,
+            ],
+            'severidad' => 'WARNING',
+            'resultado' => 'ERROR',
+        ]);
+
+        throw new HttpException('No autorizado para realizar esta accion', 403);
     };
 }
 
@@ -354,12 +416,12 @@ $router->put('/api/v1/configuracion/sucursales/{sucursal_id}', protectedRoute([$
 $router->get('/api/v1/configuracion/efectiva', protectedRoute([$configuracionController, 'efectiva'], 'configuracion.ver'));
 
 $correoController = new CorreoController();
-$router->get('/api/v1/correo/configuracion', protectedRoute([$correoController, 'configuracion'], 'correo.ver'));
-$router->put('/api/v1/correo/configuracion', protectedRoute([$correoController, 'guardarConfiguracion'], 'correo.configurar'));
-$router->post('/api/v1/correo/probar', protectedRoute([$correoController, 'probar'], 'correo.configurar'));
-$router->get('/api/v1/correo/inbox', protectedRoute([$correoController, 'inbox'], 'correo.ver'));
-$router->get('/api/v1/correo/mensajes/{uid}', protectedRoute([$correoController, 'mensaje'], 'correo.ver'));
-$router->post('/api/v1/correo/enviar', protectedRoute([$correoController, 'enviar'], 'correo.enviar'));
+$router->get('/api/v1/correo/configuracion', protectedAnyRoute([$correoController, 'configuracion'], ['correo.ver', 'configuracion.ver']));
+$router->put('/api/v1/correo/configuracion', protectedAnyRoute([$correoController, 'guardarConfiguracion'], ['correo.configurar', 'configuracion.editar']));
+$router->post('/api/v1/correo/probar', protectedAnyRoute([$correoController, 'probar'], ['correo.configurar', 'configuracion.editar']));
+$router->get('/api/v1/correo/inbox', protectedAnyRoute([$correoController, 'inbox'], ['correo.ver', 'configuracion.ver']));
+$router->get('/api/v1/correo/mensajes/{uid}', protectedAnyRoute([$correoController, 'mensaje'], ['correo.ver', 'configuracion.ver']));
+$router->post('/api/v1/correo/enviar', protectedAnyRoute([$correoController, 'enviar'], ['correo.enviar', 'configuracion.editar']));
 
 $uploadController = new UploadController();
 $router->post('/api/v1/uploads/productos', protectedRoute([$uploadController, 'producto'], 'uploads.crear'));
