@@ -5,15 +5,63 @@ declare(strict_types=1);
 namespace Mypos\Repositories;
 
 use PDO;
+use PDOException;
+use RuntimeException;
 
 final class CorreoRepository
 {
+    private bool $schemaAvailable = true;
+
     public function __construct(private readonly PDO $connection)
     {
+        $this->ensureSchema();
+    }
+
+    private function ensureSchema(): void
+    {
+        try {
+            $this->connection->query('SELECT 1 FROM correo_cuentas LIMIT 1');
+            return;
+        } catch (PDOException) {
+            // La tabla aun no existe en instalaciones donde la migracion no se ejecuto.
+        }
+
+        try {
+            $this->connection->exec(
+                "CREATE TABLE IF NOT EXISTS correo_cuentas (
+                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    empresa_id BIGINT UNSIGNED NOT NULL,
+                    email VARCHAR(190) NOT NULL,
+                    nombre VARCHAR(190) NULL,
+                    username VARCHAR(190) NOT NULL,
+                    password_encrypted TEXT NULL,
+                    imap_host VARCHAR(190) NOT NULL DEFAULT 'mail.mypos.cl',
+                    imap_port INT NOT NULL DEFAULT 993,
+                    imap_encryption ENUM('ssl','tls','none') NOT NULL DEFAULT 'ssl',
+                    smtp_host VARCHAR(190) NOT NULL DEFAULT 'mail.mypos.cl',
+                    smtp_port INT NOT NULL DEFAULT 465,
+                    smtp_encryption ENUM('ssl','tls','none') NOT NULL DEFAULT 'ssl',
+                    activo TINYINT(1) NOT NULL DEFAULT 1,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_correo_cuenta_empresa_email (empresa_id, email),
+                    KEY idx_correo_cuentas_empresa (empresa_id, activo),
+                    CONSTRAINT fk_correo_cuentas_empresa
+                        FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+                        ON DELETE RESTRICT ON UPDATE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            );
+        } catch (PDOException) {
+            $this->schemaAvailable = false;
+        }
     }
 
     public function findActiveAccount(int $empresaId): ?array
     {
+        if (!$this->schemaAvailable) {
+            return null;
+        }
+
         $statement = $this->connection->prepare(
             'SELECT id, empresa_id, email, nombre, username, password_encrypted,
                     imap_host, imap_port, imap_encryption, smtp_host, smtp_port,
@@ -31,6 +79,10 @@ final class CorreoRepository
 
     public function upsertAccount(array $data): array
     {
+        if (!$this->schemaAvailable) {
+            throw new RuntimeException('Tabla correo_cuentas no disponible. Ejecuta la migracion 073_correo_empresa.sql.');
+        }
+
         $statement = $this->connection->prepare(
             'INSERT INTO correo_cuentas (
                 empresa_id, email, nombre, username, password_encrypted,
