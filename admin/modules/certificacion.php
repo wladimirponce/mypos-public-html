@@ -1356,7 +1356,9 @@ async function certSimulacion(tipo) {
   if (statusEl) statusEl.innerHTML = `<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Enviando simulación T${tipo} (${cantidad} doc)… puede tardar varios minutos.</div>`;
   log(`Iniciando simulación T${tipo} (${cantidad} doc)…`, 'info');
   try {
-    const res = await api('cert_run_sim', { tipo });
+    // force=1: estos botones son REINTENTO explícito — descarta el folio anterior
+    // (que pudo quedar 'ok' pese a un rechazo DTE-3-101 del SII) y genera uno nuevo.
+    const res = await api('cert_run_sim', { tipo, force: 1 });
     if (res.ok || res.skipped) {
       if (badge) { badge.className='cert-badge cb-ok'; badge.textContent=`✓ OK (${res.enviados||0})`; }
       if (info)  info.textContent = `${res.enviados||0} enviados · ${res.fallidos||0} fallidos`;

@@ -204,6 +204,30 @@ try {
             $tipo = (int)($_GET['tipo'] ?? $_POST['tipo'] ?? 33);
             $cantDefault = $tipo === 33 ? 50 : 1;
             $cant = (int)($_GET['cantidad'] ?? $_POST['cantidad'] ?? $cantDefault);
+            // force=1: REINTENTO real. Descarta el estado de simulación de ESTE tipo
+            // (si no, runSimulacion hace skip por status 'ok') y convierte los folios
+            // que tenía en phantoms quemados, para que el nuevo intento NO los reuse.
+            // Necesario cuando un folio quedó 'ok' pero el SII lo rechazó individualmente
+            // (DTE-3-101): la muestra de ese folio validaba rojo en el portal.
+            if (isset($_GET['force']) && $_GET['force'] == '1') {
+                $st   = $mgr->loadState();
+                $simT = $st['simulacion']['t' . $tipo] ?? [];
+                $burn = array_merge(
+                    array_map('intval', $simT['folios_ok'] ?? []),
+                    array_map('intval', array_column($simT['folios_failed'] ?? [], 'folio'))
+                );
+                foreach (array_unique($burn) as $fBurn) {
+                    if ($fBurn > 0) {
+                        $st['pruebas']["__hw_t{$tipo}_f{$fBurn}__"] = [
+                            'tipo' => $tipo, 'folio' => $fBurn, 'status' => 'ok',
+                            'trackId' => null, 'error' => null, 'ts' => date('Y-m-d\TH:i:s'),
+                            'note' => 'phantom: folio de simulacion descartado en reintento forzado',
+                        ];
+                    }
+                }
+                unset($st['simulacion']['t' . $tipo]);
+                $mgr->saveStatePublic($st);
+            }
             $state = [];
             ob_clean();
             echo certJsonOut($mgr->runSimulacion($tipo, $cant, $state));
