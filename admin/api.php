@@ -2134,6 +2134,28 @@ function getRutCertificadoSeguro(string $certPem): string {
         return $m[1] . '-' . strtoupper($m[2]);
     }
 
+    // 2) RUT del TITULAR del certificado: OID 1.3.6.1.4.1.8321.1 dentro del
+    //    subjectAltName (otherName). Es la fuente autoritativa del RUT firmante
+    //    en TODOS los certificados de acreditados chilenos (E-Cert, Acepta, etc.).
+    //    PHP no decodifica este otherName (lo ve como "othername:<unsupported>"),
+    //    por eso se busca el OID directamente en el DER del certificado.
+    //    Crítico para certs con DOS RUTs en el SAN (titular en .1, otro en .2):
+    //    sin esto, el fallback genérico tomaba el RUT equivocado y el SII
+    //    rechazaba con (CRT-3-15) "RUT Envia Diferente al registrado en Upload".
+    if (preg_match('/-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----/s', $certPem, $mm)) {
+        $der = base64_decode(preg_replace('/\s+/', '', $mm[1]) ?? '', true);
+        if ($der !== false && $der !== '') {
+            $oidTitular = "\x06\x08\x2b\x06\x01\x04\x01\xc1\x01\x01"; // 1.3.6.1.4.1.8321.1
+            $pos = strpos($der, $oidTitular);
+            if ($pos !== false) {
+                $tail = substr($der, $pos + strlen($oidTitular), 32);
+                if (preg_match('/(\d{7,8})-([0-9Kk])/', $tail, $m)) {
+                    return $m[1] . '-' . strtoupper($m[2]);
+                }
+            }
+        }
+    }
+
     $certData = openssl_x509_parse($certPem);
 
     $subjectRut = $certData['subject']['serialNumber'] ?? '';
