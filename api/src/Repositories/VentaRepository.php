@@ -28,7 +28,7 @@ final class VentaRepository
     public function findProductById(int $empresaId, int $productId): ?array
     {
         $statement = $this->connection->prepare(
-            'SELECT p.id, p.empresa_id, p.codigo, p.sku, p.nombre, p.precio_venta,
+            'SELECT p.id, p.empresa_id, p.codigo, p.sku, p.nombre, p.descripcion, p.precio_venta,
                     p.precio_costo, p.costo_actual, p.controla_stock,
                     p.es_producto_peso, p.precio_por_kg, p.requiere_lote
              FROM productos p

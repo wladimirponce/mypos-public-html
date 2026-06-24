@@ -345,9 +345,21 @@ final class VentaService
             // Para productos vendidos por peso, precio_por_kg es el precio base (por kg).
             // La 'cantidad' del item ya viene en kg desde el frontend.
             $esPeso = (int) ($product['es_producto_peso'] ?? 0) === 1;
-            $precioBase = $esPeso && isset($product['precio_por_kg']) && (float) $product['precio_por_kg'] > 0
-                ? (float) $product['precio_por_kg']
-                : (float) $product['precio_venta'];
+
+            // Override de precio para ventas de balanza: el ticket de carnicería codifica
+            // el TOTAL del recibo en el EAN-13. Ese total llega como precio_unitario y solo
+            // se acepta para el producto contenedor genérico (descripción exacta "CARNICERIA"),
+            // que no representa un artículo con precio fijo.
+            $esContenedorBalanza = strtoupper(trim((string) ($product['descripcion'] ?? ''))) === 'CARNICERIA';
+            $precioOverride = isset($item['precio_unitario']) ? (int) round((float) $item['precio_unitario']) : 0;
+
+            if ($esContenedorBalanza && $precioOverride > 0) {
+                $precioBase = (float) $precioOverride;
+            } elseif ($esPeso && isset($product['precio_por_kg']) && (float) $product['precio_por_kg'] > 0) {
+                $precioBase = (float) $product['precio_por_kg'];
+            } else {
+                $precioBase = (float) $product['precio_venta'];
+            }
             $unitPrice = (int) round($precioBase);
             $unitCost = (int) ($product['precio_costo'] ?? $product['costo_actual'] ?? 0);
             $subtotal = (int) round($precioBase * $quantity);

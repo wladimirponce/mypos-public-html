@@ -522,13 +522,54 @@ final class ProductoRepository
             }
         }
 
+        // Fallback: la balanza de carnicería codifica el TOTAL del recibo, no un producto.
+        // Cuando ningún PLU coincide, devolvemos el producto contenedor genérico cuya
+        // descripción es exactamente "CARNICERIA" con el total embebido como precio.
+        $contenedor = $this->queryByDescripcion($empresaId, 'CARNICERIA');
+        if ($contenedor !== null) {
+            $contenedor['precio_balanza']   = $parsed['precio_total'];
+            $contenedor['es_producto_peso'] = 0;
+            return $contenedor;
+        }
+
         return null;
     }
 
     private function queryByCode(int $empresaId, string $code): ?array
     {
+        return $this->fetchProductoBase(
+            $empresaId,
+            '(p.codigo = :codigo OR p.sku = :sku OR pcb.codigo_barra = :codigo_barra)',
+            [
+                'codigo'            => $code,
+                'sku'               => $code,
+                'codigo_barra'      => $code,
+                'codigo_barra_join' => $code,
+            ]
+        );
+    }
+
+    private function queryByDescripcion(int $empresaId, string $descripcion): ?array
+    {
+        return $this->fetchProductoBase(
+            $empresaId,
+            'p.descripcion = :descripcion',
+            ['descripcion' => $descripcion]
+        );
+    }
+
+    /**
+     * SELECT base de un producto para POS. La cláusula WHERE adicional y sus
+     * parámetros se inyectan; :codigo_barra_join alimenta el LEFT JOIN del código
+     * de barra (vacío cuando no se busca por barra, p.ej. al buscar por descripción).
+     */
+    private function fetchProductoBase(int $empresaId, string $whereClause, array $params): ?array
+    {
+        $codigoBarraJoin = $params['codigo_barra_join'] ?? '';
+        unset($params['codigo_barra_join']);
+
         $statement = $this->connection->prepare(
-            'SELECT p.id, p.empresa_id, p.codigo, p.nombre, p.precio_venta, p.controla_stock,
+            'SELECT p.id, p.empresa_id, p.codigo, p.nombre, p.descripcion, p.precio_venta, p.controla_stock,
                     p.es_producto_peso, p.precio_por_kg,
                     r.nombre AS rubro, cc.nombre AS centro_costo, pcb.codigo_barra AS codigo_barra_usado,
                     pi.imagen_url AS imagen_principal,
@@ -550,16 +591,13 @@ final class ProductoRepository
              LEFT JOIN archivos_subidos a ON a.empresa_id = p.empresa_id AND a.ruta_relativa = pi.imagen_url AND a.estado = \'ACTIVO\'
              WHERE p.empresa_id = :empresa_id
                AND p.activo = 1
-               AND (p.codigo = :codigo OR p.sku = :sku OR pcb.codigo_barra = :codigo_barra)
+               AND ' . $whereClause . '
              LIMIT 1'
         );
-        $statement->execute([
-            'empresa_id'        => $empresaId,
-            'codigo'            => $code,
-            'sku'               => $code,
-            'codigo_barra_join' => $code,
-            'codigo_barra'      => $code,
-        ]);
+        $statement->execute(array_merge(
+            ['empresa_id' => $empresaId, 'codigo_barra_join' => $codigoBarraJoin],
+            $params
+        ));
         $row = $statement->fetch();
         if (!is_array($row)) {
             return null;
