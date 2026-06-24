@@ -294,6 +294,9 @@ final class CorreoService
             if ($body['text'] === null && is_string($body['html']) && $body['html'] !== '') {
                 $body['text'] = $this->htmlToText($body['html']);
             }
+            if (($body['text'] === null || trim((string) $body['text']) === '') && ($body['html'] === null || trim((string) $body['html']) === '')) {
+                $body['text'] = $this->fetchBodyByHeuristics($imap, $uid);
+            }
 
             return $body;
         } catch (Throwable $exception) {
@@ -379,6 +382,81 @@ final class CorreoService
         }
 
         return '';
+    }
+
+    private function fetchBodyByHeuristics(mixed $imap, int $uid): string
+    {
+        $sections = ['1', '1.1', '1.2', '1.3', '2', '2.1', '2.2', '3', 'TEXT'];
+        foreach ($sections as $section) {
+            $raw = @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+            if (!is_string($raw) || trim($raw) === '') {
+                continue;
+            }
+
+            foreach ($this->decodeCandidates($raw) as $candidate) {
+                $candidate = trim($candidate);
+                if ($candidate === '' || $this->looksLikeMimeHeadersOnly($candidate)) {
+                    continue;
+                }
+
+                return str_contains($candidate, '<') && str_contains($candidate, '>')
+                    ? $this->htmlToText($candidate)
+                    : $candidate;
+            }
+        }
+
+        $header = @imap_fetchheader($imap, (string) $uid, FT_UID | FT_PREFETCHTEXT);
+        if (is_string($header) && trim($header) !== '') {
+            return "Este mensaje no contiene un cuerpo legible para IMAP.\n\n" . $this->summarizeHeaders($header);
+        }
+
+        return 'Este mensaje no contiene un cuerpo legible para IMAP.';
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function decodeCandidates(string $raw): array
+    {
+        $base64 = preg_replace('/\s+/', '', $raw) ?? $raw;
+        $decodedBase64 = base64_decode($base64, true);
+
+        return array_values(array_filter([
+            $this->cleanText($raw),
+            $this->cleanText(quoted_printable_decode($raw)),
+            is_string($decodedBase64) ? $this->cleanText($decodedBase64) : null,
+            is_string($decodedBase64) ? $this->cleanText(quoted_printable_decode($decodedBase64)) : null,
+        ], static fn (?string $value): bool => $value !== null && trim($value) !== ''));
+    }
+
+    private function looksLikeMimeHeadersOnly(string $value): bool
+    {
+        $lines = array_values(array_filter(array_map('trim', explode("\n", str_replace("\r", "\n", $value)))));
+        if ($lines === []) {
+            return true;
+        }
+
+        $headerLines = 0;
+        foreach ($lines as $line) {
+            if (preg_match('/^(content-type|content-transfer-encoding|content-disposition|mime-version|boundary):/i', $line) === 1) {
+                $headerLines++;
+            }
+        }
+
+        return $headerLines > 0 && $headerLines >= count($lines) - 1;
+    }
+
+    private function summarizeHeaders(string $header): string
+    {
+        $keep = [];
+        foreach (explode("\n", str_replace("\r", "\n", $header)) as $line) {
+            $line = trim($line);
+            if (preg_match('/^(from|to|subject|date|content-type):/i', $line) === 1) {
+                $keep[] = $this->cleanText($line) ?? $line;
+            }
+        }
+
+        return implode("\n", array_slice($keep, 0, 8));
     }
 
     private function decodePart(string $content, int $encoding, ?string $charset = null): string
