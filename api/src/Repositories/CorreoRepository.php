@@ -38,6 +38,7 @@ final class CorreoRepository
                     imap_host VARCHAR(190) NOT NULL DEFAULT 'mail.mypos.cl',
                     imap_port INT NOT NULL DEFAULT 993,
                     imap_encryption ENUM('ssl','tls','none') NOT NULL DEFAULT 'ssl',
+                    imap_validate_cert TINYINT(1) NOT NULL DEFAULT 0,
                     smtp_host VARCHAR(190) NOT NULL DEFAULT 'mail.mypos.cl',
                     smtp_port INT NOT NULL DEFAULT 465,
                     smtp_encryption ENUM('ssl','tls','none') NOT NULL DEFAULT 'ssl',
@@ -51,8 +52,25 @@ final class CorreoRepository
                         ON DELETE RESTRICT ON UPDATE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
             );
+            $this->addColumnIfMissing('correo_cuentas', 'imap_validate_cert', 'ALTER TABLE correo_cuentas ADD COLUMN imap_validate_cert TINYINT(1) NOT NULL DEFAULT 0 AFTER imap_encryption');
         } catch (PDOException) {
             $this->schemaAvailable = false;
+        }
+    }
+
+    private function addColumnIfMissing(string $table, string $column, string $sql): void
+    {
+        try {
+            $statement = $this->connection->prepare(
+                'SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name'
+            );
+            $statement->execute(['table_name' => $table, 'column_name' => $column]);
+            if ((int) $statement->fetchColumn() === 0) {
+                $this->connection->exec($sql);
+            }
+        } catch (PDOException) {
+            // No bloquear lectura de configuracion si el usuario DB no puede alterar schema.
         }
     }
 
@@ -64,7 +82,7 @@ final class CorreoRepository
 
         $statement = $this->connection->prepare(
             'SELECT id, empresa_id, email, nombre, username, password_encrypted,
-                    imap_host, imap_port, imap_encryption, smtp_host, smtp_port,
+                    imap_host, imap_port, imap_encryption, imap_validate_cert, smtp_host, smtp_port,
                     smtp_encryption, activo, created_at, updated_at
              FROM correo_cuentas
              WHERE empresa_id = :empresa_id AND activo = 1
@@ -86,11 +104,11 @@ final class CorreoRepository
         $statement = $this->connection->prepare(
             'INSERT INTO correo_cuentas (
                 empresa_id, email, nombre, username, password_encrypted,
-                imap_host, imap_port, imap_encryption, smtp_host, smtp_port,
+                imap_host, imap_port, imap_encryption, imap_validate_cert, smtp_host, smtp_port,
                 smtp_encryption, activo
              ) VALUES (
                 :empresa_id, :email, :nombre, :username, :password_encrypted,
-                :imap_host, :imap_port, :imap_encryption, :smtp_host, :smtp_port,
+                :imap_host, :imap_port, :imap_encryption, :imap_validate_cert, :smtp_host, :smtp_port,
                 :smtp_encryption, :activo
              )
              ON DUPLICATE KEY UPDATE
@@ -100,6 +118,7 @@ final class CorreoRepository
                 imap_host = VALUES(imap_host),
                 imap_port = VALUES(imap_port),
                 imap_encryption = VALUES(imap_encryption),
+                imap_validate_cert = VALUES(imap_validate_cert),
                 smtp_host = VALUES(smtp_host),
                 smtp_port = VALUES(smtp_port),
                 smtp_encryption = VALUES(smtp_encryption),

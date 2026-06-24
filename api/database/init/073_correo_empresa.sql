@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS correo_cuentas (
     imap_host VARCHAR(190) NOT NULL DEFAULT 'mail.mypos.cl',
     imap_port INT NOT NULL DEFAULT 993,
     imap_encryption ENUM('ssl','tls','none') NOT NULL DEFAULT 'ssl',
+    imap_validate_cert TINYINT(1) NOT NULL DEFAULT 0,
     smtp_host VARCHAR(190) NOT NULL DEFAULT 'mail.mypos.cl',
     smtp_port INT NOT NULL DEFAULT 465,
     smtp_encryption ENUM('ssl','tls','none') NOT NULL DEFAULT 'ssl',

@@ -34,6 +34,7 @@ final class CorreoService
                     'imap_host' => 'mail.mypos.cl',
                     'imap_port' => 993,
                     'imap_encryption' => 'ssl',
+                    'imap_validate_cert' => 0,
                     'smtp_host' => 'mail.mypos.cl',
                     'smtp_port' => 465,
                     'smtp_encryption' => 'ssl',
@@ -66,6 +67,7 @@ final class CorreoService
             'imap_host' => $this->host($payload['imap_host'] ?? 'mail.mypos.cl'),
             'imap_port' => $this->port($payload['imap_port'] ?? 993),
             'imap_encryption' => $this->encryption($payload['imap_encryption'] ?? 'ssl'),
+            'imap_validate_cert' => $this->boolInt($payload['imap_validate_cert'] ?? 0),
             'smtp_host' => $this->host($payload['smtp_host'] ?? 'mail.mypos.cl'),
             'smtp_port' => $this->port($payload['smtp_port'] ?? 465),
             'smtp_encryption' => $this->encryption($payload['smtp_encryption'] ?? 'ssl'),
@@ -244,10 +246,18 @@ final class CorreoService
         } else {
             $flags .= '/notls';
         }
+        if ((int) ($account['imap_validate_cert'] ?? 0) === 0) {
+            $flags .= '/novalidate-cert';
+        }
         $mailbox = sprintf('{%s:%d%s}INBOX', $account['imap_host'], (int) $account['imap_port'], $flags);
         $imap = @imap_open($mailbox, (string) $account['username'], $this->password($account));
         if ($imap === false) {
-            throw new HttpException('No se pudo conectar al correo. Revisa usuario, password y servidor.', 422);
+            $error = imap_last_error();
+            $message = 'No se pudo conectar al correo. Revisa usuario, password y servidor.';
+            if (is_string($error) && trim($error) !== '') {
+                $message .= ' Detalle: ' . $this->safeImapError($error);
+            }
+            throw new HttpException($message, 422);
         }
 
         return $imap;
@@ -424,5 +434,15 @@ final class CorreoService
     {
         $text = trim((string) $value);
         return $text === '' ? null : $text;
+    }
+
+    private function boolInt(mixed $value): int
+    {
+        return filter_var($value, FILTER_VALIDATE_BOOL) ? 1 : 0;
+    }
+
+    private function safeImapError(string $error): string
+    {
+        return str_replace(["\r", "\n"], ' ', mb_substr($error, 0, 180));
     }
 }
