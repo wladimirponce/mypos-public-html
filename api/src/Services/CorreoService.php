@@ -129,16 +129,17 @@ final class CorreoService
         $imap = $this->openImap($account);
 
         try {
+            $messageNo = $this->messageNumber($imap, $uid);
             $overview = @imap_fetch_overview($imap, (string) $uid, FT_UID);
             if (!is_array($overview) || !isset($overview[0])) {
                 throw new HttpException('Mensaje no encontrado', 404);
             }
             $row = (array) $overview[0];
             try {
-                $body = $this->fetchBody($imap, $uid);
+                $body = $this->fetchBody($imap, $uid, $messageNo);
             } catch (Throwable $exception) {
                 error_log('[CorreoService] mensaje body error: ' . $exception->getMessage());
-                $fallbackBody = $this->safeFetchRawBody($imap, $uid);
+                $fallbackBody = $this->safeFetchRawBody($imap, $uid, $messageNo);
                 $body = [
                     'text' => $fallbackBody !== '' ? $fallbackBody : 'No se pudo leer el contenido de este mensaje.',
                     'html' => null,
@@ -148,7 +149,7 @@ final class CorreoService
                 trim((string) ($body['text'] ?? '')) === ''
                 && trim((string) ($body['html'] ?? '')) === ''
             ) {
-                $body['text'] = $this->emptyBodyMessage($imap, $uid, $row);
+                $body['text'] = $this->emptyBodyMessage($imap, $uid, $row, $messageNo);
                 $body['html'] = null;
             }
 
@@ -297,35 +298,42 @@ final class CorreoService
         return $imap;
     }
 
-    private function fetchBody(mixed $imap, int $uid): array
+    private function messageNumber(mixed $imap, int $uid): int
     {
+        $messageNo = function_exists('imap_msgno') ? @imap_msgno($imap, $uid) : 0;
+        return is_int($messageNo) && $messageNo > 0 ? $messageNo : $uid;
+    }
+
+    private function fetchBody(mixed $imap, int $uid, ?int $messageNo = null): array
+    {
+        $messageNo ??= $this->messageNumber($imap, $uid);
         try {
-            $structure = @imap_fetchstructure($imap, (string) $uid, FT_UID);
+            $structure = @imap_fetchstructure($imap, (string) $messageNo);
             if (!is_object($structure)) {
-                return ['text' => $this->safeFetchRawBody($imap, $uid), 'html' => null];
+                return ['text' => $this->safeFetchRawBody($imap, $uid, $messageNo), 'html' => null];
             }
 
             $body = ['text' => null, 'html' => null];
-            $this->collectBodyParts($imap, $uid, $structure, '', $body);
+            $this->collectBodyParts($imap, $uid, $structure, '', $body, $messageNo);
 
             if ($body['text'] === null && $body['html'] === null) {
-                $body['text'] = $this->safeFetchRawBody($imap, $uid);
+                $body['text'] = $this->safeFetchRawBody($imap, $uid, $messageNo);
             }
             if ($body['text'] === null && is_string($body['html']) && $body['html'] !== '') {
                 $body['text'] = $this->htmlToText($body['html']);
             }
             if (($body['text'] === null || trim((string) $body['text']) === '') && ($body['html'] === null || trim((string) $body['html']) === '')) {
-                $body['text'] = $this->fetchBodyByHeuristics($imap, $uid);
+                $body['text'] = $this->fetchBodyByHeuristics($imap, $uid, $messageNo);
             }
 
             return $body;
         } catch (Throwable $exception) {
             error_log('[CorreoService] fetchBody fallback: ' . $exception->getMessage());
-            return ['text' => $this->safeFetchRawBody($imap, $uid), 'html' => null];
+            return ['text' => $this->safeFetchRawBody($imap, $uid, $messageNo), 'html' => null];
         }
     }
 
-    private function collectBodyParts(mixed $imap, int $uid, object $part, string $sectionPrefix, array &$body): void
+    private function collectBodyParts(mixed $imap, int $uid, object $part, string $sectionPrefix, array &$body, int $messageNo): void
     {
         if (isset($part->parts) && is_array($part->parts)) {
             foreach ($part->parts as $index => $child) {
@@ -334,7 +342,7 @@ final class CorreoService
                 }
                 $section = $sectionPrefix === '' ? (string) ($index + 1) : $sectionPrefix . '.' . ($index + 1);
                 try {
-                    $this->collectBodyParts($imap, $uid, $child, $section, $body);
+                    $this->collectBodyParts($imap, $uid, $child, $section, $body, $messageNo);
                 } catch (Throwable $exception) {
                     error_log('[CorreoService] collectBodyParts skip: ' . $exception->getMessage());
                 }
@@ -349,7 +357,7 @@ final class CorreoService
         }
 
         $section = $sectionPrefix === '' ? '1' : $sectionPrefix;
-        $content = @imap_fetchbody($imap, (string) $uid, $section, FT_UID);
+        $content = @imap_fetchbody($imap, (string) $messageNo, $section, FT_PEEK);
         if (!is_string($content) || $content === '') {
             $content = @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
         }
@@ -372,23 +380,31 @@ final class CorreoService
         }
     }
 
-    private function safeFetchRawBody(mixed $imap, int $uid): string
+    private function safeFetchRawBody(mixed $imap, int $uid, ?int $messageNo = null): string
     {
         try {
-            return $this->fetchRawBody($imap, $uid);
+            return $this->fetchRawBody($imap, $uid, $messageNo);
         } catch (Throwable $exception) {
             error_log('[CorreoService] raw body error: ' . $exception->getMessage());
             return '';
         }
     }
 
-    private function fetchRawBody(mixed $imap, int $uid): string
+    private function fetchRawBody(mixed $imap, int $uid, ?int $messageNo = null): string
     {
-        $candidates = ['', '1', '1.1', '1.2', '2', '2.1', '2.2', 'TEXT'];
+        $messageNo ??= $this->messageNumber($imap, $uid);
+        $candidates = ['', '1', '1.1', '1.2', '1.3', '2', '2.1', '2.2', '3', 'TEXT'];
         foreach ($candidates as $section) {
             $text = $section === ''
-                ? @imap_body($imap, (string) $uid, FT_UID | FT_PEEK)
-                : @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+                ? @imap_body($imap, (string) $messageNo, FT_PEEK)
+                : @imap_fetchbody($imap, (string) $messageNo, $section, FT_PEEK);
+
+            if ((!is_string($text) || trim($text) === '') && $section === '') {
+                $text = @imap_body($imap, (string) $uid, FT_UID | FT_PEEK);
+            }
+            if ((!is_string($text) || trim($text) === '') && $section !== '') {
+                $text = @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+            }
 
             if (!is_string($text) || trim($text) === '') {
                 continue;
@@ -404,11 +420,15 @@ final class CorreoService
         return '';
     }
 
-    private function fetchBodyByHeuristics(mixed $imap, int $uid): string
+    private function fetchBodyByHeuristics(mixed $imap, int $uid, ?int $messageNo = null): string
     {
+        $messageNo ??= $this->messageNumber($imap, $uid);
         $sections = ['1', '1.1', '1.2', '1.3', '2', '2.1', '2.2', '3', 'TEXT'];
         foreach ($sections as $section) {
-            $raw = @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+            $raw = @imap_fetchbody($imap, (string) $messageNo, $section, FT_PEEK);
+            if (!is_string($raw) || trim($raw) === '') {
+                $raw = @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+            }
             if (!is_string($raw) || trim($raw) === '') {
                 continue;
             }
@@ -425,7 +445,10 @@ final class CorreoService
             }
         }
 
-        $header = @imap_fetchheader($imap, (string) $uid, FT_UID | FT_PREFETCHTEXT);
+        $header = @imap_fetchheader($imap, (string) $messageNo, FT_PREFETCHTEXT);
+        if (!is_string($header) || trim($header) === '') {
+            $header = @imap_fetchheader($imap, (string) $uid, FT_UID | FT_PREFETCHTEXT);
+        }
         if (is_string($header) && trim($header) !== '') {
             return "Este mensaje no contiene un cuerpo legible para IMAP.\n\n" . $this->summarizeHeaders($header);
         }
@@ -479,9 +502,13 @@ final class CorreoService
         return implode("\n", array_slice($keep, 0, 8));
     }
 
-    private function emptyBodyMessage(mixed $imap, int $uid, array $overview): string
+    private function emptyBodyMessage(mixed $imap, int $uid, array $overview, ?int $messageNo = null): string
     {
-        $header = @imap_fetchheader($imap, (string) $uid, FT_UID | FT_PREFETCHTEXT);
+        $messageNo ??= $this->messageNumber($imap, $uid);
+        $header = @imap_fetchheader($imap, (string) $messageNo, FT_PREFETCHTEXT);
+        if (!is_string($header) || trim($header) === '') {
+            $header = @imap_fetchheader($imap, (string) $uid, FT_UID | FT_PREFETCHTEXT);
+        }
         $summary = is_string($header) && trim($header) !== ''
             ? $this->summarizeHeaders($header)
             : '';
