@@ -2590,26 +2590,30 @@ function buildDocumentoXML(
     if ($globalContext) {
         $emp = $globalContext->getEmpresa();
         $rE  = $h($emp['rut']);
-        $rsE = $h($emp['razon_social']);
-        $gE  = $h(mb_substr($emp['giro'], 0, 80));
-        $dE  = $h($emp['direccion_origen']);
-        $cE  = $h($emp['comuna_origen'] ?? '');
-        $ciE = $h($emp['ciudad_origen'] ?? '');
+        $rsE = $h(mb_substr((string)$emp['razon_social'], 0, 100));
+        $gE  = $h(mb_substr((string)$emp['giro'], 0, 80));
+        $dE  = $h(mb_substr((string)$emp['direccion_origen'], 0, 70));
+        $cE  = $h(mb_substr((string)($emp['comuna_origen'] ?? ''), 0, 20));
+        $ciE = $h(mb_substr((string)($emp['ciudad_origen'] ?? ''), 0, 20));
         $actecoArr = json_decode($emp['acteco'] ?? '[]', true);
         $acteco = !empty($actecoArr) ? $actecoArr[0] : ACTECO;
     } else {
         $rE  = $h(RUT_EMISOR);
-        $rsE = $h(RAZON_SOCIAL);
+        $rsE = $h(mb_substr((string)RAZON_SOCIAL, 0, 100));
         $gE  = $h(mb_substr(GIRO_EMISOR, 0, 80));
-        $dE  = $h(DIRECCION);
-        $cE  = $h(COMUNA);
-        $ciE = $h(CIUDAD);
+        $dE  = $h(mb_substr((string)DIRECCION, 0, 70));
+        $cE  = $h(mb_substr((string)COMUNA, 0, 20));
+        $ciE = $h(mb_substr((string)CIUDAD, 0, 20));
         $acteco = ACTECO;
     }
 
     // Receptor (boletas pueden ir sin RUT / Consumidor Final)
+    // Campos truncados a su maxLength XSD (se corta el valor crudo ANTES de
+    // escapar para no partir una entidad HTML). Sin esto, un giro/razón social
+    // largo (ej. ACTECO de minimarket en el receptor de guías de traslado
+    // interno, donde receptor=emisor) da cvc-maxLength-valid. Multiempresa.
     $rRut  = $h($recep['rut']    ?? '');
-    $rNom  = $h($recep['nombre'] ?? '');
+    $rNom  = $h(mb_substr((string)($recep['nombre'] ?? ''), 0, 100));
 
     if (empty($rRut) && in_array($tipo, [39, 41])) {
         $rRut = '66666666-6';
@@ -2619,10 +2623,10 @@ function buildDocumentoXML(
     if (!in_array($tipo, [39, 41]) && ($rRut === '66666666-6' || empty($rRut))) {
         throw new Exception("El RUT 66.666.666-6 solo es vÃ¡lido para Boletas ElectrÃ³nicas. Para otros documentos como la GuÃ­a de Despacho (Tipo $tipo), debe ingresar un RUT de receptor vÃ¡lido.");
     }
-    $rGiro = $h($recep['giro']     ?? '');
-    $rDir  = $h($recep['direccion'] ?? '');
-    $rCom  = $h($recep['comuna']   ?? '');
-    $rCiu  = $h($recep['ciudad']   ?? '');
+    $rGiro = $h(mb_substr((string)($recep['giro']      ?? ''), 0, 40));
+    $rDir  = $h(mb_substr((string)($recep['direccion'] ?? ''), 0, 70));
+    $rCom  = $h(mb_substr((string)($recep['comuna']    ?? ''), 0, 20));
+    $rCiu  = $h(mb_substr((string)($recep['ciudad']    ?? ''), 0, 20));
 
     $xmlRecep  = "<Receptor>\n  <RUTRecep>$rRut</RUTRecep>\n  <RznSocRecep>$rNom</RznSocRecep>\n";
     if ($rGiro) $xmlRecep .= "  <GiroRecep>$rGiro</GiroRecep>\n";
