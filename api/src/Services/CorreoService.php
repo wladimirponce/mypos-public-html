@@ -171,6 +171,16 @@ final class CorreoService
             error_log('[CorreoService] mensaje error: ' . $exception->getMessage());
             $row = isset($row) && is_array($row) ? $row : [];
 
+            $summary = '';
+            try {
+                $summary = $this->emptyBodyMessage($imap, $uid, $row);
+            } catch (Throwable $summaryException) {
+                error_log('[CorreoService] resumen fallback error: ' . $summaryException->getMessage());
+            }
+            $bodyText = $summary !== ''
+                ? $summary
+                : 'No se pudo extraer el cuerpo de este mensaje desde IMAP, pero el mensaje existe en la bandeja.';
+
             return [
                 'mensaje' => [
                     'uid' => $uid,
@@ -179,7 +189,7 @@ final class CorreoService
                     'to' => $this->safeCleanHeader($row['to'] ?? ''),
                     'date' => (string) ($row['date'] ?? ''),
                     'seen' => !empty($row['seen']),
-                    'body_text' => 'No se pudo extraer el cuerpo de este mensaje desde IMAP, pero el mensaje existe en la bandeja.',
+                    'body_text' => $bodyText,
                     'body_html' => null,
                 ],
             ];
@@ -654,7 +664,19 @@ final class CorreoService
             }
         }
 
-        return preg_match('//u', $value) === 1 ? $value : utf8_encode($value);
+        if (preg_match('//u', $value) === 1) {
+            return $value;
+        }
+
+        if (function_exists('mb_convert_encoding')) {
+            $converted = @mb_convert_encoding($value, 'UTF-8', 'ISO-8859-1');
+            if (is_string($converted) && $converted !== '') {
+                return $converted;
+            }
+        }
+
+        // Ultimo recurso: descartar bytes no validos para no romper la respuesta.
+        return preg_replace('/[\x80-\xFF]/', '', $value) ?? '';
     }
 
     private function cleanText(mixed $value): ?string
