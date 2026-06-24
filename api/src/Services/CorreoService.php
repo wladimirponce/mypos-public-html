@@ -144,6 +144,13 @@ final class CorreoService
                     'html' => null,
                 ];
             }
+            if (
+                trim((string) ($body['text'] ?? '')) === ''
+                && trim((string) ($body['html'] ?? '')) === ''
+            ) {
+                $body['text'] = $this->emptyBodyMessage($imap, $uid, $row);
+                $body['html'] = null;
+            }
 
             return [
                 'mensaje' => [
@@ -457,6 +464,29 @@ final class CorreoService
         }
 
         return implode("\n", array_slice($keep, 0, 8));
+    }
+
+    private function emptyBodyMessage(mixed $imap, int $uid, array $overview): string
+    {
+        $header = @imap_fetchheader($imap, (string) $uid, FT_UID | FT_PREFETCHTEXT);
+        $summary = is_string($header) && trim($header) !== ''
+            ? $this->summarizeHeaders($header)
+            : '';
+
+        if ($summary === '') {
+            $summary = implode("\n", array_filter([
+                'From: ' . $this->decodeHeader((string) ($overview['from'] ?? '')),
+                'To: ' . $this->decodeHeader((string) ($overview['to'] ?? '')),
+                'Subject: ' . $this->decodeHeader((string) ($overview['subject'] ?? '')),
+                'Date: ' . (string) ($overview['date'] ?? ''),
+            ], static fn (string $line): bool => trim(substr($line, strpos($line, ':') + 1)) !== ''));
+        }
+
+        return trim(
+            "Este mensaje no contiene un cuerpo legible desde IMAP.\n\n" .
+            "Puede ser un aviso sin texto plano/HTML o un correo cuyo contenido viene solo como adjunto.\n\n" .
+            $summary
+        );
     }
 
     private function decodePart(string $content, int $encoding, ?string $charset = null): string
