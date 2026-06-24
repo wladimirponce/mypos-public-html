@@ -138,7 +138,11 @@ final class CorreoService
                 $body = $this->fetchBody($imap, $uid);
             } catch (Throwable $exception) {
                 error_log('[CorreoService] mensaje body error: ' . $exception->getMessage());
-                $body = ['text' => 'No se pudo leer el contenido de este mensaje.', 'html' => null];
+                $fallbackBody = $this->safeFetchRawBody($imap, $uid);
+                $body = [
+                    'text' => $fallbackBody !== '' ? $fallbackBody : 'No se pudo leer el contenido de este mensaje.',
+                    'html' => null,
+                ];
             }
 
             return [
@@ -278,20 +282,23 @@ final class CorreoService
         try {
             $structure = @imap_fetchstructure($imap, (string) $uid, FT_UID);
             if (!is_object($structure)) {
-                return ['text' => $this->fetchRawBody($imap, $uid), 'html' => null];
+                return ['text' => $this->safeFetchRawBody($imap, $uid), 'html' => null];
             }
 
             $body = ['text' => null, 'html' => null];
             $this->collectBodyParts($imap, $uid, $structure, '', $body);
 
             if ($body['text'] === null && $body['html'] === null) {
-                $body['text'] = $this->fetchRawBody($imap, $uid);
+                $body['text'] = $this->safeFetchRawBody($imap, $uid);
+            }
+            if ($body['text'] === null && is_string($body['html']) && $body['html'] !== '') {
+                $body['text'] = $this->htmlToText($body['html']);
             }
 
             return $body;
         } catch (Throwable $exception) {
             error_log('[CorreoService] fetchBody fallback: ' . $exception->getMessage());
-            return ['text' => $this->fetchRawBody($imap, $uid), 'html' => null];
+            return ['text' => $this->safeFetchRawBody($imap, $uid), 'html' => null];
         }
     }
 
@@ -303,7 +310,11 @@ final class CorreoService
                     continue;
                 }
                 $section = $sectionPrefix === '' ? (string) ($index + 1) : $sectionPrefix . '.' . ($index + 1);
-                $this->collectBodyParts($imap, $uid, $child, $section, $body);
+                try {
+                    $this->collectBodyParts($imap, $uid, $child, $section, $body);
+                } catch (Throwable $exception) {
+                    error_log('[CorreoService] collectBodyParts skip: ' . $exception->getMessage());
+                }
             }
             return;
         }
@@ -338,14 +349,36 @@ final class CorreoService
         }
     }
 
-    private function fetchRawBody(mixed $imap, int $uid): string
+    private function safeFetchRawBody(mixed $imap, int $uid): string
     {
-        $text = @imap_body($imap, (string) $uid, FT_UID | FT_PEEK);
-        if (!is_string($text)) {
+        try {
+            return $this->fetchRawBody($imap, $uid);
+        } catch (Throwable $exception) {
+            error_log('[CorreoService] raw body error: ' . $exception->getMessage());
             return '';
         }
+    }
 
-        return trim(quoted_printable_decode($text));
+    private function fetchRawBody(mixed $imap, int $uid): string
+    {
+        $candidates = ['', '1', '1.1', '1.2', '2', '2.1', '2.2', 'TEXT'];
+        foreach ($candidates as $section) {
+            $text = $section === ''
+                ? @imap_body($imap, (string) $uid, FT_UID | FT_PEEK)
+                : @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+
+            if (!is_string($text) || trim($text) === '') {
+                continue;
+            }
+
+            $decoded = $this->toUtf8(quoted_printable_decode($text));
+            $decoded = trim($decoded);
+            if ($decoded !== '') {
+                return $decoded;
+            }
+        }
+
+        return '';
     }
 
     private function decodePart(string $content, int $encoding, ?string $charset = null): string
@@ -491,6 +524,19 @@ final class CorreoService
         $clean = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $text);
 
         return is_string($clean) ? $clean : $text;
+    }
+
+    private function htmlToText(string $html): string
+    {
+        $html = preg_replace('/<style[\s\S]*?<\/style>/i', ' ', $html) ?? $html;
+        $html = preg_replace('/<script[\s\S]*?<\/script>/i', ' ', $html) ?? $html;
+        $html = preg_replace('/<br\s*\/?>/i', "\n", $html) ?? $html;
+        $html = preg_replace('/<\/p\s*>/i', "\n\n", $html) ?? $html;
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace("/[ \t]+/", ' ', $text) ?? $text;
+        $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
+
+        return trim($text);
     }
 
     private function addresses(mixed $value): array
