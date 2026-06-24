@@ -16,7 +16,7 @@ register_shutdown_function(function () {
             header('Content-Type: application/json; charset=UTF-8');
         }
         while (ob_get_level() > 0) { ob_end_clean(); }
-        echo json_encode([
+        echo certJsonOut([
             'ok'    => false,
             'error' => 'Error fatal del servidor: ' . $e['message']
                        . ' (' . basename($e['file']) . ':' . $e['line'] . ')',
@@ -24,6 +24,25 @@ register_shutdown_function(function () {
         ]);
     }
 });
+
+/**
+ * Serializa a JSON de forma SEGURA. json_encode() devuelve FALSE si el array
+ * contiene bytes no-UTF-8 (típico: mensajes del SII en ISO-8859-1, errores XSD
+ * de libxml, nombres de empresa con acentos) → un `echo certJsonOut(false)` deja
+ * la respuesta VACÍA y el front muestra "Unexpected end of JSON input". Con
+ * JSON_INVALID_UTF8_SUBSTITUTE los bytes inválidos se sustituyen en vez de fallar,
+ * y si aun así falla, se devuelve un JSON de error legible. Multiempresa.
+ */
+function certJsonOut($data, int $flags = 0): string {
+    $j = json_encode($data, $flags | JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE);
+    if ($j === false) {
+        $j = json_encode(
+            ['ok' => false, 'error' => 'Respuesta no serializable: ' . json_last_error_msg()],
+            JSON_INVALID_UTF8_SUBSTITUTE
+        );
+    }
+    return $j !== false ? $j : '{"ok":false,"error":"json_encode fallo"}';
+}
 
 ob_start();
 define('DTE_API_BOOTSTRAP_ONLY', true);
@@ -118,13 +137,13 @@ try {
         // ── Estado ──────────────────────────────────────────────
         case 'cert_state':
             ob_clean();
-            echo json_encode(['ok' => true, 'estado' => $mgr->loadState()]);
+            echo certJsonOut(['ok' => true, 'estado' => $mgr->loadState()]);
             break;
 
         case 'cert_empresa_info':
             ob_clean();
             $empData = $globalContext->getEmpresa();
-            echo json_encode([
+            echo certJsonOut([
                 'ok'        => true,
                 'rut'       => $globalContext->getRut(),
                 'ambiente'  => $globalContext->getAmbiente(),
@@ -136,7 +155,7 @@ try {
 
         case 'cert_reset':
             ob_clean();
-            echo json_encode($mgr->resetState());
+            echo certJsonOut($mgr->resetState());
             break;
 
         // ── Ejecución ────────────────────────────────────────────
@@ -160,7 +179,7 @@ try {
                     'mensaje' => 'Las boletas del set SII se ejecutan solo con cert_boletas (sobre + RCOF).',
                 ],
             ];
-            echo json_encode(['ok' => true, 'resultados' => $log, 'estado' => $mgr->loadState()]);
+            echo certJsonOut(['ok' => true, 'resultados' => $log, 'estado' => $mgr->loadState()]);
             break;
 
         case 'cert_run_pruebas':
@@ -177,7 +196,7 @@ try {
                     fn($id) => !str_starts_with($id, 'B-')
                   ))
                 : [];   // vacío = todos (incluyendo boletas, aunque se maneja aparte)
-            echo json_encode(['ok' => true, 'resultados' => $mgr->runPruebas($state, $caseIds), 'estado' => $mgr->loadState()]);
+            echo certJsonOut(['ok' => true, 'resultados' => $mgr->runPruebas($state, $caseIds), 'estado' => $mgr->loadState()]);
             break;
 
         case 'cert_run_sim':
@@ -187,7 +206,7 @@ try {
             $cant = (int)($_GET['cantidad'] ?? $_POST['cantidad'] ?? $cantDefault);
             $state = [];
             ob_clean();
-            echo json_encode($mgr->runSimulacion($tipo, $cant, $state));
+            echo certJsonOut($mgr->runSimulacion($tipo, $cant, $state));
             break;
 
         case 'cert_sim_all':
@@ -200,7 +219,7 @@ try {
                 'sim_56' => $mgr->runSimulacion(56, 1, $state),
                 'sim_61' => $mgr->runSimulacion(61, 1, $state),
             ];
-            echo json_encode(['ok' => true, 'resultados' => $results, 'estado' => $mgr->loadState()]);
+            echo certJsonOut(['ok' => true, 'resultados' => $results, 'estado' => $mgr->loadState()]);
             break;
 
         // ── Resetear SOLO el estado de simulación (pruebas y libros intactos) ────
@@ -209,7 +228,7 @@ try {
             $state = $mgr->loadState();
             $state['simulacion'] = [];
             $mgr->saveStatePublic($state);
-            echo json_encode(['ok' => true, 'mensaje' => 'Estado de simulación reiniciado. Set de Pruebas y libros intactos.']);
+            echo certJsonOut(['ok' => true, 'mensaje' => 'Estado de simulación reiniciado. Set de Pruebas y libros intactos.']);
             break;
 
         // ── Simulación en sobre único (requisito SII: 20-100 docs, 1 TrackID) ─
@@ -222,7 +241,7 @@ try {
             $tiposParam = trim($_GET['tipos'] ?? $_POST['tipos'] ?? '33');
             $tiposSobre = array_values(array_filter(array_map('intval', explode(',', $tiposParam))));
             if (empty($tiposSobre)) $tiposSobre = [33];
-            echo json_encode($mgr->runSimulacionSobre($tiposSobre, $cantSobre));
+            echo certJsonOut($mgr->runSimulacionSobre($tiposSobre, $cantSobre));
             break;
 
         // ── Correr solo casos de tipos específicos (ej: T33+T52 sin tocar T61/T56) ──
@@ -233,7 +252,7 @@ try {
             $tiposParam  = $_GET['tipos'] ?? '33,52';
             $tiposFiltro = array_map('intval', array_filter(explode(',', $tiposParam)));
             if (empty($tiposFiltro)) {
-                echo json_encode(['ok' => false, 'error' => 'Parámetro tipos inválido.']);
+                echo certJsonOut(['ok' => false, 'error' => 'Parámetro tipos inválido.']);
                 break;
             }
             $offsetMap   = $mgr->certFolioOffsetMap();
@@ -242,11 +261,11 @@ try {
                 fn($m) => in_array($m['tipo'], $tiposFiltro, true)
             ));
             if (empty($casesFiltro)) {
-                echo json_encode(['ok' => false, 'error' => 'No hay casos para tipos: ' . $tiposParam]);
+                echo certJsonOut(['ok' => false, 'error' => 'No hay casos para tipos: ' . $tiposParam]);
                 break;
             }
             $state = [];
-            echo json_encode([
+            echo certJsonOut([
                 'ok'        => true,
                 'tipos'     => $tiposFiltro,
                 'casos'     => $casesFiltro,
@@ -258,7 +277,7 @@ try {
         case 'cert_retry':
             set_time_limit(600);
             ob_clean();
-            echo json_encode($mgr->retryFailed());
+            echo certJsonOut($mgr->retryFailed());
             break;
 
         // ── Caso individual ──────────────────────────────────────
@@ -267,7 +286,7 @@ try {
             $cid  = $_GET['cid'] ?? $_POST['cid'] ?? '';
             if (str_starts_with($cid, 'B-CASO-')) {
                 ob_clean();
-                echo json_encode([
+                echo certJsonOut([
                     'ok' => false,
                     'error' => 'Las boletas del set SII no se envian individualmente. Use Certificar Boletas (sobre + RCOF).',
                 ]);
@@ -277,7 +296,7 @@ try {
             $state = [];
             $resultados = $mgr->runPruebas($state, [$cid]);
             $resCaso = $resultados[$cid] ?? ['status' => 'failed', 'error' => 'Sin resultado'];
-            echo json_encode([
+            echo certJsonOut([
                 'ok'    => ($resCaso['status'] ?? '') === 'ok',
                 'tipo'  => $resCaso['tipo'] ?? null,
                 'folio' => $resCaso['folio'] ?? null,
@@ -297,7 +316,7 @@ try {
             $cant = (int)($_GET['cantidad'] ?? $_POST['cantidad'] ?? 50);
             $state = [];
             ob_clean();
-            echo json_encode($mgr->runSimulacion($tipo, $cant, $state));
+            echo certJsonOut($mgr->runSimulacion($tipo, $cant, $state));
             break;
 
         // ── Libros de certificación ──────────────────────────────
@@ -316,7 +335,7 @@ try {
                 'cert_libro_guias'   => $mgr->runLibroGuias($periodoLib),
                 'cert_libro_compras' => $mgr->runLibroCompras($periodoLib),
             };
-            echo json_encode($resLibro);
+            echo certJsonOut($resLibro);
             break;
 
         // ── Restaurar estado desde XMLs existentes en tmp/ ───────
@@ -330,7 +349,7 @@ try {
             $bodyData = json_decode($body, true);
             $casos = $bodyData['casos'] ?? ($_POST['casos'] ?? []);
             if (empty($casos) || !is_array($casos)) {
-                echo json_encode(['ok' => false, 'error' => 'Debe enviar casos con folio, tipo y trackId.']);
+                echo certJsonOut(['ok' => false, 'error' => 'Debe enviar casos con folio, tipo y trackId.']);
                 break;
             }
             $state   = $mgr->loadState();
@@ -366,7 +385,7 @@ try {
             }
 
             $mgr->saveStatePublic($state);
-            echo json_encode([
+            echo certJsonOut([
                 'ok'       => true,
                 'restored' => $restored,
                 'missing'  => $missing,
@@ -386,7 +405,7 @@ try {
             $valorAt = trim($_GET['valor'] ?? $_POST['valor'] ?? '');
             $setMgrAt = new \App\Services\CertSetManager($globalContext);
             $okAt = $setMgrAt->actualizarAtencion($campoAt, $valorAt);
-            echo json_encode([
+            echo certJsonOut([
                 'ok'    => $okAt,
                 'campo' => $campoAt,
                 'valor' => $valorAt,
@@ -400,7 +419,7 @@ try {
             $tipo  = (int)($_GET['tipo']  ?? $_POST['tipo']  ?? 0);
             $folio = (int)($_GET['folio'] ?? $_POST['folio'] ?? 0);
             if (!$tipo || !$folio) {
-                echo json_encode(['ok' => false, 'error' => 'Parámetros tipo y folio son requeridos.']);
+                echo certJsonOut(['ok' => false, 'error' => 'Parámetros tipo y folio son requeridos.']);
                 break;
             }
             $state = $mgr->loadState();
@@ -415,7 +434,7 @@ try {
                 'note'    => 'phantom: folio quemado en SII, solo avanza HW',
             ];
             $mgr->saveStatePublic($state);
-            echo json_encode([
+            echo certJsonOut([
                 'ok'      => true,
                 'mensaje' => "HW avanzado: T{$tipo} folio {$folio} registrado en state.",
             ]);
@@ -442,7 +461,7 @@ try {
             $orphaned = $stmtSel->fetchAll(\PDO::FETCH_ASSOC);
 
             if (empty($orphaned)) {
-                echo json_encode(['ok' => true, 'mensaje' => 'No hay folios huérfanos.', 'limpiados' => 0]);
+                echo certJsonOut(['ok' => true, 'mensaje' => 'No hay folios huérfanos.', 'limpiados' => 0]);
                 break;
             }
 
@@ -459,7 +478,7 @@ try {
                 $limpiados[] = "T{$tipo}F{$folio}";
             }
 
-            echo json_encode([
+            echo certJsonOut([
                 'ok'       => true,
                 'mensaje'  => 'Folios huérfanos eliminados. Puede reintentar los casos.',
                 'limpiados'=> count($limpiados),
@@ -471,33 +490,33 @@ try {
         case 'cert_set_upload':
             ob_clean();
             if (empty($_FILES['set_file']['tmp_name'])) {
-                echo json_encode(['ok' => false, 'error' => 'Adjunte el archivo .txt del Set de Pruebas del SII.']);
+                echo certJsonOut(['ok' => false, 'error' => 'Adjunte el archivo .txt del Set de Pruebas del SII.']);
                 break;
             }
             $setMgr = new \App\Services\CertSetManager($globalContext);
             $raw    = file_get_contents($_FILES['set_file']['tmp_name']);
-            echo json_encode($setMgr->importarTxt($raw, $_FILES['set_file']['name'] ?? 'set.txt'));
+            echo certJsonOut($setMgr->importarTxt($raw, $_FILES['set_file']['name'] ?? 'set.txt'));
             break;
 
         // ── Set de Certificación: ver el set vinculado ───────────
         case 'cert_set_get':
             ob_clean();
             $setMgr = new \App\Services\CertSetManager($globalContext);
-            echo json_encode(['ok' => true, 'set' => $setMgr->load()]);
+            echo certJsonOut(['ok' => true, 'set' => $setMgr->load()]);
             break;
 
         // ── Set de Certificación: eliminar vínculo ───────────────
         case 'cert_set_delete':
             ob_clean();
             $setMgr = new \App\Services\CertSetManager($globalContext);
-            echo json_encode(['ok' => $setMgr->delete()]);
+            echo certJsonOut(['ok' => $setMgr->delete()]);
             break;
 
         // ── Certificación de BOLETAS: set en un sobre + RCOF ──────
         case 'cert_boletas':
             set_time_limit(600);
             ob_clean();
-            echo json_encode($mgr->certificarSetBoletas());
+            echo certJsonOut($mgr->certificarSetBoletas());
             break;
 
         // ── Muestras impresas: entrega los XML + opts para el renderer cliente ──
@@ -505,7 +524,7 @@ try {
             ob_clean();
             $empM   = $globalContext->getEmpresa();
             $esCert = $globalContext->getAmbiente() === 'CERTIFICACION';
-            echo json_encode([
+            echo certJsonOut([
                 'ok'   => true,
                 'dtes' => $mgr->getMuestrasXmls(),
                 'opts' => [
@@ -526,7 +545,7 @@ try {
             ob_clean();
             $empM   = $globalContext->getEmpresa();
             $esCert = $globalContext->getAmbiente() === 'CERTIFICACION';
-            echo json_encode($mgr->generarMuestrasPdf([
+            echo certJsonOut($mgr->generarMuestrasPdf([
                 'unidadSII'  => $empM['unidad_sii'] ?? 'S.I.I.',
                 'resolNum'   => $esCert ? 0 : (int)($empM['numero_resolucion'] ?? 0),
                 'resolFch'   => $esCert ? '2021-01-04' : ($empM['fecha_resolucion'] ?? ''),
@@ -540,7 +559,7 @@ try {
             $pdfDir = $globalContext->getTmpPath() . 'muestras_pdf/';
             $files = array_map('basename', glob($pdfDir . '*.pdf') ?: []);
             sort($files, SORT_NATURAL);
-            echo json_encode(['ok' => true, 'archivos' => $files]);
+            echo certJsonOut(['ok' => true, 'archivos' => $files]);
             break;
 
         // ── Descarga individual de una muestra PDF generada ──
@@ -573,7 +592,7 @@ try {
                 throw new \Exception('Debe proporcionar el XML de intercambio (pegar o subir archivo).');
             }
             ob_clean();
-            echo json_encode($mgr->responderIntercambio($xml));
+            echo certJsonOut($mgr->responderIntercambio($xml));
             break;
 
         // ── Descarga de las respuestas de intercambio generadas ──
@@ -610,7 +629,7 @@ try {
                 if (preg_match('/-1$/', (string)($c['caso'] ?? ''))) { $caso1 = $c; break; }
             }
             if (!$caso1) {
-                echo json_encode(['ok' => false, 'error' => 'No se encontró caso -1 en el set. Asegúrese de haber subido el set de pruebas.']);
+                echo certJsonOut(['ok' => false, 'error' => 'No se encontró caso -1 en el set. Asegúrese de haber subido el set de pruebas.']);
                 break;
             }
             $caseId2   = 'F-' . $caso1['caso'];
@@ -620,7 +639,7 @@ try {
                 JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_INVALID_UTF8_SUBSTITUTE
             );
             if ($diagJson === false) {
-                echo json_encode(['ok' => false, 'error' => 'json_encode falló: ' . json_last_error_msg(),
+                echo certJsonOut(['ok' => false, 'error' => 'json_encode falló: ' . json_last_error_msg(),
                                   'dte_ids' => $diagData['dte_ids'] ?? [],
                                   'envio_raw_ids' => $diagData['envio_raw_ids'] ?? [],
                                   'envio_firmado_ids' => $diagData['envio_firmado_ids'] ?? []]);
@@ -701,15 +720,15 @@ try {
                 $out['raw_primeras_100_lineas']= "(envio_raw_T*.xml no existe — si quieres este diagnóstico activa el guardado en sendDTE)";
             }
 
-            echo json_encode($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+            echo certJsonOut($out, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
             break;
 
         default:
             ob_clean();
-            echo json_encode(['ok' => false, 'error' => "Acción '$action' no soportada en cert_bridge."]);
+            echo certJsonOut(['ok' => false, 'error' => "Acción '$action' no soportada en cert_bridge."]);
     }
 
 } catch (\Throwable $e) {
     ob_clean();
-    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+    echo certJsonOut(['ok' => false, 'error' => $e->getMessage()]);
 }

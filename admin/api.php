@@ -6746,14 +6746,25 @@ function uploadDTE(string $envioDTE, string $token, ?string $certPem = null): ar
 
     $errMsg = $trackId ? "" : ($mD[1] ?? substr(strip_tags($resp ?? 'sin respuesta'), 0, 500));
 
+    // El SII responde en ISO-8859-1. Si el mensaje (rechazo de carátula/schema,
+    // muchas veces con acentos/ñ) no es UTF-8 válido, json_encode() devuelve FALSE
+    // y la respuesta del bridge sale VACÍA → el front muestra "Unexpected end of
+    // JSON input" sin pista. Normalizar a UTF-8 evita ese blanco.
+    $toUtf8 = static function (string $s): string {
+        if ($s === '' || mb_check_encoding($s, 'UTF-8')) return $s;
+        return mb_convert_encoding($s, 'UTF-8', 'ISO-8859-1');
+    };
+    $errMsg = $toUtf8($errMsg);
+    $estado = $toUtf8($estado);
+
     return [
         'ok'      => !empty($trackId),
         'trackId' => $trackId,
         'estado'  => $estado,
-        'error'   => "Error en envÃ­o: $errMsg",
+        'error'   => "Error en envío: $errMsg",
         'mensaje' => $trackId
             ? "Enviado. TrackID: $trackId | Estado: $estado"
-            : "Error en envÃ­o: $errMsg",
+            : "Error en envío: $errMsg",
     ];
 }
 
