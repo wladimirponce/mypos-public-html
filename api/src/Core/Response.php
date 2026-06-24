@@ -94,7 +94,14 @@ final class Response
         http_response_code($statusCode);
         header('Content-Type: application/json; charset=utf-8');
 
-        echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($json === false) {
+            http_response_code(500);
+            echo '{"success":false,"data":null,"message":"Error interno del servidor.","errors":null}';
+            exit;
+        }
+
+        echo $json;
         exit;
     }
 }

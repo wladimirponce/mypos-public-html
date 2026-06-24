@@ -129,25 +129,35 @@ final class CorreoService
         $imap = $this->openImap($account);
 
         try {
-            $overview = imap_fetch_overview($imap, (string) $uid, FT_UID);
+            $overview = @imap_fetch_overview($imap, (string) $uid, FT_UID);
             if (!is_array($overview) || !isset($overview[0])) {
                 throw new HttpException('Mensaje no encontrado', 404);
             }
             $row = (array) $overview[0];
-            $body = $this->fetchBody($imap, $uid);
+            try {
+                $body = $this->fetchBody($imap, $uid);
+            } catch (Throwable $exception) {
+                error_log('[CorreoService] mensaje body error: ' . $exception->getMessage());
+                $body = ['text' => 'No se pudo leer el contenido de este mensaje.', 'html' => null];
+            }
 
             return [
                 'mensaje' => [
                     'uid' => $uid,
-                    'subject' => $this->decodeHeader((string) ($row['subject'] ?? '(sin asunto)')),
-                    'from' => $this->decodeHeader((string) ($row['from'] ?? '')),
-                    'to' => $this->decodeHeader((string) ($row['to'] ?? '')),
+                    'subject' => $this->cleanText($this->decodeHeader((string) ($row['subject'] ?? '(sin asunto)'))),
+                    'from' => $this->cleanText($this->decodeHeader((string) ($row['from'] ?? ''))),
+                    'to' => $this->cleanText($this->decodeHeader((string) ($row['to'] ?? ''))),
                     'date' => (string) ($row['date'] ?? ''),
                     'seen' => !empty($row['seen']),
-                    'body_text' => $body['text'],
-                    'body_html' => $body['html'],
+                    'body_text' => $this->cleanText($body['text']),
+                    'body_html' => $this->cleanText($body['html']),
                 ],
             ];
+        } catch (HttpException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            error_log('[CorreoService] mensaje error: ' . $exception->getMessage());
+            throw new HttpException('No se pudo leer este mensaje de correo.', 422);
         } finally {
             imap_close($imap);
         }
@@ -313,7 +323,7 @@ final class CorreoService
             return;
         }
 
-        $content = trim($this->decodePart($content, (int) ($part->encoding ?? 0)));
+            $content = trim($this->decodePart($content, (int) ($part->encoding ?? 0), $this->partCharset($part)));
         if ($content === '') {
             return;
         }
@@ -338,13 +348,15 @@ final class CorreoService
         return trim(quoted_printable_decode($text));
     }
 
-    private function decodePart(string $content, int $encoding): string
+    private function decodePart(string $content, int $encoding, ?string $charset = null): string
     {
-        return match ($encoding) {
+        $decoded = match ($encoding) {
             3 => base64_decode($content, true) ?: '',
             4 => quoted_printable_decode($content),
             default => $content,
         };
+
+        return $this->toUtf8($decoded, $charset);
     }
 
     private function publicAccount(array $account): array
@@ -412,9 +424,73 @@ final class CorreoService
         }
         $decoded = '';
         foreach ($parts as $part) {
-            $decoded .= (string) ($part->text ?? '');
+            $text = (string) ($part->text ?? '');
+            $charset = isset($part->charset) ? (string) $part->charset : null;
+            $decoded .= $this->toUtf8($text, $charset);
         }
-        return $decoded;
+        return $this->cleanText($decoded) ?? '';
+    }
+
+    private function partCharset(object $part): ?string
+    {
+        foreach (['parameters', 'dparameters'] as $property) {
+            if (!isset($part->{$property}) || !is_array($part->{$property})) {
+                continue;
+            }
+            foreach ($part->{$property} as $parameter) {
+                if (!is_object($parameter)) {
+                    continue;
+                }
+                $attribute = strtolower((string) ($parameter->attribute ?? ''));
+                if ($attribute === 'charset') {
+                    return (string) ($parameter->value ?? '');
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function toUtf8(string $value, ?string $charset = null): string
+    {
+        $charset = trim((string) $charset);
+        if ($charset === '' || strcasecmp($charset, 'default') === 0) {
+            $charset = 'UTF-8';
+        }
+
+        if (strcasecmp($charset, 'UTF-8') === 0 && preg_match('//u', $value) === 1) {
+            return $value;
+        }
+
+        if (function_exists('iconv')) {
+            $converted = @iconv($charset, 'UTF-8//IGNORE', $value);
+            if (is_string($converted) && $converted !== '') {
+                return $converted;
+            }
+            $converted = @iconv('ISO-8859-1', 'UTF-8//IGNORE', $value);
+            if (is_string($converted) && $converted !== '') {
+                return $converted;
+            }
+        }
+
+        return preg_match('//u', $value) === 1 ? $value : utf8_encode($value);
+    }
+
+    private function cleanText(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $text = (string) $value;
+        if ($text === '') {
+            return '';
+        }
+
+        $text = $this->toUtf8($text);
+        $clean = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $text);
+
+        return is_string($clean) ? $clean : $text;
     }
 
     private function addresses(mixed $value): array
