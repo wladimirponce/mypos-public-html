@@ -168,9 +168,22 @@ final class CorreoService
             throw $exception;
         } catch (Throwable $exception) {
             error_log('[CorreoService] mensaje error: ' . $exception->getMessage());
-            throw new HttpException('No se pudo leer este mensaje de correo.', 422);
+            $row = isset($row) && is_array($row) ? $row : [];
+
+            return [
+                'mensaje' => [
+                    'uid' => $uid,
+                    'subject' => $this->safeCleanHeader($row['subject'] ?? 'Mensaje de correo'),
+                    'from' => $this->safeCleanHeader($row['from'] ?? ''),
+                    'to' => $this->safeCleanHeader($row['to'] ?? ''),
+                    'date' => (string) ($row['date'] ?? ''),
+                    'seen' => !empty($row['seen']),
+                    'body_text' => 'No se pudo extraer el cuerpo de este mensaje desde IMAP, pero el mensaje existe en la bandeja.',
+                    'body_html' => null,
+                ],
+            ];
         } finally {
-            imap_close($imap);
+            @imap_close($imap);
         }
     }
 
@@ -632,6 +645,15 @@ final class CorreoService
         $clean = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $text);
 
         return is_string($clean) ? $clean : $text;
+    }
+
+    private function safeCleanHeader(mixed $value): string
+    {
+        try {
+            return $this->cleanText($this->decodeHeader((string) $value)) ?? '';
+        } catch (Throwable) {
+            return preg_replace('/[^\P{C}\t\r\n]+/u', '', (string) $value) ?? '';
+        }
     }
 
     private function htmlToText(string $html): string
