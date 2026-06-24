@@ -265,30 +265,77 @@ final class CorreoService
 
     private function fetchBody(mixed $imap, int $uid): array
     {
-        $structure = imap_fetchstructure($imap, (string) $uid, FT_UID);
-        if (!isset($structure->parts) || !is_array($structure->parts)) {
-            $text = imap_body($imap, (string) $uid, FT_UID) ?: '';
-            return ['text' => trim($text), 'html' => null];
+        try {
+            $structure = @imap_fetchstructure($imap, (string) $uid, FT_UID);
+            if (!is_object($structure)) {
+                return ['text' => $this->fetchRawBody($imap, $uid), 'html' => null];
+            }
+
+            $body = ['text' => null, 'html' => null];
+            $this->collectBodyParts($imap, $uid, $structure, '', $body);
+
+            if ($body['text'] === null && $body['html'] === null) {
+                $body['text'] = $this->fetchRawBody($imap, $uid);
+            }
+
+            return $body;
+        } catch (Throwable $exception) {
+            error_log('[CorreoService] fetchBody fallback: ' . $exception->getMessage());
+            return ['text' => $this->fetchRawBody($imap, $uid), 'html' => null];
+        }
+    }
+
+    private function collectBodyParts(mixed $imap, int $uid, object $part, string $sectionPrefix, array &$body): void
+    {
+        if (isset($part->parts) && is_array($part->parts)) {
+            foreach ($part->parts as $index => $child) {
+                if (!is_object($child)) {
+                    continue;
+                }
+                $section = $sectionPrefix === '' ? (string) ($index + 1) : $sectionPrefix . '.' . ($index + 1);
+                $this->collectBodyParts($imap, $uid, $child, $section, $body);
+            }
+            return;
         }
 
-        $text = null;
-        $html = null;
-        foreach ($structure->parts as $index => $part) {
-            $section = (string) ($index + 1);
-            $subtype = strtoupper((string) ($part->subtype ?? ''));
-            if (($part->type ?? null) !== 0 || !in_array($subtype, ['PLAIN', 'HTML'], true)) {
-                continue;
-            }
-            $content = imap_fetchbody($imap, (string) $uid, $section, FT_UID) ?: '';
-            $content = $this->decodePart($content, (int) ($part->encoding ?? 0));
-            if ($subtype === 'HTML') {
-                $html = $content;
-            } else {
-                $text = $content;
-            }
+        $type = (int) ($part->type ?? 0);
+        $subtype = strtoupper((string) ($part->subtype ?? ''));
+        if ($type !== 0 || !in_array($subtype, ['PLAIN', 'HTML'], true)) {
+            return;
         }
 
-        return ['text' => $text, 'html' => $html];
+        $section = $sectionPrefix === '' ? '1' : $sectionPrefix;
+        $content = @imap_fetchbody($imap, (string) $uid, $section, FT_UID);
+        if (!is_string($content) || $content === '') {
+            $content = @imap_fetchbody($imap, (string) $uid, $section, FT_UID | FT_PEEK);
+        }
+        if (!is_string($content) || $content === '') {
+            return;
+        }
+
+        $content = trim($this->decodePart($content, (int) ($part->encoding ?? 0)));
+        if ($content === '') {
+            return;
+        }
+
+        if ($subtype === 'HTML' && $body['html'] === null) {
+            $body['html'] = $content;
+            return;
+        }
+
+        if ($subtype === 'PLAIN' && $body['text'] === null) {
+            $body['text'] = $content;
+        }
+    }
+
+    private function fetchRawBody(mixed $imap, int $uid): string
+    {
+        $text = @imap_body($imap, (string) $uid, FT_UID | FT_PEEK);
+        if (!is_string($text)) {
+            return '';
+        }
+
+        return trim(quoted_printable_decode($text));
     }
 
     private function decodePart(string $content, int $encoding): string
@@ -355,7 +402,11 @@ final class CorreoService
 
     private function decodeHeader(string $value): string
     {
-        $parts = function_exists('imap_mime_header_decode') ? imap_mime_header_decode($value) : false;
+        try {
+            $parts = function_exists('imap_mime_header_decode') ? @imap_mime_header_decode($value) : false;
+        } catch (Throwable) {
+            return $value;
+        }
         if (!is_array($parts)) {
             return $value;
         }
