@@ -82,7 +82,22 @@ class CertificationManager
     private function saveState(array &$state): void
     {
         $state['updated'] = date('Y-m-d\TH:i:s');
-        file_put_contents($this->statePath, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        // JSON_INVALID_UTF8_SUBSTITUTE: sin esto, un solo byte Latin-1 en el estado
+        // (ej. un mensaje de rechazo del SII con acentos/ñ) hace que json_encode
+        // devuelva FALSE y file_put_contents escriba "" → cert_state.json queda
+        // VACÍO y al recargar (F5) se pierden TODOS los avances. Crítico/multiempresa.
+        $json = json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($json === false || $json === '') {
+            // Nunca sobrescribir el estado existente con basura: preservar el archivo.
+            error_log('CertificationManager::saveState json_encode fallo: ' . json_last_error_msg());
+            return;
+        }
+        // Escritura atómica: archivo temporal + rename, para que un corte a mitad
+        // de escritura no deje el cert_state.json truncado.
+        $tmp = $this->statePath . '.tmp';
+        if (file_put_contents($tmp, $json) !== false) {
+            @rename($tmp, $this->statePath);
+        }
     }
 
     /** Versión pública de saveState para uso desde cert_bridge en casos de restauración. */
