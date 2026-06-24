@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mypos\Services;
 
+use Mypos\Support\Env;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
@@ -13,17 +14,25 @@ final class MailService
     {
         $mail = new PHPMailer(true);
 
-        // Server settings
         $mail->isSMTP();
-        $mail->Host       = 'mail.mypos.cl';
+        $mail->Host       = (string) Env::get('MAIL_HOST', 'mail.mypos.cl');
         $mail->SMTPAuth   = true;
-        $mail->Username   = 'pagos@mypos.cl';
-        $mail->Password   = 'FeActiva3342';
-        $mail->SMTPSecure = PHPMailer::ENCRYPTION_SMTPS;
-        $mail->Port       = 465;
+        $mail->Username   = (string) Env::get('MAIL_USERNAME', '');
+        $mail->Password   = (string) Env::get('MAIL_PASSWORD', '');
+        $mail->SMTPSecure = (string) Env::get('MAIL_ENCRYPTION', 'ssl') === 'tls'
+            ? PHPMailer::ENCRYPTION_STARTTLS
+            : PHPMailer::ENCRYPTION_SMTPS;
+        $mail->Port       = Env::int('MAIL_PORT', 465);
+        $mail->CharSet    = 'UTF-8';
 
-        // Default Sender
-        $mail->setFrom('pagos@mypos.cl', 'MyPOS Admin');
+        if ($mail->Username === '' || $mail->Password === '') {
+            throw new Exception('MAIL_USERNAME y MAIL_PASSWORD no configurados');
+        }
+
+        $mail->setFrom(
+            (string) Env::get('MAIL_FROM_ADDRESS', $mail->Username),
+            (string) Env::get('MAIL_FROM_NAME', 'MyPOS Admin')
+        );
 
         return $mail;
     }

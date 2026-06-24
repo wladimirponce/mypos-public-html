@@ -29,6 +29,7 @@ use Mypos\Controllers\VarianteController;
 use Mypos\Controllers\ComunicacionVentasController;
 use Mypos\Controllers\ConfiguracionController;
 use Mypos\Controllers\ClienteController;
+use Mypos\Controllers\CorreoController;
 use Mypos\Controllers\CreditoController;
 use Mypos\Controllers\DocumentoIaController;
 use Mypos\Controllers\EmpresaController;
@@ -351,6 +352,14 @@ $router->put('/api/v1/configuracion/operacion', protectedRoute([$configuracionCo
 $router->get('/api/v1/configuracion/sucursales/{sucursal_id}', protectedRoute([$configuracionController, 'sucursal'], 'configuracion.ver'));
 $router->put('/api/v1/configuracion/sucursales/{sucursal_id}', protectedRoute([$configuracionController, 'updateSucursal'], 'configuracion.editar'));
 $router->get('/api/v1/configuracion/efectiva', protectedRoute([$configuracionController, 'efectiva'], 'configuracion.ver'));
+
+$correoController = new CorreoController();
+$router->get('/api/v1/correo/configuracion', protectedRoute([$correoController, 'configuracion'], 'correo.ver'));
+$router->put('/api/v1/correo/configuracion', protectedRoute([$correoController, 'guardarConfiguracion'], 'correo.configurar'));
+$router->post('/api/v1/correo/probar', protectedRoute([$correoController, 'probar'], 'correo.configurar'));
+$router->get('/api/v1/correo/inbox', protectedRoute([$correoController, 'inbox'], 'correo.ver'));
+$router->get('/api/v1/correo/mensajes/{uid}', protectedRoute([$correoController, 'mensaje'], 'correo.ver'));
+$router->post('/api/v1/correo/enviar', protectedRoute([$correoController, 'enviar'], 'correo.enviar'));
 
 $uploadController = new UploadController();
 $router->post('/api/v1/uploads/productos', protectedRoute([$uploadController, 'producto'], 'uploads.crear'));
