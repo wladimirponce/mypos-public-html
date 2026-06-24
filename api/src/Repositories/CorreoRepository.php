@@ -21,6 +21,7 @@ final class CorreoRepository
     {
         try {
             $this->connection->query('SELECT 1 FROM correo_cuentas LIMIT 1');
+            $this->addColumnIfMissing('correo_cuentas', 'imap_validate_cert', 'ALTER TABLE correo_cuentas ADD COLUMN imap_validate_cert TINYINT(1) NOT NULL DEFAULT 0 AFTER imap_encryption');
             return;
         } catch (PDOException) {
             // La tabla aun no existe en instalaciones donde la migracion no se ejecuto.
@@ -61,16 +62,26 @@ final class CorreoRepository
     private function addColumnIfMissing(string $table, string $column, string $sql): void
     {
         try {
+            if (!$this->columnExists($table, $column)) {
+                $this->connection->exec($sql);
+            }
+        } catch (PDOException) {
+            // No bloquear lectura de configuracion si el usuario DB no puede alterar schema.
+        }
+    }
+
+    private function columnExists(string $table, string $column): bool
+    {
+        try {
             $statement = $this->connection->prepare(
                 'SELECT COUNT(*) FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name'
             );
             $statement->execute(['table_name' => $table, 'column_name' => $column]);
-            if ((int) $statement->fetchColumn() === 0) {
-                $this->connection->exec($sql);
-            }
+
+            return (int) $statement->fetchColumn() > 0;
         } catch (PDOException) {
-            // No bloquear lectura de configuracion si el usuario DB no puede alterar schema.
+            return false;
         }
     }
 
@@ -80,9 +91,13 @@ final class CorreoRepository
             return null;
         }
 
+        $imapValidateSelect = $this->columnExists('correo_cuentas', 'imap_validate_cert')
+            ? 'imap_validate_cert'
+            : '0 AS imap_validate_cert';
+
         $statement = $this->connection->prepare(
             'SELECT id, empresa_id, email, nombre, username, password_encrypted,
-                    imap_host, imap_port, imap_encryption, imap_validate_cert, smtp_host, smtp_port,
+                    imap_host, imap_port, imap_encryption, ' . $imapValidateSelect . ', smtp_host, smtp_port,
                     smtp_encryption, activo, created_at, updated_at
              FROM correo_cuentas
              WHERE empresa_id = :empresa_id AND activo = 1
@@ -99,6 +114,39 @@ final class CorreoRepository
     {
         if (!$this->schemaAvailable) {
             throw new RuntimeException('Tabla correo_cuentas no disponible. Ejecuta la migracion 073_correo_empresa.sql.');
+        }
+
+        $hasValidateColumn = $this->columnExists('correo_cuentas', 'imap_validate_cert');
+        if (!$hasValidateColumn) {
+            unset($data['imap_validate_cert']);
+        }
+
+        if (!$hasValidateColumn) {
+            $statement = $this->connection->prepare(
+                'INSERT INTO correo_cuentas (
+                    empresa_id, email, nombre, username, password_encrypted,
+                    imap_host, imap_port, imap_encryption, smtp_host, smtp_port,
+                    smtp_encryption, activo
+                 ) VALUES (
+                    :empresa_id, :email, :nombre, :username, :password_encrypted,
+                    :imap_host, :imap_port, :imap_encryption, :smtp_host, :smtp_port,
+                    :smtp_encryption, :activo
+                 )
+                 ON DUPLICATE KEY UPDATE
+                    nombre = VALUES(nombre),
+                    username = VALUES(username),
+                    password_encrypted = COALESCE(VALUES(password_encrypted), password_encrypted),
+                    imap_host = VALUES(imap_host),
+                    imap_port = VALUES(imap_port),
+                    imap_encryption = VALUES(imap_encryption),
+                    smtp_host = VALUES(smtp_host),
+                    smtp_port = VALUES(smtp_port),
+                    smtp_encryption = VALUES(smtp_encryption),
+                    activo = VALUES(activo)'
+            );
+            $statement->execute($data);
+
+            return $this->findActiveAccount((int) $data['empresa_id']) ?? [];
         }
 
         $statement = $this->connection->prepare(
