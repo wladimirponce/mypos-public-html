@@ -35,6 +35,22 @@ final class CorreoController
         $this->respond(fn (): array => $this->service->inbox($_GET));
     }
 
+    public function bandeja(): void
+    {
+        $this->respond(fn (): array => $this->service->bandeja($_GET));
+    }
+
+    public function sincronizar(): void
+    {
+        $this->respond(
+            fn (): array => $this->service->sincronizar(
+                (int) ($_GET['empresa_id'] ?? 0),
+                (int) ($_GET['max'] ?? 300)
+            ),
+            'Bandeja sincronizada'
+        );
+    }
+
     public function mensaje(array $params): void
     {
         $this->respond(fn (): array => $this->service->mensaje((int) ($_GET['empresa_id'] ?? 0), (int) $params['uid']));

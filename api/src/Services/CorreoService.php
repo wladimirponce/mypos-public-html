@@ -6,6 +6,7 @@ namespace Mypos\Services;
 
 use Mypos\Config\Database;
 use Mypos\Core\HttpException;
+use Mypos\Repositories\CorreoMensajeRepository;
 use Mypos\Repositories\CorreoRepository;
 use Mypos\Support\Env;
 use PDO;
@@ -259,6 +260,105 @@ final class CorreoService
         imap_close($imap);
 
         return ['ok' => true, 'message' => 'Conexion IMAP correcta'];
+    }
+
+    /**
+     * Sincroniza incrementalmente los mensajes nuevos de INBOX hacia la BD.
+     * Lee solo UIDs mayores al ultimo sincronizado. Pensado para correr por
+     * cron y, manualmente, desde el endpoint de sincronizacion.
+     */
+    public function sincronizar(int $empresaId, int $maxMensajes = 300): array
+    {
+        $account = $this->requireAccount($empresaId);
+        $cuentaId = (int) $account['id'];
+        $carpeta = 'inbox';
+        $repository = new CorreoMensajeRepository(Database::connection());
+        $imap = $this->openImap($account);
+
+        try {
+            $lastUid = $repository->maxUid($cuentaId, $carpeta);
+            $sequence = ($lastUid + 1) . ':*';
+            $overviews = @imap_fetch_overview($imap, $sequence, FT_UID);
+            $overviews = is_array($overviews) ? $overviews : [];
+
+            // El rango "n:*" devuelve el ultimo mensaje aunque no haya nuevos: filtrar.
+            $nuevos = array_values(array_filter(
+                $overviews,
+                static fn ($overview): bool => (int) ($overview->uid ?? 0) > $lastUid
+            ));
+            usort($nuevos, static fn ($a, $b): int => (int) ($b->uid ?? 0) <=> (int) ($a->uid ?? 0));
+            $nuevos = array_slice($nuevos, 0, $maxMensajes);
+
+            $sincronizados = 0;
+            $maxUidProcesado = $lastUid;
+            foreach ($nuevos as $overview) {
+                $uid = (int) ($overview->uid ?? 0);
+                if ($uid <= 0) {
+                    continue;
+                }
+                try {
+                    $messageNo = $this->messageNumber($imap, $uid);
+                    $body = $this->fetchBody($imap, $uid, $messageNo);
+                    $bodyText = (string) ($body['text'] ?? '');
+                    $bodyHtml = $body['html'] ?? null;
+                    $fromRaw = $this->decodeHeader((string) ($overview->from ?? ''));
+
+                    $repository->upsertMensaje([
+                        'empresa_id' => $empresaId,
+                        'cuenta_id' => $cuentaId,
+                        'uid' => $uid,
+                        'carpeta' => $carpeta,
+                        'message_id' => $this->trimOrNull((string) ($overview->message_id ?? ''), 255),
+                        'in_reply_to' => $this->trimOrNull((string) ($overview->in_reply_to ?? ''), 255),
+                        'referencias' => $this->trimOrNull((string) ($overview->references ?? ''), 60000),
+                        'remitente' => $this->trimOrNull($this->extractEmail($fromRaw), 320),
+                        'remitente_nombre' => $this->trimOrNull($this->extractName($fromRaw), 190),
+                        'destinatarios' => $this->trimOrNull($this->decodeHeader((string) ($overview->to ?? '')), 60000),
+                        'cc' => null,
+                        'asunto' => $this->trimOrNull($this->cleanText($this->decodeHeader((string) ($overview->subject ?? ''))), 500),
+                        'snippet' => $this->trimOrNull($this->makeSnippet($bodyText, $bodyHtml), 300),
+                        'body_text' => $this->cleanText($bodyText),
+                        'body_html' => $this->cleanText($bodyHtml),
+                        'fecha' => $this->parseDate((string) ($overview->date ?? '')),
+                        'seen' => !empty($overview->seen) ? 1 : 0,
+                        'flagged' => !empty($overview->flagged) ? 1 : 0,
+                        'tiene_adjuntos' => 0,
+                        'tamano' => (int) ($overview->size ?? 0),
+                    ]);
+
+                    $sincronizados++;
+                    $maxUidProcesado = max($maxUidProcesado, $uid);
+                } catch (Throwable $exception) {
+                    error_log('[CorreoService] sync mensaje uid ' . $uid . ': ' . $exception->getMessage());
+                }
+            }
+
+            $repository->saveSyncState($cuentaId, $carpeta, null, $maxUidProcesado);
+
+            return ['sincronizados' => $sincronizados, 'ultimo_uid' => $maxUidProcesado];
+        } finally {
+            @imap_close($imap);
+        }
+    }
+
+    /**
+     * Bandeja paginada leyendo desde BD (sin tocar IMAP). Base de la UI nueva.
+     */
+    public function bandeja(array $filters): array
+    {
+        $empresaId = (int) ($filters['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+        $carpeta = in_array($filters['carpeta'] ?? 'inbox', ['inbox', 'enviados', 'papelera'], true)
+            ? (string) $filters['carpeta']
+            : 'inbox';
+        $page = (int) ($filters['page'] ?? 1);
+        $perPage = (int) ($filters['per_page'] ?? 25);
+
+        $repository = new CorreoMensajeRepository(Database::connection());
+
+        return $repository->paginar($empresaId, $carpeta, $page, $perPage);
     }
 
     private function requireAccount(int $empresaId): array
@@ -796,5 +896,56 @@ final class CorreoService
     private function safeImapError(string $error): string
     {
         return str_replace(["\r", "\n"], ' ', mb_substr($error, 0, 180));
+    }
+
+    private function trimOrNull(?string $value, int $maxLength): ?string
+    {
+        $text = trim((string) $value);
+        if ($text === '') {
+            return null;
+        }
+
+        return mb_substr($text, 0, $maxLength);
+    }
+
+    private function extractEmail(string $value): string
+    {
+        if (preg_match('/<([^>]+)>/', $value, $match) === 1) {
+            return strtolower(trim($match[1]));
+        }
+        if (filter_var(trim($value), FILTER_VALIDATE_EMAIL)) {
+            return strtolower(trim($value));
+        }
+
+        return '';
+    }
+
+    private function extractName(string $value): string
+    {
+        $value = trim($value);
+        if (preg_match('/^(.*?)<[^>]+>/', $value, $match) === 1) {
+            return trim(trim($match[1]), " \"'");
+        }
+
+        return '';
+    }
+
+    private function makeSnippet(string $text, ?string $html): string
+    {
+        $source = trim($text) !== '' ? $text : $this->htmlToText((string) $html);
+        $source = preg_replace('/\s+/', ' ', (string) $this->cleanText($source)) ?? '';
+
+        return trim(mb_substr(trim($source), 0, 280));
+    }
+
+    private function parseDate(string $value): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        $timestamp = strtotime($value);
+
+        return $timestamp !== false ? date('Y-m-d H:i:s', $timestamp) : null;
     }
 }

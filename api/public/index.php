@@ -420,6 +420,8 @@ $router->get('/api/v1/correo/configuracion', protectedAnyRoute([$correoControlle
 $router->put('/api/v1/correo/configuracion', protectedAnyRoute([$correoController, 'guardarConfiguracion'], ['correo.configurar', 'configuracion.editar']));
 $router->post('/api/v1/correo/probar', protectedAnyRoute([$correoController, 'probar'], ['correo.configurar', 'configuracion.editar']));
 $router->get('/api/v1/correo/inbox', protectedAnyRoute([$correoController, 'inbox'], ['correo.ver', 'configuracion.ver']));
+$router->get('/api/v1/correo/bandeja', protectedAnyRoute([$correoController, 'bandeja'], ['correo.ver', 'configuracion.ver']));
+$router->post('/api/v1/correo/sincronizar', protectedAnyRoute([$correoController, 'sincronizar'], ['correo.ver', 'configuracion.ver']));
 $router->get('/api/v1/correo/mensajes/{uid}', protectedAnyRoute([$correoController, 'mensaje'], ['correo.ver', 'configuracion.ver']));
 $router->post('/api/v1/correo/enviar', protectedAnyRoute([$correoController, 'enviar'], ['correo.enviar', 'configuracion.editar']));
 
