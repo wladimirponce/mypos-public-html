@@ -282,11 +282,19 @@ final class StockRepository
         $params = ['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId];
 
         if ($q !== null && trim($q) !== '') {
-            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
+            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku
+                        OR EXISTS (
+                            SELECT 1 FROM productos_codigos_barra pcb_q
+                            WHERE pcb_q.producto_id = p.id
+                              AND pcb_q.empresa_id = p.empresa_id
+                              AND pcb_q.activo = 1
+                              AND pcb_q.codigo_barra LIKE :q_codigo_barra
+                        ))';
             $term = '%' . trim($q) . '%';
             $params['q_nombre'] = $term;
             $params['q_codigo'] = $term;
             $params['q_sku'] = $term;
+            $params['q_codigo_barra'] = $term;
         }
 
         $safeLimit  = max(1, min($limit, 500));
@@ -305,11 +313,19 @@ final class StockRepository
         $params = ['empresa_id' => $empresaId];
 
         if ($q !== null && trim($q) !== '') {
-            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
+            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku
+                        OR EXISTS (
+                            SELECT 1 FROM productos_codigos_barra pcb_q
+                            WHERE pcb_q.producto_id = p.id
+                              AND pcb_q.empresa_id = p.empresa_id
+                              AND pcb_q.activo = 1
+                              AND pcb_q.codigo_barra LIKE :q_codigo_barra
+                        ))';
             $term = '%' . trim($q) . '%';
             $params['q_nombre'] = $term;
             $params['q_codigo'] = $term;
             $params['q_sku'] = $term;
+            $params['q_codigo_barra'] = $term;
         }
 
         $statement = $this->connection->prepare($sql);
@@ -340,11 +356,19 @@ final class StockRepository
         $params = ['empresa_id' => $empresaId, 'ubicacion_id' => $ubicacionId];
 
         if ($q !== null && trim($q) !== '') {
-            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku)';
+            $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku
+                        OR EXISTS (
+                            SELECT 1 FROM productos_codigos_barra pcb_q
+                            WHERE pcb_q.producto_id = p.id
+                              AND pcb_q.empresa_id = p.empresa_id
+                              AND pcb_q.activo = 1
+                              AND pcb_q.codigo_barra LIKE :q_codigo_barra
+                        ))';
             $term = '%' . trim($q) . '%';
             $params['q_nombre'] = $term;
             $params['q_codigo'] = $term;
             $params['q_sku'] = $term;
+            $params['q_codigo_barra'] = $term;
         }
 
         $safeLimit  = max(1, min($limit, 500));
