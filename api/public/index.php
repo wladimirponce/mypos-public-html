@@ -426,6 +426,9 @@ $router->get('/api/v1/correo/mensajes/{uid}', protectedAnyRoute([$correoControll
 $router->get('/api/v1/correo/mensajes-bd/{id}', protectedAnyRoute([$correoController, 'mensajeBd'], ['correo.ver', 'configuracion.ver']));
 $router->delete('/api/v1/correo/mensajes-bd/{id}', protectedAnyRoute([$correoController, 'eliminar'], ['correo.enviar', 'configuracion.editar']));
 $router->post('/api/v1/correo/reenviar', protectedAnyRoute([$correoController, 'reenviar'], ['correo.enviar', 'configuracion.editar']));
+$router->get('/api/v1/correo/hilos', protectedAnyRoute([$correoController, 'hilos'], ['correo.ver', 'configuracion.ver']));
+$router->get('/api/v1/correo/hilos/{id}', protectedAnyRoute([$correoController, 'hilo'], ['correo.ver', 'configuracion.ver']));
+$router->post('/api/v1/correo/hilos/reconstruir', protectedAnyRoute([$correoController, 'reconstruirHilos'], ['correo.ver', 'configuracion.ver']));
 $router->post('/api/v1/correo/enviar', protectedAnyRoute([$correoController, 'enviar'], ['correo.enviar', 'configuracion.editar']));
 
 $uploadController = new UploadController();

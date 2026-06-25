@@ -73,6 +73,12 @@ foreach ($empresas as $empresaId) {
         $nuevos = (int) ($resultado['sincronizados'] ?? 0);
         $totalNuevos += $nuevos;
         printf('[correo-sync] empresa %d: %d mensajes nuevos (ultimo uid %d)%s', $empresaId, $nuevos, (int) ($resultado['ultimo_uid'] ?? 0), PHP_EOL);
+
+        // Backfill de hilos para mensajes previos sin agrupar (idempotente).
+        $hilos = $service->reconstruirHilos($empresaId);
+        if ((int) ($hilos['procesados'] ?? 0) > 0) {
+            printf('[correo-sync] empresa %d: %d mensajes agrupados en %d hilos%s', $empresaId, (int) $hilos['procesados'], (int) ($hilos['hilos'] ?? 0), PHP_EOL);
+        }
     } catch (Throwable $exception) {
         fwrite(STDERR, sprintf('[correo-sync] empresa %d ERROR: %s%s', $empresaId, $exception->getMessage(), PHP_EOL));
     }

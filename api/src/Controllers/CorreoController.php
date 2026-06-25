@@ -74,6 +74,24 @@ final class CorreoController
         $this->respond(fn (int $userId): array => $this->service->reenviar(Request::json(), $userId), 'Correo reenviado');
     }
 
+    public function hilos(): void
+    {
+        $this->respond(fn (): array => $this->service->hilos($_GET));
+    }
+
+    public function hilo(array $params): void
+    {
+        $this->respond(fn (): array => $this->service->hilo((int) ($_GET['empresa_id'] ?? 0), (int) $params['id']));
+    }
+
+    public function reconstruirHilos(): void
+    {
+        $this->respond(
+            fn (): array => $this->service->reconstruirHilos((int) ($_GET['empresa_id'] ?? 0)),
+            'Hilos reconstruidos'
+        );
+    }
+
     public function enviar(): void
     {
         $this->respond(fn (int $userId): array => $this->service->enviar(Request::json(), $userId), 'Correo enviado');

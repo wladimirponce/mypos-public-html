@@ -364,6 +364,7 @@ final class CorreoService
 
             $sincronizados = 0;
             $maxUidProcesado = $lastUid;
+            $insertados = [];
             foreach ($nuevos as $overview) {
                 $uid = (int) ($overview->uid ?? 0);
                 if ($uid <= 0) {
@@ -376,7 +377,7 @@ final class CorreoService
                     $bodyHtml = $body['html'] ?? null;
                     $fromRaw = $this->decodeHeader((string) ($overview->from ?? ''));
 
-                    $repository->upsertMensaje([
+                    $datos = [
                         'empresa_id' => $empresaId,
                         'cuenta_id' => $cuentaId,
                         'uid' => $uid,
@@ -397,7 +398,9 @@ final class CorreoService
                         'flagged' => !empty($overview->flagged) ? 1 : 0,
                         'tiene_adjuntos' => 0,
                         'tamano' => (int) ($overview->size ?? 0),
-                    ]);
+                    ];
+                    $repository->upsertMensaje($datos);
+                    $insertados[] = $datos;
 
                     $sincronizados++;
                     $maxUidProcesado = max($maxUidProcesado, $uid);
@@ -407,6 +410,19 @@ final class CorreoService
             }
 
             $repository->saveSyncState($cuentaId, $carpeta, null, $maxUidProcesado);
+
+            // Threading: asignar hilos en orden cronologico (padres antes que respuestas).
+            usort($insertados, static fn (array $a, array $b): int => strcmp((string) ($a['fecha'] ?? ''), (string) ($b['fecha'] ?? '')));
+            $hilosAfectados = [];
+            foreach ($insertados as $datos) {
+                $hiloId = $this->asignarHiloAMensaje($repository, $empresaId, $datos);
+                if ($hiloId > 0) {
+                    $hilosAfectados[$hiloId] = true;
+                }
+            }
+            foreach (array_keys($hilosAfectados) as $hiloId) {
+                $repository->recalcularHilo((int) $hiloId);
+            }
 
             return ['sincronizados' => $sincronizados, 'ultimo_uid' => $maxUidProcesado];
         } finally {
@@ -531,6 +547,167 @@ final class CorreoService
             'subject' => $asunto,
             'body' => $body,
         ], $usuarioId);
+    }
+
+    /**
+     * Listado paginado de hilos (conversaciones) de una carpeta.
+     */
+    public function hilos(array $filters): array
+    {
+        $empresaId = (int) ($filters['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+        $carpeta = in_array($filters['carpeta'] ?? 'inbox', ['inbox', 'enviados', 'papelera'], true)
+            ? (string) $filters['carpeta']
+            : 'inbox';
+        $page = (int) ($filters['page'] ?? 1);
+        $perPage = (int) ($filters['per_page'] ?? 25);
+
+        $repository = new CorreoMensajeRepository(Database::connection());
+
+        return $repository->paginarHilos($empresaId, $carpeta, $page, $perPage, [
+            'q' => (string) ($filters['q'] ?? ''),
+        ]);
+    }
+
+    /**
+     * Conversacion completa de un hilo. Marca sus mensajes como leidos (BD + IMAP).
+     */
+    public function hilo(int $empresaId, int $hiloId): array
+    {
+        if ($hiloId <= 0) {
+            throw new HttpException('Hilo invalido', 422);
+        }
+        $repository = new CorreoMensajeRepository(Database::connection());
+        $mensajes = $repository->mensajesDeHilo($empresaId, $hiloId);
+        if ($mensajes === []) {
+            throw new HttpException('Hilo no encontrado', 404);
+        }
+
+        $uidsNoLeidos = $repository->marcarHiloLeido($empresaId, $hiloId);
+        if ($uidsNoLeidos !== []) {
+            $repository->recalcularHilo($hiloId);
+            $this->marcarLeidosImap($empresaId, $uidsNoLeidos);
+            foreach ($mensajes as &$mensaje) {
+                $mensaje['seen'] = 1;
+            }
+            unset($mensaje);
+        }
+
+        return ['hilo_id' => $hiloId, 'mensajes' => $mensajes];
+    }
+
+    /**
+     * Backfill: agrupa en hilos todos los mensajes que aun no tienen hilo_id.
+     */
+    public function reconstruirHilos(int $empresaId): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+        $repository = new CorreoMensajeRepository(Database::connection());
+        $pendientes = $repository->mensajesSinHilo($empresaId);
+        $afectados = [];
+        foreach ($pendientes as $row) {
+            $hiloId = $this->asignarHiloAMensaje($repository, $empresaId, $row);
+            if ($hiloId > 0) {
+                $afectados[$hiloId] = true;
+            }
+        }
+        foreach (array_keys($afectados) as $hiloId) {
+            $repository->recalcularHilo((int) $hiloId);
+        }
+
+        return ['procesados' => count($pendientes), 'hilos' => count($afectados)];
+    }
+
+    /**
+     * Resuelve (o crea) el hilo de un mensaje ya guardado y se lo asigna.
+     *
+     * @param array<string, mixed> $row con cuenta_id, uid, carpeta, message_id, in_reply_to, referencias, asunto, fecha
+     */
+    private function asignarHiloAMensaje(CorreoMensajeRepository $repository, int $empresaId, array $row): int
+    {
+        $cuentaId = (int) ($row['cuenta_id'] ?? 0);
+        $uid = (int) ($row['uid'] ?? 0);
+        $carpeta = (string) ($row['carpeta'] ?? 'inbox');
+        if ($cuentaId <= 0 || $uid <= 0) {
+            return 0;
+        }
+
+        $referencias = $this->extraerMessageIds(
+            (string) ($row['referencias'] ?? ''),
+            (string) ($row['in_reply_to'] ?? '')
+        );
+        $asuntoNorm = $this->normalizarAsunto((string) ($row['asunto'] ?? ''));
+
+        $hiloId = $repository->hiloIdPorReferencias($cuentaId, $referencias);
+        if ($hiloId === null) {
+            $hiloId = $repository->hiloIdPorAsunto($cuentaId, $asuntoNorm);
+        }
+        if ($hiloId === null) {
+            $hiloId = $repository->crearHilo(
+                $empresaId,
+                $cuentaId,
+                $asuntoNorm,
+                $this->trimOrNull((string) ($row['message_id'] ?? ''), 255),
+                $row['fecha'] !== null ? (string) $row['fecha'] : null
+            );
+        }
+
+        $repository->asignarHilo($cuentaId, $uid, $carpeta, $hiloId);
+
+        return $hiloId;
+    }
+
+    private function normalizarAsunto(string $asunto): string
+    {
+        $asunto = trim($asunto);
+        // Quitar prefijos de respuesta/reenvio repetidos (re:, fwd:, fw:, rv:, res:).
+        do {
+            $previo = $asunto;
+            $asunto = preg_replace('/^\s*(re|rv|fwd|fw|res)\s*:\s*/i', '', $asunto) ?? $asunto;
+        } while ($asunto !== $previo);
+
+        $asunto = preg_replace('/\s+/', ' ', $asunto) ?? $asunto;
+
+        return mb_strtolower(trim($asunto));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function extraerMessageIds(string $referencias, string $inReplyTo): array
+    {
+        $combinado = trim($inReplyTo . ' ' . $referencias);
+        if ($combinado === '') {
+            return [];
+        }
+        if (preg_match_all('/<[^>]+>/', $combinado, $matches) === false) {
+            return [];
+        }
+
+        return array_values(array_unique($matches[0] ?? []));
+    }
+
+    private function marcarLeidosImap(int $empresaId, array $uids): void
+    {
+        $uids = array_values(array_filter(array_map('intval', $uids), static fn (int $u): bool => $u > 0));
+        if ($uids === []) {
+            return;
+        }
+        try {
+            $account = $this->requireAccount($empresaId);
+            $imap = $this->openImap($account);
+            try {
+                @imap_setflag_full($imap, implode(',', $uids), '\\Seen', ST_UID);
+            } finally {
+                @imap_close($imap);
+            }
+        } catch (Throwable $exception) {
+            error_log('[CorreoService] marcarLeidosImap: ' . $exception->getMessage());
+        }
     }
 
     private function marcarLeidoImap(int $empresaId, int $uid): void
