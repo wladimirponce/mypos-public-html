@@ -574,10 +574,44 @@ final class CorreoService
 
         $repository = new CorreoMensajeRepository(Database::connection());
 
-        return $repository->paginarHilos($empresaId, $carpeta, $page, $perPage, [
+        $resultado = $repository->paginarHilos($empresaId, $carpeta, $page, $perPage, [
             'q' => (string) ($filters['q'] ?? ''),
             'grupo' => (string) ($filters['grupo'] ?? ''),
+            'estado' => (string) ($filters['estado'] ?? ''),
         ]);
+        $resultado['conteos_estado'] = $repository->contarHilosPorEstado($empresaId, $carpeta);
+
+        return $resultado;
+    }
+
+    /**
+     * Cambia el estado de una conversacion (pendiente/esperando/resuelto).
+     */
+    public function cambiarEstadoHilo(int $empresaId, int $hiloId, string $estado, int $usuarioId): array
+    {
+        if ($hiloId <= 0) {
+            throw new HttpException('Hilo invalido', 422);
+        }
+        if (!in_array($estado, ['pendiente', 'esperando', 'resuelto'], true)) {
+            throw new HttpException('Estado invalido', 422);
+        }
+        $repository = new CorreoMensajeRepository(Database::connection());
+        if (!$repository->actualizarEstadoHilo($empresaId, $hiloId, $estado)) {
+            throw new HttpException('Hilo no encontrado', 404);
+        }
+
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'usuario_id' => $usuarioId,
+            'modulo' => 'correo',
+            'accion' => 'estado_hilo',
+            'entidad' => 'correo_hilos',
+            'entidad_id' => $hiloId,
+            'descripcion' => 'Estado de conversacion actualizado a ' . $estado,
+            'metadata' => ['estado' => $estado],
+        ]);
+
+        return ['estado' => $estado];
     }
 
     /**
@@ -619,6 +653,8 @@ final class CorreoService
         $repository = new CorreoMensajeRepository(Database::connection());
         $proveedores = $repository->mapaEmails('proveedores', $empresaId);
         $clientes = $repository->mapaEmails('clientes', $empresaId);
+        $dominiosProveedor = $this->mapaDominios($proveedores);
+        $dominiosCliente = $this->mapaDominios($clientes);
 
         $procesados = 0;
         foreach ($repository->remitentesDistintos($empresaId) as $row) {
@@ -626,17 +662,15 @@ final class CorreoService
             if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 continue;
             }
-            $proveedorId = $proveedores[$email] ?? null;
-            $clienteId = $clientes[$email] ?? null;
-            $tipo = $this->clasificarContacto($email, $proveedorId, $clienteId);
+            $clasificacion = $this->clasificarContacto($email, $proveedores, $clientes, $dominiosProveedor, $dominiosCliente);
 
             $repository->upsertContacto([
                 'empresa_id' => $empresaId,
                 'email' => $email,
                 'nombre' => $this->trimOrNull((string) ($row['remitente_nombre'] ?? ''), 190),
-                'tipo' => $tipo,
-                'proveedor_id' => $proveedorId,
-                'cliente_id' => $clienteId,
+                'tipo' => $clasificacion['tipo'],
+                'proveedor_id' => $clasificacion['proveedor_id'],
+                'cliente_id' => $clasificacion['cliente_id'],
             ]);
             $procesados++;
         }
@@ -644,21 +678,72 @@ final class CorreoService
         return ['procesados' => $procesados];
     }
 
-    private function clasificarContacto(string $email, ?int $proveedorId, ?int $clienteId): string
+    /**
+     * Construye un mapa dominio=>id a partir de un mapa email=>id, excluyendo
+     * dominios de correo gratuito (gmail, hotmail, etc.) para no agrupar de mas.
+     *
+     * @param array<string, int> $emails
+     * @return array<string, int>
+     */
+    private function mapaDominios(array $emails): array
     {
-        if ($proveedorId !== null) {
-            return 'proveedor';
+        $dominios = [];
+        foreach ($emails as $email => $id) {
+            $dominio = strtolower((string) substr(strrchr($email, '@') ?: '', 1));
+            if ($dominio === '' || $this->esDominioGratuito($dominio)) {
+                continue;
+            }
+            // Primer id gana; varios proveedores con igual dominio = misma empresa.
+            $dominios[$dominio] ??= $id;
         }
-        if ($clienteId !== null) {
-            return 'cliente';
+
+        return $dominios;
+    }
+
+    /**
+     * @param array<string, int> $proveedores email=>id
+     * @param array<string, int> $clientes email=>id
+     * @param array<string, int> $dominiosProveedor dominio=>id
+     * @param array<string, int> $dominiosCliente dominio=>id
+     * @return array{tipo:string, proveedor_id:?int, cliente_id:?int}
+     */
+    private function clasificarContacto(string $email, array $proveedores, array $clientes, array $dominiosProveedor, array $dominiosCliente): array
+    {
+        // 1) Email exacto.
+        if (isset($proveedores[$email])) {
+            return ['tipo' => 'proveedor', 'proveedor_id' => $proveedores[$email], 'cliente_id' => null];
+        }
+        if (isset($clientes[$email])) {
+            return ['tipo' => 'cliente', 'proveedor_id' => null, 'cliente_id' => $clientes[$email]];
         }
 
         $dominio = strtolower((string) substr(strrchr($email, '@') ?: '', 1));
-        if ($dominio !== '' && $this->esDominioBanco($dominio)) {
-            return 'banco';
+
+        // 2) Dominio corporativo coincidente (no free-mail).
+        if ($dominio !== '' && !$this->esDominioGratuito($dominio)) {
+            if (isset($dominiosProveedor[$dominio])) {
+                return ['tipo' => 'proveedor', 'proveedor_id' => $dominiosProveedor[$dominio], 'cliente_id' => null];
+            }
+            if (isset($dominiosCliente[$dominio])) {
+                return ['tipo' => 'cliente', 'proveedor_id' => null, 'cliente_id' => $dominiosCliente[$dominio]];
+            }
         }
 
-        return 'otro';
+        // 3) Banco por dominio.
+        if ($dominio !== '' && $this->esDominioBanco($dominio)) {
+            return ['tipo' => 'banco', 'proveedor_id' => null, 'cliente_id' => null];
+        }
+
+        return ['tipo' => 'otro', 'proveedor_id' => null, 'cliente_id' => null];
+    }
+
+    private function esDominioGratuito(string $dominio): bool
+    {
+        return in_array($dominio, [
+            'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.cl', 'outlook.com',
+            'outlook.cl', 'live.com', 'live.cl', 'yahoo.com', 'yahoo.es', 'icloud.com',
+            'me.com', 'aol.com', 'protonmail.com', 'proton.me', 'gmx.com', 'zoho.com',
+        ], true);
     }
 
     private function esDominioBanco(string $dominio): bool

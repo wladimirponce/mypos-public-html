@@ -336,6 +336,13 @@ final class CorreoMensajeRepository
             $params['grupo'] = $grupo;
         }
 
+        $estado = (string) ($options['estado'] ?? '');
+        if (in_array($estado, ['pendiente', 'esperando', 'resuelto'], true)) {
+            $filtroBusqueda .= ' AND EXISTS (SELECT 1 FROM correo_hilos he
+                WHERE he.id = m.hilo_id AND he.estado = :estado)';
+            $params['estado'] = $estado;
+        }
+
         // Cada hilo en una carpeta se representa por su mensaje MAS RECIENTE alli.
         // Seleccionamos esa fila directamente con una subconsulta correlacionada,
         // evitando GROUP BY/GROUP_CONCAT.
@@ -357,7 +364,7 @@ final class CorreoMensajeRepository
             'SELECT m.hilo_id, m.id, m.asunto,
                     COALESCE(m.remitente_nombre, m.remitente) AS remitente,
                     m.destinatarios, m.snippet, m.fecha,
-                    h.total_mensajes, h.no_leidos
+                    h.total_mensajes, h.no_leidos, h.estado
              FROM correo_mensajes m
              INNER JOIN correo_hilos h ON h.id = m.hilo_id
              WHERE ' . $where . '
@@ -495,6 +502,39 @@ final class CorreoMensajeRepository
         $out = ['proveedor' => 0, 'cliente' => 0, 'banco' => 0, 'otro' => 0];
         foreach ($statement->fetchAll() as $row) {
             $out[(string) $row['tipo']] = (int) $row['n'];
+        }
+
+        return $out;
+    }
+
+    public function actualizarEstadoHilo(int $empresaId, int $hiloId, string $estado): bool
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE correo_hilos SET estado = :estado WHERE empresa_id = :empresa_id AND id = :hilo_id'
+        );
+        $statement->execute(['estado' => $estado, 'empresa_id' => $empresaId, 'hilo_id' => $hiloId]);
+
+        return $statement->rowCount() > 0;
+    }
+
+    /**
+     * Conteo de hilos por estado, contando solo los que tienen mensajes en la carpeta dada.
+     *
+     * @return array<string, int>
+     */
+    public function contarHilosPorEstado(int $empresaId, string $carpeta): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT h.estado, COUNT(DISTINCT h.id) AS n
+             FROM correo_hilos h
+             WHERE h.empresa_id = :empresa_id
+               AND EXISTS (SELECT 1 FROM correo_mensajes m WHERE m.hilo_id = h.id AND m.carpeta = :carpeta)
+             GROUP BY h.estado'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'carpeta' => $carpeta]);
+        $out = ['pendiente' => 0, 'esperando' => 0, 'resuelto' => 0];
+        foreach ($statement->fetchAll() as $row) {
+            $out[(string) $row['estado']] = (int) $row['n'];
         }
 
         return $out;

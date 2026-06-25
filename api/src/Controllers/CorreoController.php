@@ -92,6 +92,19 @@ final class CorreoController
         );
     }
 
+    public function estadoHilo(array $params): void
+    {
+        $this->respond(
+            fn (int $userId): array => $this->service->cambiarEstadoHilo(
+                (int) ($_GET['empresa_id'] ?? 0),
+                (int) $params['id'],
+                (string) (Request::json()['estado'] ?? ''),
+                $userId
+            ),
+            'Estado actualizado'
+        );
+    }
+
     public function contactos(): void
     {
         $this->respond(fn (): array => $this->service->contactos($_GET));
