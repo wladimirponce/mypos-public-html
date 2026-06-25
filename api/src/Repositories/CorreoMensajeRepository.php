@@ -329,6 +329,13 @@ final class CorreoMensajeRepository
             $params['q'] = '%' . $q . '%';
         }
 
+        $grupo = (string) ($options['grupo'] ?? '');
+        if (in_array($grupo, ['proveedor', 'cliente', 'banco', 'otro'], true)) {
+            $filtroBusqueda .= ' AND EXISTS (SELECT 1 FROM correo_contactos c
+                WHERE c.empresa_id = m.empresa_id AND c.email = m.remitente AND c.tipo = :grupo)';
+            $params['grupo'] = $grupo;
+        }
+
         // Cada hilo en una carpeta se representa por su mensaje MAS RECIENTE alli.
         // Seleccionamos esa fila directamente con una subconsulta correlacionada,
         // evitando GROUP BY/GROUP_CONCAT.
@@ -391,6 +398,106 @@ final class CorreoMensajeRepository
         $rows = $statement->fetchAll();
 
         return is_array($rows) ? $rows : [];
+    }
+
+    // ---------------------------------------------------------------
+    // Contactos / agenda (Sprint 3)
+    // ---------------------------------------------------------------
+
+    /**
+     * Remitentes distintos de la bandeja de entrada (para construir la agenda).
+     *
+     * @return array<int, array{remitente:string, remitente_nombre:?string}>
+     */
+    public function remitentesDistintos(int $empresaId): array
+    {
+        $statement = $this->connection->prepare(
+            "SELECT remitente, MAX(remitente_nombre) AS remitente_nombre
+             FROM correo_mensajes
+             WHERE empresa_id = :empresa_id AND carpeta = 'inbox' AND remitente IS NOT NULL AND remitente <> ''
+             GROUP BY remitente"
+        );
+        $statement->execute(['empresa_id' => $empresaId]);
+        $rows = $statement->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<string, int> email(lower) => id
+     */
+    public function mapaEmails(string $tabla, int $empresaId): array
+    {
+        $tabla = $tabla === 'proveedores' ? 'proveedores' : 'clientes';
+        $statement = $this->connection->prepare(
+            "SELECT id, LOWER(email) AS email FROM {$tabla}
+             WHERE empresa_id = :empresa_id AND email IS NOT NULL AND email <> ''"
+        );
+        $statement->execute(['empresa_id' => $empresaId]);
+        $mapa = [];
+        foreach ($statement->fetchAll() as $row) {
+            $mapa[(string) $row['email']] = (int) $row['id'];
+        }
+
+        return $mapa;
+    }
+
+    public function upsertContacto(array $data): void
+    {
+        $statement = $this->connection->prepare(
+            'INSERT INTO correo_contactos (empresa_id, email, nombre, tipo, proveedor_id, cliente_id)
+             VALUES (:empresa_id, :email, :nombre, :tipo, :proveedor_id, :cliente_id)
+             ON DUPLICATE KEY UPDATE
+                nombre = COALESCE(VALUES(nombre), nombre),
+                tipo = VALUES(tipo),
+                proveedor_id = VALUES(proveedor_id),
+                cliente_id = VALUES(cliente_id),
+                updated_at = NOW()'
+        );
+        $statement->execute([
+            'empresa_id' => $data['empresa_id'],
+            'email' => $data['email'],
+            'nombre' => $data['nombre'] ?? null,
+            'tipo' => $data['tipo'] ?? 'otro',
+            'proveedor_id' => $data['proveedor_id'] ?? null,
+            'cliente_id' => $data['cliente_id'] ?? null,
+        ]);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function listarContactos(int $empresaId, ?string $tipo = null): array
+    {
+        $sql = 'SELECT id, email, nombre, tipo, proveedor_id, cliente_id FROM correo_contactos WHERE empresa_id = :empresa_id';
+        $params = ['empresa_id' => $empresaId];
+        if ($tipo !== null && $tipo !== '') {
+            $sql .= ' AND tipo = :tipo';
+            $params['tipo'] = $tipo;
+        }
+        $sql .= ' ORDER BY COALESCE(nombre, email) ASC';
+        $statement = $this->connection->prepare($sql);
+        $statement->execute($params);
+        $rows = $statement->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<string, int> tipo => cantidad
+     */
+    public function contarContactosPorTipo(int $empresaId): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT tipo, COUNT(*) AS n FROM correo_contactos WHERE empresa_id = :empresa_id GROUP BY tipo'
+        );
+        $statement->execute(['empresa_id' => $empresaId]);
+        $out = ['proveedor' => 0, 'cliente' => 0, 'banco' => 0, 'otro' => 0];
+        foreach ($statement->fetchAll() as $row) {
+            $out[(string) $row['tipo']] = (int) $row['n'];
+        }
+
+        return $out;
     }
 
     public function marcarHiloLeido(int $empresaId, int $hiloId): array

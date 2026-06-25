@@ -424,6 +424,14 @@ final class CorreoService
                 $repository->recalcularHilo((int) $hiloId);
             }
 
+            if ($sincronizados > 0) {
+                try {
+                    $this->reconstruirContactos($empresaId);
+                } catch (Throwable $exception) {
+                    error_log('[CorreoService] reconstruirContactos en sync: ' . $exception->getMessage());
+                }
+            }
+
             return ['sincronizados' => $sincronizados, 'ultimo_uid' => $maxUidProcesado];
         } finally {
             @imap_close($imap);
@@ -568,7 +576,109 @@ final class CorreoService
 
         return $repository->paginarHilos($empresaId, $carpeta, $page, $perPage, [
             'q' => (string) ($filters['q'] ?? ''),
+            'grupo' => (string) ($filters['grupo'] ?? ''),
         ]);
+    }
+
+    /**
+     * Agenda: contactos agrupados por tipo + conteos. Construye la agenda si
+     * aun no existe (primera vez).
+     */
+    public function contactos(array $filters): array
+    {
+        $empresaId = (int) ($filters['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+        $repository = new CorreoMensajeRepository(Database::connection());
+        $conteos = $repository->contarContactosPorTipo($empresaId);
+        if (array_sum($conteos) === 0) {
+            $this->reconstruirContactos($empresaId);
+            $conteos = $repository->contarContactosPorTipo($empresaId);
+        }
+
+        $tipo = in_array($filters['tipo'] ?? '', ['proveedor', 'cliente', 'banco', 'otro'], true)
+            ? (string) $filters['tipo']
+            : null;
+
+        return [
+            'contactos' => $repository->listarContactos($empresaId, $tipo),
+            'conteos' => $conteos,
+        ];
+    }
+
+    /**
+     * Reconstruye la agenda desde los remitentes de la bandeja, matcheando con
+     * proveedores/clientes existentes y clasificando bancos por dominio.
+     */
+    public function reconstruirContactos(int $empresaId): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+        $repository = new CorreoMensajeRepository(Database::connection());
+        $proveedores = $repository->mapaEmails('proveedores', $empresaId);
+        $clientes = $repository->mapaEmails('clientes', $empresaId);
+
+        $procesados = 0;
+        foreach ($repository->remitentesDistintos($empresaId) as $row) {
+            $email = strtolower(trim((string) ($row['remitente'] ?? '')));
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                continue;
+            }
+            $proveedorId = $proveedores[$email] ?? null;
+            $clienteId = $clientes[$email] ?? null;
+            $tipo = $this->clasificarContacto($email, $proveedorId, $clienteId);
+
+            $repository->upsertContacto([
+                'empresa_id' => $empresaId,
+                'email' => $email,
+                'nombre' => $this->trimOrNull((string) ($row['remitente_nombre'] ?? ''), 190),
+                'tipo' => $tipo,
+                'proveedor_id' => $proveedorId,
+                'cliente_id' => $clienteId,
+            ]);
+            $procesados++;
+        }
+
+        return ['procesados' => $procesados];
+    }
+
+    private function clasificarContacto(string $email, ?int $proveedorId, ?int $clienteId): string
+    {
+        if ($proveedorId !== null) {
+            return 'proveedor';
+        }
+        if ($clienteId !== null) {
+            return 'cliente';
+        }
+
+        $dominio = strtolower((string) substr(strrchr($email, '@') ?: '', 1));
+        if ($dominio !== '' && $this->esDominioBanco($dominio)) {
+            return 'banco';
+        }
+
+        return 'otro';
+    }
+
+    private function esDominioBanco(string $dominio): bool
+    {
+        if (str_contains($dominio, 'banco')) {
+            return true;
+        }
+        $bancos = [
+            'bancochile.cl', 'bancoestado.cl', 'santander.cl', 'santander.com',
+            'bci.cl', 'scotiabank.cl', 'itau.cl', 'bice.cl', 'security.cl',
+            'consorcio.cl', 'bancofalabella.cl', 'falabella.com', 'ripley.cl',
+            'tbanc.cl', 'coopeuch.cl', 'bancoripley.cl', 'edwards.cl',
+        ];
+        foreach ($bancos as $banco) {
+            if ($dominio === $banco || str_ends_with($dominio, '.' . $banco)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
