@@ -323,43 +323,38 @@ final class CorreoMensajeRepository
 
         $q = trim((string) ($options['q'] ?? ''));
         $params = ['empresa_id' => $empresaId, 'carpeta' => $carpeta];
-        $having = '';
+        $filtroBusqueda = '';
         if ($q !== '') {
-            $having = 'HAVING asunto LIKE :q OR remitente LIKE :q OR destinatarios LIKE :q OR snippet LIKE :q';
+            $filtroBusqueda = ' AND (m.asunto LIKE :q OR m.body_text LIKE :q OR m.remitente LIKE :q OR m.destinatarios LIKE :q)';
             $params['q'] = '%' . $q . '%';
         }
 
-        // Un "hilo" en una carpeta se representa por su mensaje mas reciente alli;
-        // agrupamos por hilo_id y elegimos el ultimo por fecha.
-        $base =
-            'FROM correo_mensajes m
-             INNER JOIN (
-                SELECT hilo_id, MAX(fecha) AS max_fecha
-                FROM correo_mensajes
-                WHERE empresa_id = :empresa_id AND carpeta = :carpeta AND hilo_id IS NOT NULL
-                GROUP BY hilo_id
-             ) ult ON ult.hilo_id = m.hilo_id AND ult.max_fecha = m.fecha
-             WHERE m.empresa_id = :empresa_id AND m.carpeta = :carpeta';
+        // Cada hilo en una carpeta se representa por su mensaje MAS RECIENTE alli.
+        // Seleccionamos esa fila directamente con una subconsulta correlacionada,
+        // evitando GROUP BY/GROUP_CONCAT.
+        $where =
+            'm.empresa_id = :empresa_id AND m.carpeta = :carpeta
+             AND m.hilo_id IS NOT NULL
+             AND m.id = (
+                SELECT m2.id FROM correo_mensajes m2
+                WHERE m2.hilo_id = m.hilo_id AND m2.carpeta = m.carpeta
+                ORDER BY m2.fecha DESC, m2.uid DESC
+                LIMIT 1
+             )' . $filtroBusqueda;
 
-        $countStmt = $this->connection->prepare('SELECT COUNT(*) FROM (SELECT m.hilo_id ' . $base . ' GROUP BY m.hilo_id ' . $having . ') t');
+        $countStmt = $this->connection->prepare('SELECT COUNT(*) FROM correo_mensajes m WHERE ' . $where);
         $countStmt->execute($params);
         $total = (int) $countStmt->fetchColumn();
 
         $sql =
-            'SELECT m.hilo_id,
-                    MAX(m.id) AS id,
-                    SUBSTRING_INDEX(GROUP_CONCAT(m.asunto ORDER BY m.fecha DESC SEPARATOR 0x1f), 0x1f, 1) AS asunto,
-                    SUBSTRING_INDEX(GROUP_CONCAT(COALESCE(m.remitente_nombre, m.remitente) ORDER BY m.fecha DESC SEPARATOR 0x1f), 0x1f, 1) AS remitente,
-                    SUBSTRING_INDEX(GROUP_CONCAT(m.destinatarios ORDER BY m.fecha DESC SEPARATOR 0x1f), 0x1f, 1) AS destinatarios,
-                    SUBSTRING_INDEX(GROUP_CONCAT(m.snippet ORDER BY m.fecha DESC SEPARATOR 0x1f), 0x1f, 1) AS snippet,
-                    MAX(m.fecha) AS fecha,
-                    h.total_mensajes,
-                    h.no_leidos
-             ' . $base . '
+            'SELECT m.hilo_id, m.id, m.asunto,
+                    COALESCE(m.remitente_nombre, m.remitente) AS remitente,
+                    m.destinatarios, m.snippet, m.fecha,
+                    h.total_mensajes, h.no_leidos
+             FROM correo_mensajes m
              INNER JOIN correo_hilos h ON h.id = m.hilo_id
-             GROUP BY m.hilo_id, h.total_mensajes, h.no_leidos
-             ' . $having . '
-             ORDER BY fecha DESC
+             WHERE ' . $where . '
+             ORDER BY m.fecha DESC
              LIMIT :limit OFFSET :offset';
 
         $statement = $this->connection->prepare($sql);
