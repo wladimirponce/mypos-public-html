@@ -578,6 +578,7 @@ final class CorreoService
             'q' => (string) ($filters['q'] ?? ''),
             'grupo' => (string) ($filters['grupo'] ?? ''),
             'estado' => (string) ($filters['estado'] ?? ''),
+            'contacto' => (string) ($filters['contacto'] ?? ''),
         ]);
         $resultado['conteos_estado'] = $repository->contarHilosPorEstado($empresaId, $carpeta);
 

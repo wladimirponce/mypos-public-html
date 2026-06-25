@@ -342,6 +342,17 @@ final class CorreoMensajeRepository
             $params['estado'] = $estado;
         }
 
+        // Vista 360 por contacto: hilos donde el contacto aparece como
+        // remitente o destinatario en cualquiera de sus mensajes.
+        $contacto = strtolower(trim((string) ($options['contacto'] ?? '')));
+        if ($contacto !== '') {
+            $filtroBusqueda .= ' AND EXISTS (SELECT 1 FROM correo_mensajes mc
+                WHERE mc.hilo_id = m.hilo_id
+                  AND (LOWER(mc.remitente) = :contacto OR LOWER(mc.destinatarios) LIKE :contacto_like))';
+            $params['contacto'] = $contacto;
+            $params['contacto_like'] = '%' . $contacto . '%';
+        }
+
         // Cada hilo en una carpeta se representa por su mensaje MAS RECIENTE alli.
         // Seleccionamos esa fila directamente con una subconsulta correlacionada,
         // evitando GROUP BY/GROUP_CONCAT.
