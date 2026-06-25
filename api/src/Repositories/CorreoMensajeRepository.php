@@ -78,8 +78,7 @@ final class CorreoMensajeRepository
                 flagged = VALUES(flagged),
                 snippet = VALUES(snippet),
                 body_text = VALUES(body_text),
-                body_html = VALUES(body_html),
-                updated_at = NOW()'
+                body_html = VALUES(body_html)'
         );
         $statement->execute([
             'empresa_id' => $data['empresa_id'],
@@ -527,8 +526,7 @@ final class CorreoMensajeRepository
                 nombre = COALESCE(VALUES(nombre), nombre),
                 tipo = VALUES(tipo),
                 proveedor_id = VALUES(proveedor_id),
-                cliente_id = VALUES(cliente_id),
-                updated_at = NOW()'
+                cliente_id = VALUES(cliente_id)'
         );
         $statement->execute([
             'empresa_id' => $data['empresa_id'],
