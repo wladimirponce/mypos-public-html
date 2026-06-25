@@ -429,6 +429,8 @@ $router->post('/api/v1/correo/reenviar', protectedAnyRoute([$correoController, '
 $router->get('/api/v1/correo/hilos', protectedAnyRoute([$correoController, 'hilos'], ['correo.ver', 'configuracion.ver']));
 $router->get('/api/v1/correo/hilos/{id}', protectedAnyRoute([$correoController, 'hilo'], ['correo.ver', 'configuracion.ver']));
 $router->post('/api/v1/correo/hilos/reconstruir', protectedAnyRoute([$correoController, 'reconstruirHilos'], ['correo.ver', 'configuracion.ver']));
+$router->get('/api/v1/correo/contactos', protectedAnyRoute([$correoController, 'contactos'], ['correo.ver', 'configuracion.ver']));
+$router->post('/api/v1/correo/contactos/reconstruir', protectedAnyRoute([$correoController, 'reconstruirContactos'], ['correo.ver', 'configuracion.ver']));
 $router->post('/api/v1/correo/enviar', protectedAnyRoute([$correoController, 'enviar'], ['correo.enviar', 'configuracion.editar']));
 
 $uploadController = new UploadController();

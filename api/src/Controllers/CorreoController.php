@@ -92,6 +92,19 @@ final class CorreoController
         );
     }
 
+    public function contactos(): void
+    {
+        $this->respond(fn (): array => $this->service->contactos($_GET));
+    }
+
+    public function reconstruirContactos(): void
+    {
+        $this->respond(
+            fn (): array => $this->service->reconstruirContactos((int) ($_GET['empresa_id'] ?? 0)),
+            'Agenda reconstruida'
+        );
+    }
+
     public function enviar(): void
     {
         $this->respond(fn (int $userId): array => $this->service->enviar(Request::json(), $userId), 'Correo enviado');

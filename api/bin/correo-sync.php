@@ -79,6 +79,12 @@ foreach ($empresas as $empresaId) {
         if ((int) ($hilos['procesados'] ?? 0) > 0) {
             printf('[correo-sync] empresa %d: %d mensajes agrupados en %d hilos%s', $empresaId, (int) $hilos['procesados'], (int) ($hilos['hilos'] ?? 0), PHP_EOL);
         }
+
+        // Agenda: clasificar contactos (proveedor/cliente/banco/otro) (idempotente).
+        $contactos = $service->reconstruirContactos($empresaId);
+        if ((int) ($contactos['procesados'] ?? 0) > 0) {
+            printf('[correo-sync] empresa %d: %d contactos en agenda%s', $empresaId, (int) $contactos['procesados'], PHP_EOL);
+        }
     } catch (Throwable $exception) {
         fwrite(STDERR, sprintf('[correo-sync] empresa %d ERROR: %s%s', $empresaId, $exception->getMessage(), PHP_EOL));
     }
