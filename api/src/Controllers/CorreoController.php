@@ -8,6 +8,7 @@ use Mypos\Core\HttpException;
 use Mypos\Core\Request;
 use Mypos\Core\Response;
 use Mypos\Middleware\AuthMiddleware;
+use Mypos\Services\CorreoIaService;
 use Mypos\Services\CorreoService;
 use Throwable;
 
@@ -103,6 +104,23 @@ final class CorreoController
             ),
             'Estado actualizado'
         );
+    }
+
+    public function resumenHilo(array $params): void
+    {
+        $this->respond(fn (): array => (new CorreoIaService())->resumenHilo(
+            (int) ($_GET['empresa_id'] ?? 0),
+            (int) $params['id'],
+            ($_GET['forzar'] ?? '') === '1'
+        ));
+    }
+
+    public function buscarIa(): void
+    {
+        $this->respond(fn (): array => (new CorreoIaService())->buscarContextual(
+            (int) ($_GET['empresa_id'] ?? 0),
+            (string) (Request::json()['q'] ?? '')
+        ));
     }
 
     public function contactos(): void

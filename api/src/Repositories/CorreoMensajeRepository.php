@@ -408,6 +408,75 @@ final class CorreoMensajeRepository
     }
 
     // ---------------------------------------------------------------
+    // IA: resumenes + candidatos para busqueda contextual (Sprint 4)
+    // ---------------------------------------------------------------
+
+    public function resumenCacheado(int $empresaId, int $hiloId, string $hashContenido): ?string
+    {
+        $statement = $this->connection->prepare(
+            'SELECT resumen FROM correo_resumenes_ia
+             WHERE empresa_id = :empresa_id AND hilo_id = :hilo_id AND hash_contenido = :hash
+             ORDER BY id DESC LIMIT 1'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'hilo_id' => $hiloId, 'hash' => $hashContenido]);
+        $value = $statement->fetchColumn();
+
+        return $value !== false && $value !== null ? (string) $value : null;
+    }
+
+    public function guardarResumen(int $empresaId, int $hiloId, string $resumen, ?string $modelo, string $hashContenido): void
+    {
+        $del = $this->connection->prepare(
+            'DELETE FROM correo_resumenes_ia WHERE empresa_id = :empresa_id AND hilo_id = :hilo_id'
+        );
+        $del->execute(['empresa_id' => $empresaId, 'hilo_id' => $hiloId]);
+
+        $ins = $this->connection->prepare(
+            'INSERT INTO correo_resumenes_ia (empresa_id, hilo_id, resumen, modelo, hash_contenido)
+             VALUES (:empresa_id, :hilo_id, :resumen, :modelo, :hash)'
+        );
+        $ins->execute([
+            'empresa_id' => $empresaId,
+            'hilo_id' => $hiloId,
+            'resumen' => $resumen,
+            'modelo' => $modelo,
+            'hash' => $hashContenido,
+        ]);
+    }
+
+    /**
+     * Candidatos para busqueda contextual: mensajes recientes (filtrados por
+     * texto si se entrega q). Devuelve cuerpo recortado para limitar tokens.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function buscarMensajesIa(int $empresaId, string $q, int $limit): array
+    {
+        $limit = min(40, max(1, $limit));
+        $where = "empresa_id = :empresa_id AND carpeta = 'inbox'";
+        $params = ['empresa_id' => $empresaId];
+        if ($q !== '') {
+            $where .= ' AND (asunto LIKE :q OR body_text LIKE :q OR remitente LIKE :q OR destinatarios LIKE :q)';
+            $params['q'] = '%' . $q . '%';
+        }
+        $statement = $this->connection->prepare(
+            'SELECT id, hilo_id, asunto, remitente, fecha, LEFT(COALESCE(body_text, snippet, \'\'), 1200) AS cuerpo
+             FROM correo_mensajes
+             WHERE ' . $where . '
+             ORDER BY fecha DESC
+             LIMIT :limit'
+        );
+        foreach ($params as $key => $value) {
+            $statement->bindValue($key, $value, $key === 'empresa_id' ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $statement->bindValue('limit', $limit, PDO::PARAM_INT);
+        $statement->execute();
+        $rows = $statement->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    // ---------------------------------------------------------------
     // Contactos / agenda (Sprint 3)
     // ---------------------------------------------------------------
 

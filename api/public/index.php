@@ -430,6 +430,8 @@ $router->get('/api/v1/correo/hilos', protectedAnyRoute([$correoController, 'hilo
 $router->get('/api/v1/correo/hilos/{id}', protectedAnyRoute([$correoController, 'hilo'], ['correo.ver', 'configuracion.ver']));
 $router->post('/api/v1/correo/hilos/reconstruir', protectedAnyRoute([$correoController, 'reconstruirHilos'], ['correo.ver', 'configuracion.ver']));
 $router->post('/api/v1/correo/hilos/{id}/estado', protectedAnyRoute([$correoController, 'estadoHilo'], ['correo.enviar', 'configuracion.editar']));
+$router->get('/api/v1/correo/hilos/{id}/resumen', protectedAnyRoute([$correoController, 'resumenHilo'], ['correo.ver', 'configuracion.ver']));
+$router->post('/api/v1/correo/buscar-ia', protectedAnyRoute([$correoController, 'buscarIa'], ['correo.ver', 'configuracion.ver']));
 $router->get('/api/v1/correo/contactos', protectedAnyRoute([$correoController, 'contactos'], ['correo.ver', 'configuracion.ver']));
 $router->post('/api/v1/correo/contactos/reconstruir', protectedAnyRoute([$correoController, 'reconstruirContactos'], ['correo.ver', 'configuracion.ver']));
 $router->post('/api/v1/correo/enviar', protectedAnyRoute([$correoController, 'enviar'], ['correo.enviar', 'configuracion.editar']));
