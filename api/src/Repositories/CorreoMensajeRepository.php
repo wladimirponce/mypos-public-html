@@ -107,29 +107,48 @@ final class CorreoMensajeRepository
 
     /**
      * Listado paginado de una carpeta leyendo desde BD (sin tocar IMAP).
+     * Soporta busqueda (asunto/cuerpo/remitente/destinatarios) y orden.
+     *
+     * @param array{q?:string, sort?:string, order?:string} $options
      */
-    public function paginar(int $empresaId, string $carpeta, int $page, int $perPage): array
+    public function paginar(int $empresaId, string $carpeta, int $page, int $perPage, array $options = []): array
     {
         $page = max(1, $page);
         $perPage = min(100, max(1, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $count = $this->connection->prepare(
-            'SELECT COUNT(*) FROM correo_mensajes WHERE empresa_id = :empresa_id AND carpeta = :carpeta'
-        );
-        $count->execute(['empresa_id' => $empresaId, 'carpeta' => $carpeta]);
+        $q = trim((string) ($options['q'] ?? ''));
+        $where = 'empresa_id = :empresa_id AND carpeta = :carpeta';
+        $params = ['empresa_id' => $empresaId, 'carpeta' => $carpeta];
+        if ($q !== '') {
+            // LIKE sobre las mismas columnas indexadas en FULLTEXT; robusto para
+            // terminos cortos y sin depender del umbral de palabra de InnoDB.
+            $where .= ' AND (asunto LIKE :q OR body_text LIKE :q OR remitente LIKE :q OR destinatarios LIKE :q)';
+            $params['q'] = '%' . $q . '%';
+        }
+
+        $count = $this->connection->prepare('SELECT COUNT(*) FROM correo_mensajes WHERE ' . $where);
+        $count->execute($params);
         $total = (int) $count->fetchColumn();
+
+        $sortColumn = match ((string) ($options['sort'] ?? 'fecha')) {
+            'asunto' => 'asunto',
+            'remitente' => 'remitente',
+            default => 'fecha',
+        };
+        $sortOrder = strtolower((string) ($options['order'] ?? 'desc')) === 'asc' ? 'ASC' : 'DESC';
 
         $statement = $this->connection->prepare(
             'SELECT id, uid, message_id, remitente, remitente_nombre, destinatarios,
                     asunto, snippet, fecha, seen, flagged, tiene_adjuntos
              FROM correo_mensajes
-             WHERE empresa_id = :empresa_id AND carpeta = :carpeta
-             ORDER BY fecha DESC, uid DESC
+             WHERE ' . $where . '
+             ORDER BY ' . $sortColumn . ' ' . $sortOrder . ', uid DESC
              LIMIT :limit OFFSET :offset'
         );
-        $statement->bindValue('empresa_id', $empresaId, PDO::PARAM_INT);
-        $statement->bindValue('carpeta', $carpeta, PDO::PARAM_STR);
+        foreach ($params as $key => $value) {
+            $statement->bindValue($key, $value, $key === 'empresa_id' ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
         $statement->bindValue('limit', $perPage, PDO::PARAM_INT);
         $statement->bindValue('offset', $offset, PDO::PARAM_INT);
         $statement->execute();
@@ -142,6 +161,40 @@ final class CorreoMensajeRepository
             'per_page' => $perPage,
             'total_pages' => (int) ceil($total / $perPage),
         ];
+    }
+
+    /**
+     * Detalle completo de un mensaje (incluye cuerpo) desde BD.
+     */
+    public function find(int $empresaId, int $id): ?array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT id, cuenta_id, uid, carpeta, message_id, remitente, remitente_nombre,
+                    destinatarios, cc, asunto, body_text, body_html, fecha, seen, flagged
+             FROM correo_mensajes
+             WHERE empresa_id = :empresa_id AND id = :id
+             LIMIT 1'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'id' => $id]);
+        $row = $statement->fetch();
+
+        return is_array($row) ? $row : null;
+    }
+
+    public function updateSeen(int $empresaId, int $id, bool $seen): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE correo_mensajes SET seen = :seen WHERE empresa_id = :empresa_id AND id = :id'
+        );
+        $statement->execute(['seen' => $seen ? 1 : 0, 'empresa_id' => $empresaId, 'id' => $id]);
+    }
+
+    public function moverCarpeta(int $empresaId, int $id, string $carpeta): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE correo_mensajes SET carpeta = :carpeta WHERE empresa_id = :empresa_id AND id = :id'
+        );
+        $statement->execute(['carpeta' => $carpeta, 'empresa_id' => $empresaId, 'id' => $id]);
     }
 
     public function maxUid(int $cuentaId, string $carpeta): int

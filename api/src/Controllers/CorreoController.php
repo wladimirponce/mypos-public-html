@@ -56,6 +56,24 @@ final class CorreoController
         $this->respond(fn (): array => $this->service->mensaje((int) ($_GET['empresa_id'] ?? 0), (int) $params['uid']));
     }
 
+    public function mensajeBd(array $params): void
+    {
+        $this->respond(fn (): array => $this->service->mensajeBd((int) ($_GET['empresa_id'] ?? 0), (int) $params['id']));
+    }
+
+    public function eliminar(array $params): void
+    {
+        $this->respond(
+            fn (int $userId): array => $this->service->eliminar((int) ($_GET['empresa_id'] ?? 0), (int) $params['id'], $userId),
+            'Correo movido a papelera'
+        );
+    }
+
+    public function reenviar(): void
+    {
+        $this->respond(fn (int $userId): array => $this->service->reenviar(Request::json(), $userId), 'Correo reenviado');
+    }
+
     public function enviar(): void
     {
         $this->respond(fn (int $userId): array => $this->service->enviar(Request::json(), $userId), 'Correo enviado');

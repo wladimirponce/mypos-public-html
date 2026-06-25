@@ -240,6 +240,14 @@ final class CorreoService
         $mail->Body = $body;
         $mail->send();
 
+        $rawMime = '';
+        try {
+            $rawMime = (string) $mail->getSentMIMEMessage();
+        } catch (Throwable) {
+            $rawMime = '';
+        }
+        $this->guardarEnviado($account, $empresaId, $to, $cc, $subject, $body, $rawMime);
+
         AuditoriaService::registrarEvento([
             'empresa_id' => $empresaId,
             'usuario_id' => $usuarioId,
@@ -251,6 +259,71 @@ final class CorreoService
         ]);
 
         return ['enviado' => true];
+    }
+
+    /**
+     * Refleja el correo enviado en la carpeta Sent del servidor IMAP y guarda
+     * una copia local en BD (carpeta enviados) para verlo de inmediato.
+     */
+    private function guardarEnviado(array $account, int $empresaId, array $to, array $cc, string $subject, string $body, string $rawMime): void
+    {
+        $cuentaId = (int) ($account['id'] ?? 0);
+        if ($cuentaId <= 0) {
+            return;
+        }
+
+        if ($rawMime !== '' && function_exists('imap_append')) {
+            try {
+                $imap = $this->openImap($account);
+                try {
+                    if (@imap_append($imap, $this->sentMailbox($account), $rawMime, '\\Seen') !== true) {
+                        @imap_append($imap, $this->sentMailbox($account, 'INBOX.Sent'), $rawMime, '\\Seen');
+                    }
+                } finally {
+                    @imap_close($imap);
+                }
+            } catch (Throwable $exception) {
+                error_log('[CorreoService] imap_append Sent: ' . $exception->getMessage());
+            }
+        }
+
+        try {
+            $repository = new CorreoMensajeRepository(Database::connection());
+            $localUid = $repository->maxUid($cuentaId, 'enviados') + 1;
+            $repository->upsertMensaje([
+                'empresa_id' => $empresaId,
+                'cuenta_id' => $cuentaId,
+                'uid' => $localUid,
+                'carpeta' => 'enviados',
+                'remitente' => (string) $account['email'],
+                'remitente_nombre' => $this->trimOrNull((string) ($account['nombre'] ?? ''), 190),
+                'destinatarios' => $this->trimOrNull(implode(', ', array_merge($to, $cc)), 60000),
+                'asunto' => $this->trimOrNull($subject, 500),
+                'snippet' => $this->trimOrNull($this->makeSnippet($body, null), 300),
+                'body_text' => $this->cleanText($body),
+                'fecha' => date('Y-m-d H:i:s'),
+                'seen' => 1,
+            ]);
+        } catch (Throwable $exception) {
+            error_log('[CorreoService] guardarEnviado BD: ' . $exception->getMessage());
+        }
+    }
+
+    private function sentMailbox(array $account, string $folder = 'Sent'): string
+    {
+        $flags = '/imap';
+        if (($account['imap_encryption'] ?? 'ssl') === 'ssl') {
+            $flags .= '/ssl';
+        } elseif (($account['imap_encryption'] ?? '') === 'tls') {
+            $flags .= '/tls';
+        } else {
+            $flags .= '/notls';
+        }
+        if ((int) ($account['imap_validate_cert'] ?? 0) === 0) {
+            $flags .= '/novalidate-cert';
+        }
+
+        return sprintf('{%s:%d%s}%s', $account['imap_host'], (int) $account['imap_port'], $flags, $folder);
     }
 
     public function probar(int $empresaId): array
@@ -358,7 +431,140 @@ final class CorreoService
 
         $repository = new CorreoMensajeRepository(Database::connection());
 
-        return $repository->paginar($empresaId, $carpeta, $page, $perPage);
+        return $repository->paginar($empresaId, $carpeta, $page, $perPage, [
+            'q' => (string) ($filters['q'] ?? ''),
+            'sort' => (string) ($filters['sort'] ?? 'fecha'),
+            'order' => (string) ($filters['order'] ?? 'desc'),
+        ]);
+    }
+
+    /**
+     * Detalle de un mensaje desde BD. Marca como leido (BD + IMAP best-effort).
+     */
+    public function mensajeBd(int $empresaId, int $id): array
+    {
+        if ($id <= 0) {
+            throw new HttpException('Mensaje invalido', 422);
+        }
+        $repository = new CorreoMensajeRepository(Database::connection());
+        $mensaje = $repository->find($empresaId, $id);
+        if ($mensaje === null) {
+            throw new HttpException('Mensaje no encontrado', 404);
+        }
+
+        if ((int) ($mensaje['seen'] ?? 0) === 0) {
+            $repository->updateSeen($empresaId, $id, true);
+            $mensaje['seen'] = 1;
+            $this->marcarLeidoImap($empresaId, (int) $mensaje['uid']);
+        }
+
+        return ['mensaje' => $mensaje];
+    }
+
+    /**
+     * Mueve un mensaje a la papelera en BD y en el servidor IMAP.
+     */
+    public function eliminar(int $empresaId, int $id, int $usuarioId): array
+    {
+        if ($id <= 0) {
+            throw new HttpException('Mensaje invalido', 422);
+        }
+        $repository = new CorreoMensajeRepository(Database::connection());
+        $mensaje = $repository->find($empresaId, $id);
+        if ($mensaje === null) {
+            throw new HttpException('Mensaje no encontrado', 404);
+        }
+
+        $repository->moverCarpeta($empresaId, $id, 'papelera');
+        $this->moverPapeleraImap($empresaId, (int) $mensaje['uid']);
+
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'usuario_id' => $usuarioId,
+            'modulo' => 'correo',
+            'accion' => 'eliminar',
+            'entidad' => 'correo_mensajes',
+            'entidad_id' => $id,
+            'descripcion' => 'Correo movido a papelera',
+            'metadata' => ['uid' => (int) $mensaje['uid'], 'asunto' => $mensaje['asunto'] ?? ''],
+        ]);
+
+        return ['eliminado' => true];
+    }
+
+    /**
+     * Reenvia un mensaje existente citando el cuerpo original.
+     */
+    public function reenviar(array $payload, int $usuarioId): array
+    {
+        $empresaId = (int) ($payload['empresa_id'] ?? 0);
+        $id = (int) ($payload['id'] ?? 0);
+        if ($id <= 0) {
+            throw new HttpException('Mensaje invalido', 422);
+        }
+        $repository = new CorreoMensajeRepository(Database::connection());
+        $original = $repository->find($empresaId, $id);
+        if ($original === null) {
+            throw new HttpException('Mensaje no encontrado', 404);
+        }
+
+        $cuerpoOriginal = trim((string) ($original['body_text'] ?? ''));
+        if ($cuerpoOriginal === '' && !empty($original['body_html'])) {
+            $cuerpoOriginal = $this->htmlToText((string) $original['body_html']);
+        }
+        $extra = trim((string) ($payload['body'] ?? ''));
+        $asuntoBase = (string) ($original['asunto'] ?? '');
+        $asunto = stripos($asuntoBase, 'fwd:') === 0 ? $asuntoBase : 'Fwd: ' . $asuntoBase;
+
+        $body = ($extra !== '' ? $extra . "\n\n" : '')
+            . "---------- Mensaje reenviado ----------\n"
+            . 'De: ' . (string) ($original['remitente'] ?? '') . "\n"
+            . 'Fecha: ' . (string) ($original['fecha'] ?? '') . "\n"
+            . 'Asunto: ' . $asuntoBase . "\n"
+            . 'Para: ' . (string) ($original['destinatarios'] ?? '') . "\n\n"
+            . $cuerpoOriginal;
+
+        return $this->enviar([
+            'empresa_id' => $empresaId,
+            'to' => $payload['to'] ?? [],
+            'cc' => $payload['cc'] ?? [],
+            'subject' => $asunto,
+            'body' => $body,
+        ], $usuarioId);
+    }
+
+    private function marcarLeidoImap(int $empresaId, int $uid): void
+    {
+        try {
+            $account = $this->requireAccount($empresaId);
+            $imap = $this->openImap($account);
+            try {
+                @imap_setflag_full($imap, (string) $uid, '\\Seen', ST_UID);
+            } finally {
+                @imap_close($imap);
+            }
+        } catch (Throwable $exception) {
+            error_log('[CorreoService] marcarLeidoImap: ' . $exception->getMessage());
+        }
+    }
+
+    private function moverPapeleraImap(int $empresaId, int $uid): void
+    {
+        try {
+            $account = $this->requireAccount($empresaId);
+            $imap = $this->openImap($account);
+            try {
+                $movido = @imap_mail_move($imap, (string) $uid, 'Trash', CP_UID);
+                if ($movido !== true) {
+                    @imap_mail_move($imap, (string) $uid, 'INBOX.Trash', CP_UID);
+                }
+                @imap_expunge($imap);
+            } finally {
+                @imap_close($imap);
+            }
+        } catch (Throwable $exception) {
+            error_log('[CorreoService] moverPapeleraImap: ' . $exception->getMessage());
+        }
     }
 
     private function requireAccount(int $empresaId): array
