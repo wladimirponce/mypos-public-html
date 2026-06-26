@@ -98,9 +98,18 @@ final class FolioService
             throw new HttpException('Archivo de CAF inválido o no recibido', 422);
         }
 
-        // Leer XML
+        // Leer XML — los CAF del SII usan ISO-8859-1 (Ñ, tildes) sin declarar
+        // encoding en el prólogo, lo que hace que simplexml asuma UTF-8 y falle.
         $xmlContent = file_get_contents((string) $file['tmp_name']);
-        
+        if (!preg_match('/encoding\s*=/i', substr($xmlContent, 0, 200))) {
+            $xmlContent = preg_replace(
+                '/<\?xml\s+version\s*=\s*"1\.0"\s*\?>/',
+                '<?xml version="1.0" encoding="ISO-8859-1"?>',
+                $xmlContent,
+                1
+            );
+        }
+
         // Deshabilitar entidades externas por seguridad XML (previene XXE)
         $disableEntities = libxml_disable_entity_loader(true);
         $xml = simplexml_load_string($xmlContent);
