@@ -254,27 +254,51 @@ final class UploadService
     {
         $this->requireEmpresa($empresaId);
         $file = $this->repository->findActiveCertificate($empresaId);
-        
-        if ($file === null) {
+
+        $absolutePath = null;
+        $password = '';
+        $nombreOriginal = '';
+        $createdAt = '';
+
+        if ($file !== null) {
+            $nombreOriginal = (string) $file['nombre_original'];
+            $createdAt = (string) $file['created_at'];
+            $metadata = json_decode((string) ($file['metadata_json'] ?? '{}'), true);
+            $password = (string) ($metadata['password_certificado'] ?? '');
+            try {
+                $absolutePath = $this->absolutePath((string) $file['ruta_relativa']);
+                if (!is_file($absolutePath)) {
+                    $absolutePath = null;
+                }
+            } catch (\Throwable $e) {
+                $absolutePath = null;
+            }
+        }
+
+        if ($absolutePath === null) {
+            $adminCert = $this->resolveAdminCertificate($empresaId);
+            if ($adminCert !== null) {
+                $absolutePath = $adminCert['path'];
+                $password = $adminCert['password'];
+                $nombreOriginal = $nombreOriginal ?: basename($absolutePath);
+            }
+        }
+
+        if ($absolutePath === null) {
+            if ($file !== null) {
+                return [
+                    'registrado' => true,
+                    'valido' => false,
+                    'mensaje' => 'El archivo físico del certificado digital no se encuentra en el servidor.',
+                    'nombre_original' => $nombreOriginal,
+                    'created_at' => $createdAt,
+                ];
+            }
             return [
                 'registrado' => false,
                 'mensaje' => 'No hay ningún certificado digital registrado para esta empresa.',
             ];
         }
-
-        $absolutePath = $this->absolutePath((string) $file['ruta_relativa']);
-        if (!is_file($absolutePath)) {
-            return [
-                'registrado' => true,
-                'valido' => false,
-                'mensaje' => 'El archivo físico del certificado digital no se encuentra en el servidor.',
-                'nombre_original' => (string) $file['nombre_original'],
-                'created_at' => (string) $file['created_at'],
-            ];
-        }
-
-        $metadata = json_decode((string) ($file['metadata_json'] ?? '{}'), true);
-        $password = (string) ($metadata['password_certificado'] ?? '');
 
         $pfxContent = file_get_contents($absolutePath);
         try {
@@ -284,8 +308,8 @@ final class UploadService
                 'registrado' => true,
                 'valido' => false,
                 'mensaje' => $exception->getMessage(),
-                'nombre_original' => (string) $file['nombre_original'],
-                'created_at' => (string) $file['created_at'],
+                'nombre_original' => $nombreOriginal,
+                'created_at' => $createdAt,
             ];
         }
 
@@ -295,8 +319,8 @@ final class UploadService
                 'registrado' => true,
                 'valido' => false,
                 'mensaje' => 'Error al analizar el certificado X509.',
-                'nombre_original' => (string) $file['nombre_original'],
-                'created_at' => (string) $file['created_at'],
+                'nombre_original' => $nombreOriginal,
+                'created_at' => $createdAt,
             ];
         }
 
@@ -304,20 +328,78 @@ final class UploadService
         $validTo = (int) ($certData['validTo_time_t'] ?? 0);
         $subject = $certData['subject'] ?? [];
         $cn = (string) ($subject['CN'] ?? 'Desconocido');
-        
+
         $vencido = time() > $validTo;
         $diasRestantes = (int) floor(($validTo - time()) / 86400);
 
         return [
             'registrado' => true,
             'valido' => true,
-            'nombre_original' => (string) $file['nombre_original'],
+            'nombre_original' => $nombreOriginal,
             'titular' => $cn,
             'valido_desde' => date('Y-m-d H:i:s', $validFrom),
             'valido_hasta' => date('Y-m-d H:i:s', $validTo),
             'vencido' => $vencido,
             'dias_restantes' => $diasRestantes,
-            'created_at' => (string) $file['created_at'],
+            'created_at' => $createdAt,
+        ];
+    }
+
+    private function resolveAdminCertificate(int $empresaId): ?array
+    {
+        $conn = $this->repository->connection();
+        $stmt = $conn->prepare(
+            'SELECT e.rut, COALESCE(dc.ambiente, \'CERTIFICACION\') AS ambiente
+             FROM empresas e
+             LEFT JOIN dte_configuracion dc ON dc.empresa_id = e.id
+             WHERE e.id = :id LIMIT 1'
+        );
+        $stmt->execute(['id' => $empresaId]);
+        $row = $stmt->fetch();
+        if (!is_array($row) || empty($row['rut'])) {
+            return null;
+        }
+
+        $rut = (string) $row['rut'];
+        $ambiente = strtoupper((string) $row['ambiente']);
+        $adminBase = dirname(__DIR__, 3) . '/admin';
+        $certDir = $adminBase . '/cert/' . $rut . '/' . $ambiente;
+        $confPath = $certDir . '/cert.conf';
+
+        if (!is_file($confPath)) {
+            return null;
+        }
+
+        $conf = json_decode((string) file_get_contents($confPath), true);
+        if (!is_array($conf)) {
+            return null;
+        }
+
+        $pfxFile = (string) ($conf['pfx_file'] ?? '');
+        if ($pfxFile !== '') {
+            $pfxPath = str_contains($pfxFile, '/') || str_contains($pfxFile, '\\')
+                ? $pfxFile
+                : $certDir . '/' . $pfxFile;
+        } else {
+            $pfxPath = $certDir . '/firma.pfx';
+        }
+
+        if (!is_file($pfxPath)) {
+            foreach (glob($certDir . '/*.pfx') ?: [] as $found) {
+                $pfxPath = $found;
+                break;
+            }
+        }
+
+        if (!is_file($pfxPath)) {
+            return null;
+        }
+
+        $password = (string) ($conf['password'] ?? $conf['pass'] ?? '');
+
+        return [
+            'path' => $pfxPath,
+            'password' => $password,
         ];
     }
 

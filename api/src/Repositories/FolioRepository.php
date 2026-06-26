@@ -70,24 +70,30 @@ final class FolioRepository
         return (bool) $statement->fetchColumn();
     }
 
-    public function cafOverlapExists(int $empresaId, string $type, int $from, int $to): bool
+    public function cafOverlapExists(int $empresaId, string $type, int $from, int $to, string $ambiente = ''): bool
     {
-        $statement = $this->connection->prepare(
-            'SELECT 1
+        $sql = 'SELECT 1
              FROM caf_archivos
              WHERE empresa_id = :empresa_id
                AND tipo_documento = :tipo_documento
                AND estado = \'ACTIVO\'
                AND folio_desde <= :folio_hasta
-               AND folio_hasta >= :folio_desde
-             LIMIT 1'
-        );
-        $statement->execute([
+               AND folio_hasta >= :folio_desde';
+        $params = [
             'empresa_id' => $empresaId,
             'tipo_documento' => $type,
             'folio_desde' => $from,
             'folio_hasta' => $to,
-        ]);
+        ];
+
+        if ($ambiente !== '') {
+            $sql .= ' AND ambiente = :ambiente';
+            $params['ambiente'] = $ambiente;
+        }
+
+        $sql .= ' LIMIT 1';
+        $statement = $this->connection->prepare($sql);
+        $statement->execute($params);
 
         return (bool) $statement->fetchColumn();
     }
@@ -98,11 +104,11 @@ final class FolioRepository
             'INSERT INTO caf_archivos (
                 empresa_id, tipo_documento, rut_emisor, razon_social_emisor,
                 folio_desde, folio_hasta, fecha_autorizacion, fecha_vencimiento,
-                archivo_path, caf_xml, estado, created_by_usuario_id
+                archivo_path, caf_xml, estado, ambiente, created_by_usuario_id
              ) VALUES (
                 :empresa_id, :tipo_documento, :rut_emisor, :razon_social_emisor,
                 :folio_desde, :folio_hasta, :fecha_autorizacion, :fecha_vencimiento,
-                :archivo_path, :caf_xml, \'ACTIVO\', :created_by_usuario_id
+                :archivo_path, :caf_xml, \'ACTIVO\', :ambiente, :created_by_usuario_id
              )'
         );
         $statement->execute($data);
@@ -119,7 +125,7 @@ final class FolioRepository
                 WHERE empresa_id = :empresa_id';
         $params = ['empresa_id' => $empresaId];
 
-        foreach (['tipo_documento', 'estado'] as $field) {
+        foreach (['tipo_documento', 'estado', 'ambiente'] as $field) {
             if (!empty($filters[$field])) {
                 $sql .= " AND {$field} = :{$field}";
                 $params[$field] = strtoupper((string) $filters[$field]);

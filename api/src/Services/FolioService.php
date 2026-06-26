@@ -42,7 +42,9 @@ final class FolioService
             throw new HttpException('fecha_vencimiento no puede ser menor que fecha_autorizacion', 422);
         }
 
-        if ($this->repository->cafOverlapExists($empresaId, $type, $from, $to)) {
+        $ambiente = $this->ambienteEmpresa($empresaId);
+
+        if ($this->repository->cafOverlapExists($empresaId, $type, $from, $to, $ambiente)) {
             throw new HttpException('Existe un CAF activo que se solapa con el rango informado', 422);
         }
 
@@ -57,8 +59,11 @@ final class FolioService
             'fecha_vencimiento' => $expirationDate,
             'archivo_path' => $this->nullableString($payload['archivo_path'] ?? null),
             'caf_xml' => $this->nullableString($payload['caf_xml'] ?? null),
+            'ambiente' => $ambiente,
             'created_by_usuario_id' => $userId,
         ]);
+
+        $this->autoAsignarCaf($userId, $cafId, $empresaId, $type, $from, $to);
 
         AuditoriaService::registrarEvento([
             'empresa_id' => $empresaId,
@@ -74,6 +79,7 @@ final class FolioService
                 'folio_hasta' => $to,
                 'fecha_vencimiento' => $expirationDate,
                 'estado' => 'ACTIVO',
+                'ambiente' => $ambiente,
             ],
         ]);
 
@@ -209,6 +215,10 @@ final class FolioService
 
         if (!empty($filters['tipo_documento'])) {
             $this->type($filters['tipo_documento']);
+        }
+
+        if (empty($filters['ambiente'])) {
+            $filters['ambiente'] = $this->ambienteEmpresa($empresaId);
         }
 
         return $this->repository->listCafs($empresaId, $filters);
@@ -778,6 +788,53 @@ final class FolioService
             'alerta_folios_bajos' => $available <= $alertMin,
             'estado' => (string) $assignment['estado'],
         ];
+    }
+
+    private function ambienteEmpresa(int $empresaId): string
+    {
+        $row = $this->repository->connection()->prepare(
+            'SELECT ambiente FROM dte_configuracion WHERE empresa_id = :id LIMIT 1'
+        );
+        $row->execute(['id' => $empresaId]);
+        $amb = $row->fetchColumn();
+
+        return is_string($amb) && $amb !== '' ? strtoupper($amb) : 'CERTIFICACION';
+    }
+
+    private function sucursalPrincipal(int $empresaId): int
+    {
+        $stmt = $this->repository->connection()->prepare(
+            'SELECT id FROM sucursales WHERE empresa_id = :id AND activo = 1 ORDER BY id ASC LIMIT 1'
+        );
+        $stmt->execute(['id' => $empresaId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function autoAsignarCaf(int $userId, int $cafId, int $empresaId, string $type, int $from, int $to): void
+    {
+        $sucursalId = $this->sucursalPrincipal($empresaId);
+        if ($sucursalId <= 0) {
+            return;
+        }
+
+        if ($this->repository->assignmentOverlapExists($empresaId, $type, $from, $to)) {
+            return;
+        }
+
+        $this->repository->createAssignment([
+            'empresa_id' => $empresaId,
+            'sucursal_id' => $sucursalId,
+            'caf_id' => $cafId,
+            'tipo_documento' => $type,
+            'folio_desde' => $from,
+            'folio_hasta' => $to,
+            'folio_actual' => $from - 1,
+            'alerta_minimo' => 50,
+            'estado' => 'ACTIVO',
+            'caja_id' => null,
+            'dispositivo_id' => null,
+            'created_by_usuario_id' => $userId,
+        ]);
     }
 
     private function validateEmpresa(int $empresaId): void
