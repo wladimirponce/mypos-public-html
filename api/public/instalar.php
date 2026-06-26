@@ -159,12 +159,26 @@ function mypos_applied_migrations(PDO $pdo): array
     }
 }
 
+function mypos_safe_pdo_exec(?PDO $pdo, string $sql): void
+{
+    if ($pdo === null) {
+        return;
+    }
+
+    try {
+        $pdo->exec($sql);
+    } catch (PDOException) {
+        // No romper la respuesta del instalador por una limpieza defensiva fallida.
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $host = $_POST['host'] ?? 'localhost';
     $db   = $_POST['db'] ?? '';
     $user = $_POST['user'] ?? '';
     $pass = $_POST['pass'] ?? '';
     $soloActualizar = ($_POST['solo_actualizar'] ?? '0') === '1';
+    $pdo = null;
 
     if (empty($db) || empty($user)) {
         $mensaje = "<div class='alert alert-danger'>La Base de Datos y el Usuario son obligatorios.</div>";
@@ -184,6 +198,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $archivos = glob($sql_dir . '/*.sql') ?: [];
             sort($archivos);
+            if ($archivos === []) {
+                throw new Exception("No se encontraron migraciones SQL en {$sql_dir}.");
+            }
 
             $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;");
             $pdo->exec("SET collation_connection = 'utf8mb4_unicode_ci';");
@@ -205,6 +222,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $applied = $soloActualizar ? mypos_applied_migrations($pdo) : [];
 
             $log            = "<ul class='list-group mt-3'>";
+            $log           .= "<li class='list-group-item list-group-item-primary'>"
+                            . "Carpeta SQL: <code>" . htmlspecialchars($sql_dir) . "</code> - "
+                            . "<b>" . count($archivos) . "</b> migraciones detectadas.</li>";
             $aplicadas      = 0;
             $saltadas       = 0;
             $errores        = 0;
@@ -293,9 +313,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                       . "Configure las credenciales de BD en el archivo <b>.env</b> del servidor.</div>";
 
         } catch (PDOException $e) {
+            mypos_safe_pdo_exec($pdo, "SET FOREIGN_KEY_CHECKS=1;");
             $mensaje = "<div class='alert alert-danger'><b>Error de Conexión:</b> "
                      . htmlspecialchars($e->getMessage()) . "</div>";
         } catch (Exception $e) {
+            mypos_safe_pdo_exec($pdo, "SET FOREIGN_KEY_CHECKS=1;");
             $mensaje = "<div class='alert alert-danger'><b>Error:</b> "
                      . htmlspecialchars($e->getMessage()) . "</div>";
         }
@@ -328,6 +350,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?php if (!empty($mensaje)) echo $mensaje; ?>
 
             <form method="POST" action="">
+                <input type="hidden" name="token" value="<?= htmlspecialchars($providedToken, ENT_QUOTES, 'UTF-8') ?>">
                 <div class="mb-3">
                     <label class="form-label fw-bold">Servidor (Host)</label>
                     <input type="text" name="host" class="form-control" value="localhost" required>

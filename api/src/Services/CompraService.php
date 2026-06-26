@@ -415,9 +415,14 @@ final class CompraService
                 continue;
             }
 
-            $productoRepo->actualizarCostoActual($empresaId, $productoId, $costoNuevo);
+            try {
+                $producto = $productoRepo->findParaMargen($empresaId, $productoId);
+            } catch (Throwable $exception) {
+                error_log('[Compras] No se pudo calcular propuesta de margen: ' . $exception->getMessage());
+                $producto = null;
+            }
 
-            $producto = $productoRepo->findParaMargen($empresaId, $productoId);
+            $productoRepo->actualizarCostoActual($empresaId, $productoId, $costoNuevo);
 
             if ($producto === null || $producto['margen_ganancia'] === null || $producto['margen_ganancia'] === '') {
                 continue;
