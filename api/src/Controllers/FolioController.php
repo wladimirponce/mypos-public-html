@@ -102,6 +102,10 @@ final class FolioController
             return (int) $_GET['empresa_id'];
         }
 
+        if (isset($_POST['empresa_id'])) {
+            return (int) $_POST['empresa_id'];
+        }
+
         $payload = Request::json();
 
         return (int) ($payload['empresa_id'] ?? 0);
