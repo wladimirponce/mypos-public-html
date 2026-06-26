@@ -30,13 +30,14 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.1.1"
+VERSION = "1.1.4"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
 DEFAULT_RASTER_WIDTH = 576
 PDF417_RASTER_WIDTH = 480
 SUMATRA_PDF_PATH = os.environ.get("MYPOS_SUMATRA_PDF", r"C:\MyPOSPrint\SumatraPDF.exe")
+PDF_PRINTER_TOKENS = ("PDF", "PDFCREATOR", "PDF24", "MICROSOFT PRINT TO PDF", "ADOBE PDF")
 
 ESC = b"\x1b"
 GS = b"\x1d"
@@ -89,6 +90,48 @@ def text(value: Any, max_len: int | None = None) -> str:
     return clean[:max_len] if max_len else clean
 
 
+def format_rut(value: Any) -> str:
+    raw = text(value).replace(".", "").replace(" ", "").upper()
+    if "-" not in raw and len(raw) > 1:
+        raw = raw[:-1] + "-" + raw[-1]
+    if "-" not in raw:
+        return text(value)
+    body, dv = raw.split("-", 1)
+    if not body.isdigit():
+        return text(value)
+    groups: list[str] = []
+    while body:
+        groups.insert(0, body[-3:])
+        body = body[:-3]
+    return ".".join(groups) + "-" + dv[:1]
+
+
+def dte_type_name(tipo_dte: Any) -> str:
+    return {
+        "39": "BOLETA ELECTRONICA",
+        "41": "BOLETA EXENTA ELECTRONICA",
+        "33": "FACTURA ELECTRONICA",
+        "34": "FACTURA EXENTA ELECTRONICA",
+        "52": "GUIA DESPACHO ELECTRONICA",
+        "56": "NOTA DEBITO ELECTRONICA",
+        "61": "NOTA CREDITO ELECTRONICA",
+    }.get(text(tipo_dte or 39), "BOLETA ELECTRONICA")
+
+
+def sii_unit_line(data: dict[str, Any]) -> str:
+    unidad = text(data.get("unidad_sii") or data.get("unidadSII"), 34)
+    return "S.I.I." + (f" - {unidad}" if unidad else "")
+
+
+def resolution_line(data: dict[str, Any]) -> str:
+    number_value = text(data.get("nro_resol") or data.get("resolNum"))
+    date_value = text(data.get("fch_resol") or data.get("resolFch"))
+    if not number_value and not date_value:
+        return ""
+    year = date_value[:4] if len(date_value) >= 4 else date_value
+    return f"Res. Nro {number_value or '0'}" + (f" de {year}" if year else "")
+
+
 def enc(value: str) -> bytes:
     return value.encode("cp850", errors="replace")
 
@@ -139,11 +182,36 @@ def default_printer() -> str:
         return explicit
 
     printers = list_printers()
-    preferred = ("TM-T20", "TM-T88", "TM-M", "POS", "THERMAL", "BIXOLON", "STAR", "TICKET")
+    preferred = (
+        "TM-T20",
+        "TM-T88",
+        "TM-M",
+        "POS",
+        "THERMAL",
+        "TERMICA",
+        "TERMICO",
+        "BIXOLON",
+        "STAR",
+        "TICKET",
+        "XPRINTER",
+        "XP-",
+        "GP-",
+        "GPRINTER",
+        "USB",
+        *PDF_PRINTER_TOKENS,
+    )
     for name in printers:
         upper = name.upper()
         if any(token in upper for token in preferred):
             return name
+
+    if win32print is not None:
+        try:
+            default = text(win32print.GetDefaultPrinter())
+            if default:
+                return default
+        except Exception:
+            pass
 
     return ""
 
@@ -192,6 +260,280 @@ def print_raw(payload: bytes, printer_name: str | None = None) -> tuple[bool, st
                 win32print.ClosePrinter(handle)
             except Exception:
                 pass
+
+
+def is_pdf_printer(printer_name: str | None) -> bool:
+    upper = text(printer_name).upper()
+    return upper != "" and any(token in upper for token in PDF_PRINTER_TOKENS)
+
+
+def pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def write_text_pdf(path: str, lines: list[str], title: str = "MyPOS ticket") -> None:
+    page_width = 226
+    line_height = 11
+    top_margin = 24
+    bottom_margin = 24
+    page_height = max(420, top_margin + bottom_margin + (len(lines) + 2) * line_height)
+    y = page_height - top_margin
+
+    stream_lines = [
+        "BT",
+        "/F1 8.5 Tf",
+        f"14 {y} Td",
+        f"{line_height} TL",
+    ]
+    for line_text in lines:
+        stream_lines.append(f"({pdf_escape(line_text[:54])}) Tj")
+        stream_lines.append("T*")
+    stream_lines.append("ET")
+    stream = "\n".join(stream_lines).encode("latin-1", errors="replace")
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_width} {page_height}] "
+            f"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+        ).encode("ascii"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+
+    pdf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{index} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R /Info << /Title ({pdf_escape(title)}) >> >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode("latin-1", errors="replace")
+    )
+
+    with open(path, "wb") as handle:
+        handle.write(pdf)
+
+
+def ticket_pdf_lines(data: dict[str, Any], kind: str = "ticket") -> list[str]:
+    width = 38
+    lines: list[str] = []
+    company = text(data.get("nombre_fantasia") or data.get("empresa") or data.get("razon_social"), 46) or "Empresa no informada"
+    lines.append(company[:width].center(width))
+    legal_name = text(data.get("razon_social"), 46)
+    if legal_name and legal_name != company:
+        lines.append(legal_name[:width].center(width))
+
+    for key, label in (("rut_emisor", "RUT"), ("giro", ""), ("direccion", ""), ("comuna", ""), ("ciudad", "")):
+        value = text(data.get(key), 46)
+        if value:
+            lines.append(((f"{label}: " if label else "") + value)[:width])
+
+    lines.append("=" * width)
+    if kind == "boleta_electronica_dte":
+        lines.append(("-" * 30).center(width))
+        rut = format_rut(data.get("rut_emisor"))
+        if rut:
+            lines.append(f"R.U.T.: {rut}".center(width))
+        lines.append(dte_type_name(data.get("tipo_dte")).center(width))
+        folio = text(data.get("folio_dte") or data.get("folio"))
+        if folio:
+            lines.append(f"Nro {folio}".center(width))
+        lines.append(("-" * 30).center(width))
+        lines.append(sii_unit_line(data).center(width))
+    else:
+        lines.append("TICKET DE VENTA".center(width))
+        lines.append("NO VALIDO COMO DOCUMENTO TRIBUTARIO".center(width))
+    lines.append("=" * width)
+
+    if data.get("venta_id"):
+        lines.append(f"Venta: #{text(data.get('venta_id'))}")
+    lines.append(f"Fecha: {text(data.get('fecha_dte') or data.get('fecha')) or datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"Pago : {text(data.get('metodo_pago')) or 'EFECTIVO'}")
+    lines.append("-" * width)
+    lines.append(f"{'Producto':<22}{'Cant':>5}{'Total':>11}")
+    lines.append("-" * width)
+
+    for item in data.get("productos") or []:
+        quantity = number(item.get("cantidad"), 1)
+        subtotal = item.get("subtotal")
+        if subtotal is None:
+            subtotal = number(item.get("precio") or item.get("precio_unitario"), 0) * quantity
+        rows = wrap_label(text(item.get("nombre")) or "Producto", 22)
+        lines.append(f"{rows[0]:<22}{quantity:>5.2f}{money(subtotal):>11}")
+        for extra in rows[1:]:
+            lines.append(extra[:22])
+
+    lines.append("=" * width)
+    lines.append(f"TOTAL {money(data.get('total'))}".rjust(width))
+    received = number(data.get("monto_recibido"), 0)
+    change = number(data.get("vuelto"), 0)
+    if received > 0:
+        lines.append(f"Recibido {money(received)}".rjust(width))
+        lines.append(f"Vuelto   {money(change)}".rjust(width))
+    if kind == "boleta_electronica_dte":
+        lines.append("")
+        if data.get("ted_xml"):
+            lines.append("[PDF417 TED disponible en impresora termica]".center(width))
+        else:
+            lines.append("*** SIN TIMBRE ELECTRONICO ***".center(width))
+        lines.append("Timbre Electronico SII".center(width))
+        resol = resolution_line(data)
+        if resol:
+            lines.append(resol.center(width))
+        lines.append("Verifique documento: www.sii.cl".center(width))
+        verify_url = text(data.get("verify_url"), width)
+        if verify_url:
+            lines.append(verify_url.center(width))
+    lines.append("")
+    if kind != "boleta_electronica_dte":
+        lines.append("Gracias por su compra".center(width))
+    return lines
+
+
+def etiquetas_pdf_lines(data: dict[str, Any]) -> list[str]:
+    lines = [text(data.get("empresa") or data.get("nombre_fantasia"), 38) or "MyPOS", "=" * 38]
+    for item in data.get("etiquetas") or []:
+        copies = max(1, min(99, int(number(item.get("copias") or item.get("cantidad"), 1))))
+        lines.append(text(item.get("nombre"), 38) or "Producto")
+        lines.append(f"COD: {text(item.get('codigo'), 30)}")
+        ean = text(item.get("ean") or item.get("codigo_barra"), 30)
+        if ean:
+            lines.append(f"EAN: {ean}")
+        lines.append(f"Precio: {money(item.get('precio_venta') or item.get('precio'))}")
+        if item.get("fecha_vencimiento"):
+            lines.append(f"Vto: {text(item.get('fecha_vencimiento'), 20)}")
+        lines.append(f"Copias: {copies}")
+        lines.append("-" * 38)
+    return lines
+
+
+def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
+    if Image is None or not data.get("ted_xml"):
+        return False
+
+    try:
+        from PIL import ImageDraw, ImageFont
+        from pdf417 import encode as pdf417_encode
+        from pdf417 import render_image as pdf417_render
+
+        width = 640
+        margin = 26
+        line_h = 22
+        font = ImageFont.load_default()
+        bold_font = font
+        canvas = Image.new("RGB", (width, 1800), "white")
+        draw = ImageDraw.Draw(canvas)
+        y = 24
+
+        def text_width(value: str, used_font: Any = font) -> int:
+            box = draw.textbbox((0, 0), value, font=used_font)
+            return box[2] - box[0]
+
+        def center(value: str, used_font: Any = font, step: int = line_h) -> None:
+            nonlocal y
+            value = text(value, 78)
+            draw.text(((width - text_width(value, used_font)) // 2, y), value, fill="black", font=used_font)
+            y += step
+
+        def left(value: str, used_font: Any = font, step: int = line_h) -> None:
+            nonlocal y
+            draw.text((margin, y), text(value, 90), fill="black", font=used_font)
+            y += step
+
+        def rule(x_pad: int = 70, step: int = 12) -> None:
+            nonlocal y
+            draw.line((x_pad, y, width - x_pad, y), fill="black", width=2)
+            y += step
+
+        rule()
+        rut = format_rut(data.get("rut_emisor"))
+        if rut:
+            center(f"R.U.T.: {rut}", bold_font)
+        center(dte_type_name(data.get("tipo_dte")), bold_font)
+        folio = text(data.get("folio_dte") or data.get("folio"))
+        if folio:
+            center(f"Nro {folio}", bold_font)
+        rule()
+        center(sii_unit_line(data), bold_font)
+        y += 10
+
+        left(text(data.get("razon_social") or data.get("nombre_fantasia"), 70) or "Empresa no informada", bold_font)
+        for key, label in (("giro", "Giro"), ("direccion", "Casa Matriz"), ("comuna", "Comuna"), ("ciudad", "Ciudad")):
+            value = text(data.get(key), 70)
+            if value:
+                left(f"{label}: {value}")
+        left(f"Fecha: {text(data.get('fecha_dte') or data.get('fecha'))}")
+        y += 6
+        rule(margin)
+
+        left(f"{'Producto':<30}{'Cant':>7}{'Total':>14}", bold_font)
+        rule(margin)
+        for item in data.get("productos") or []:
+            quantity = number(item.get("cantidad"), 1)
+            subtotal = item.get("subtotal")
+            if subtotal is None:
+                subtotal = number(item.get("precio") or item.get("precio_unitario"), 0) * quantity
+            rows = wrap_label(text(item.get("nombre")) or "Producto", 30)
+            left(f"{rows[0]:<30}{quantity:>7.2f}{money(subtotal):>14}")
+            for extra in rows[1:]:
+                left(extra)
+
+        rule(margin)
+        center(f"TOTAL {money(data.get('total'))}", bold_font, 28)
+        y += 8
+
+        ted_safe = text(data.get("ted_xml")).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
+        codes = pdf417_encode(ted_safe, columns=17, security_level=5, encoding="iso-8859-1")
+        barcode_img = pdf417_render(codes, scale=2, ratio=5).convert("RGB")
+        if barcode_img.width > 540:
+            ratio = 540 / barcode_img.width
+            barcode_img = barcode_img.resize((540, max(1, int(barcode_img.height * ratio))))
+        canvas.paste(barcode_img, ((width - barcode_img.width) // 2, y))
+        y += barcode_img.height + 10
+        center("Timbre Electronico SII", bold_font)
+        resol = resolution_line(data)
+        if resol:
+            center(resol)
+        center("Verifique documento: www.sii.cl")
+        verify_url = text(data.get("verify_url"), 70)
+        if verify_url:
+            center(verify_url)
+
+        cropped = canvas.crop((0, 0, width, min(canvas.height, y + 30)))
+        cropped.save(path, "PDF", resolution=203.0)
+        return True
+    except Exception as exc:
+        print(f"[PDF DTE] image fallback failed: {exc}")
+        return False
+
+
+def print_as_pdf_file(data: dict[str, Any], kind: str = "ticket") -> tuple[bool, str]:
+    documents = os.path.join(os.path.expanduser("~"), "Documents", "MyPOS")
+    os.makedirs(documents, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    venta = text(data.get("venta_id") or data.get("folio_dte") or data.get("folio") or stamp, 40)
+    filename = f"MyPOS ticket {venta}.pdf".replace("/", "-").replace("\\", "-").replace(":", "-")
+    path = os.path.join(documents, filename)
+    if kind != "boleta_electronica_dte" or not write_boleta_dte_image_pdf(path, data):
+        lines = etiquetas_pdf_lines(data) if kind == "etiquetas" else ticket_pdf_lines(data, kind)
+        write_text_pdf(path, lines, title="MyPOS ticket")
+    try:
+        os.startfile(path)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    return True, f"PDF generado: {path}"
 
 
 def image_to_escpos_raster(img: Any, max_width: int = DEFAULT_RASTER_WIDTH) -> bytes:
@@ -469,23 +811,30 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
     ticket.extend(CMD_INIT)
     ticket.extend(CMD_CODEPAGE_PC858)
     ticket.extend(CMD_CENTER)
-    ticket.extend(CMD_BOLD_ON)
-    ticket.extend(enc((text(data.get("razon_social") or data.get("nombre_fantasia"), 46) or "Empresa no informada") + "\n"))
-    ticket.extend(CMD_BOLD_OFF)
-
-    for key, label in (("rut_emisor", "RUT"), ("giro", ""), ("direccion", ""), ("comuna", ""), ("ciudad", ""), ("telefono", ""), ("sitio_web", "")):
-        value = text(data.get(key), 46)
-        if value:
-            ticket.extend(enc((f"{label}: " if label else "") + value + "\n"))
-
     ticket.extend(separator("="))
     ticket.extend(CMD_BOLD_ON)
-    ticket.extend(enc("BOLETA ELECTRONICA\n"))
+    rut = format_rut(data.get("rut_emisor"))
+    if rut:
+        ticket.extend(enc(f"R.U.T.: {rut}\n"))
+    ticket.extend(enc(dte_type_name(data.get("tipo_dte")) + "\n"))
     folio = text(data.get("folio_dte") or data.get("folio"))
     if folio:
         ticket.extend(enc(f"Nro {folio}\n"))
     ticket.extend(CMD_BOLD_OFF)
     ticket.extend(separator("="))
+    ticket.extend(enc(sii_unit_line(data) + "\n"))
+    ticket.extend(enc("\n"))
+
+    ticket.extend(CMD_LEFT)
+    ticket.extend(CMD_BOLD_ON)
+    ticket.extend(enc((text(data.get("razon_social") or data.get("nombre_fantasia"), 46) or "Empresa no informada") + "\n"))
+    ticket.extend(CMD_BOLD_OFF)
+
+    for key, label in (("giro", "Giro"), ("direccion", "Casa Matriz"), ("comuna", "Comuna"), ("ciudad", "Ciudad"), ("telefono", "Telefono"), ("sitio_web", "Web")):
+        value = text(data.get(key), 46)
+        if value:
+            ticket.extend(enc((f"{label}: " if label else "") + value + "\n"))
+
     ticket.extend(CMD_LEFT)
     ticket.extend(line("Fecha", text(data.get("fecha_dte") or data.get("fecha"))))
     ticket.extend(line("Tipo DTE", text(data.get("tipo_dte") or 39)))
@@ -498,11 +847,10 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
     ticket.extend(CMD_BOLD_ON)
     ticket.extend(enc("Timbre Electronico SII\n"))
     ticket.extend(CMD_BOLD_OFF)
-    resol = text(data.get("nro_resol"))
-    resol_date = text(data.get("fch_resol"))
-    if resol and resol_date:
-        ticket.extend(enc(f"Res. {resol} de {resol_date[:4]}\n"))
-    ticket.extend(enc("Verifique en www.sii.cl\n"))
+    resol = resolution_line(data)
+    if resol:
+        ticket.extend(enc(resol + "\n"))
+    ticket.extend(enc("Verifique documento: www.sii.cl\n"))
     if data.get("verify_url"):
         ticket.extend(enc(text(data.get("verify_url"), 46) + "\n"))
     ticket.extend(CMD_FEED_CUT)
@@ -591,6 +939,7 @@ def status():
                 "host": HOST,
                 "port": PORT,
                 "printer": printer,
+                "printers": list_printers(),
                 "printer_access": printer_access,
                 "printer_access_message": printer_access_message,
                 "pywin32": win32print is not None,
@@ -608,20 +957,24 @@ def printers():
 
 @app.get("/test")
 def test_print():
-    payload = format_ticket(
-        {
-            "empresa": "MyPOS",
-            "sucursal": "Prueba local",
-            "venta_id": "TEST",
-            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "metodo_pago": "EFECTIVO",
-            "total": 1000,
-            "monto_recibido": 1000,
-            "vuelto": 0,
-            "productos": [{"nombre": "Prueba de impresion", "cantidad": 1, "subtotal": 1000}],
-        }
-    )
-    ok, message = print_raw(payload, request.args.get("printer"))
+    data = {
+        "empresa": "MyPOS",
+        "sucursal": "Prueba local",
+        "venta_id": "TEST",
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "metodo_pago": "EFECTIVO",
+        "total": 1000,
+        "monto_recibido": 1000,
+        "vuelto": 0,
+        "productos": [{"nombre": "Prueba de impresion", "cantidad": 1, "subtotal": 1000}],
+    }
+    printer = text(request.args.get("printer")) or default_printer()
+    if is_pdf_printer(printer):
+        ok, message = print_as_pdf_file(data, "ticket")
+        return jsonify({"success": ok, "message": message}), 200 if ok else 500
+
+    payload = format_ticket(data)
+    ok, message = print_raw(payload, printer)
     return jsonify({"success": ok, "message": message}), 200 if ok else 500
 
 
@@ -636,8 +989,13 @@ def print_ticket():
     printer = text(data.get("printer")) or None
 
     try:
+        effective_printer = printer or default_printer()
         if kind in ("boleta_electronica_pdf", "pdf"):
             ok, message = print_pdf_job(data)
+            return jsonify({"success": ok, "message": message}), 200 if ok else 500
+
+        if is_pdf_printer(effective_printer):
+            ok, message = print_as_pdf_file(data, kind)
             return jsonify({"success": ok, "message": message}), 200 if ok else 500
 
         if kind == "etiquetas":
