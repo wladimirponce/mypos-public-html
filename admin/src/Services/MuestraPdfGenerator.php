@@ -376,7 +376,7 @@ class MuestraPdfGenerator
         $pdf->SetXY(20, $tedY + 23);
         $pdf->Cell(60, 3.5, 'Timbre Electrónico SII', 0, 2, 'C');
         $pdf->SetFont('helvetica', '', 8);
-        $pdf->Cell(60, 3.5, "Res. Ex. SII N° {$resolNum} del {$resolAno}", 0, 2, 'C');
+        $pdf->Cell(60, 3.5, "Res. {$resolNum} de {$resolAno}", 0, 2, 'C');
         $pdf->Cell(60, 3.5, 'Verifique documento: www.sii.cl', 0, 2, 'C');
 
         // Marca CEDIBLE

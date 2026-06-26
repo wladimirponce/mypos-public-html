@@ -501,7 +501,7 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
     resol = text(data.get("nro_resol"))
     resol_date = text(data.get("fch_resol"))
     if resol and resol_date:
-        ticket.extend(enc(f"Res. Ex. SII Nro {resol} del {resol_date[:4]}\n"))
+        ticket.extend(enc(f"Res. {resol} de {resol_date[:4]}\n"))
     ticket.extend(enc("Verifique en www.sii.cl\n"))
     if data.get("verify_url"):
         ticket.extend(enc(text(data.get("verify_url"), 46) + "\n"))
