@@ -280,6 +280,38 @@ final class VentaService
                 $response['saldo_credito'] = $creditBalance;
             }
 
+            // ── Boleta electrónica (best-effort) ─────────────────────────────────
+            // La venta ya está confirmada (commit hecho). Si la empresa tiene DTE
+            // habilitado, se emite la boleta reutilizando el flujo de Documentos
+            // Tributarios (crearDesdeVenta → emitirDte), que a su vez genera el TED
+            // para imprimir y el PDF de respaldo en la nube. NUNCA rompe la venta:
+            // si el SII falla / no hay folios, la boleta queda pendiente y el POS
+            // imprime el ticket. El dte_print_payload alimenta el print server; el
+            // pdf_path es el respaldo usado cuando no hay impresora local.
+            if (!empty($config['documentos_tributarios_habilitados'])) {
+                try {
+                    $docSvc = new \Mypos\Services\DocumentoTributarioService();
+                    $doc = $docSvc->crearDesdeVenta($userId, [
+                        'empresa_id' => $empresaId,
+                        'venta_id'   => $saleId,
+                    ]);
+                    $emision = $docSvc->emitirDte($userId, (int) $doc['documento_emitido_id'], [
+                        'empresa_id'              => $empresaId,
+                        'sucursal_id'             => $sucursalId,
+                        'asignar_folio_si_falta'  => true,
+                        'origen'                  => 'ONLINE',
+                    ]);
+                    $response['dte_print_payload'] = $emision['dte_print_payload'] ?? null;
+                    $response['dte_pdf_path']      = $emision['pdf_path'] ?? null;
+                    $response['dte_folio']         = $emision['folio'] ?? null;
+                    $response['dte_estado']        = $emision['estado'] ?? null;
+                    $response['dte_emision_id']    = $emision['dte_emision_id'] ?? null;
+                } catch (Throwable $dteEx) {
+                    error_log('[POS DTE] Boleta no emitida (venta ' . $saleId . ' OK): ' . $dteEx->getMessage());
+                    $response['dte_error'] = 'Boleta electrónica pendiente de emisión.';
+                }
+            }
+
             return $response;
         } catch (Throwable $exception) {
             if ($connection->inTransaction()) {

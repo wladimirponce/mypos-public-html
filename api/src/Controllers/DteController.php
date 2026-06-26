@@ -57,6 +57,43 @@ final class DteController
         $this->respond(fn (int $empresaId, int $userId): array => $this->service->marcarRechazado($userId, (int) $params['id'], Request::json()), 'dte.emitir');
     }
 
+    /**
+     * Sirve el PDF de respaldo de una boleta/DTE emitido (storage/boletas/...).
+     * Usado por el POS para ver/descargar la boleta cuando no hay impresora local.
+     * Respeta auth + tenant + permiso; entrega binario (no JSON).
+     */
+    public function downloadPdf(array $params): void
+    {
+        try {
+            $claims = (new AuthMiddleware())->handle();
+            $userId = (int) $claims['user_id'];
+            $empresaId = $this->requestEmpresaId();
+            if ($empresaId <= 0) {
+                throw new HttpException('empresa_id obligatorio', 422);
+            }
+
+            (new TenantMiddleware())->handle($userId, $empresaId);
+            (new PermissionMiddleware())->handle($userId, $empresaId, 'dte.ver');
+
+            $path = $this->service->pdfPathDeEmision((int) $params['id'], $empresaId);
+            if ($path === null || !is_file($path)) {
+                throw new HttpException('PDF de la boleta no disponible', 404);
+            }
+
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: inline; filename="' . basename($path) . '"');
+            header('Content-Length: ' . (string) filesize($path));
+            header('Cache-Control: private, max-age=0, must-revalidate');
+            readfile($path);
+            exit;
+        } catch (HttpException $exception) {
+            Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());
+        } catch (Throwable $exception) {
+            error_log($exception->getMessage());
+            Response::error('Error interno del servidor', null, 500);
+        }
+    }
+
     private function respond(callable $callback, string $permission): void
     {
         try {

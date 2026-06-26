@@ -447,12 +447,24 @@ final class DteIntegrationService
         $trackId = isset($send['trackId']) ? (string) $send['trackId'] : (isset($send['track_id']) ? (string) $send['track_id'] : null);
         $printPayload = $this->buildPrintPayload($payload, $generate, $send, $tedXml);
 
+        // Respaldo en la nube: guardar el PDF que devolvió el admin (with_pdf) en
+        // storage/boletas/{empresa}/{folio}.pdf. La venta no falla si esto falla.
+        $pdfPath = null;
+        if (!empty($generate['pdf_base64'])) {
+            $pdfPath = $this->guardarBoletaPdf(
+                (int) $payload['documento']['empresa_id'],
+                $tipo,
+                $folio,
+                (string) $generate['pdf_base64']
+            );
+        }
+
         return [
             'success' => $sendOk,
             'estado' => $sendOk ? 'ENVIADO' : 'ERROR',
             'track_id' => $trackId,
             'xml_path' => "admin://dte/T{$tipo}F{$folio}",
-            'pdf_path' => null,
+            'pdf_path' => $pdfPath,
             'response' => [
                 'modo' => 'REAL',
                 'generate' => $this->withoutXml($generate),
@@ -474,6 +486,10 @@ final class DteIntegrationService
             'tipo' => (int) $document['tipo_dte'],
             'folio' => (int) $document['folio'],
             'fecha' => (string) $document['fecha_emision'],
+            // Pedir al admin la representación impresa en PDF (base64) junto con el
+            // XML, para guardarla como respaldo en la nube. Reutiliza el generador
+            // de certificación (MuestraPdfGenerator) — mismo timbre PDF417.
+            'with_pdf' => 1,
             'receptor' => [
                 'rut' => (string) ($receptor['rut'] ?? '66666666-6'),
                 'nombre' => (string) ($receptor['nombre'] ?? 'Consumidor Final'),
@@ -491,6 +507,63 @@ final class DteIntegrationService
                 'exento' => (int) ($item['exento'] ?? 0) > 0,
             ], $payload['items'] ?? []),
         ];
+    }
+
+    /** Directorio base de respaldo de boletas/DTE en PDF (en la nube/servidor). */
+    private function boletasDir(int $empresaId): string
+    {
+        return dirname(__DIR__, 2) . '/storage/boletas/' . $empresaId;
+    }
+
+    /**
+     * Guarda la representación impresa (PDF base64 que devolvió el admin) en
+     * storage/boletas/{empresa}/{folio}.pdf. Devuelve la ruta relativa, o null
+     * si no se pudo escribir (la venta NO debe fallar por esto).
+     */
+    private function guardarBoletaPdf(int $empresaId, int $tipo, int $folio, string $base64): ?string
+    {
+        $bytes = base64_decode($base64, true);
+        if ($bytes === false || $bytes === '') {
+            return null;
+        }
+        $dir = $this->boletasDir($empresaId);
+        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return null;
+        }
+        // Nombre = número de boleta (folio). Boletas (39/41) usan su propio rango
+        // de folios; otros tipos se prefijan para no colisionar.
+        $name = in_array($tipo, [39, 41], true) ? "{$folio}.pdf" : "T{$tipo}-{$folio}.pdf";
+        $full = $dir . '/' . $name;
+        if (@file_put_contents($full, $bytes) === false) {
+            return null;
+        }
+        return "boletas/{$empresaId}/{$name}";
+    }
+
+    /**
+     * Ruta absoluta del PDF guardado para un folio (boleta = {folio}.pdf; otros
+     * tipos = T{tipo}-{folio}.pdf). Devuelve null si no existe.
+     */
+    public function rutaBoletaPdf(int $empresaId, int $folio): ?string
+    {
+        $dir = $this->boletasDir($empresaId);
+        $direct = $dir . "/{$folio}.pdf";
+        if (is_file($direct)) {
+            return $direct;
+        }
+        $matches = glob($dir . "/T*-{$folio}.pdf") ?: [];
+        return $matches[0] ?? null;
+    }
+
+    /**
+     * Ruta absoluta del PDF de una emisión por su id (para descargar/ver desde el
+     * POS cuando no hay impresora local). null si no hay PDF guardado.
+     */
+    public function pdfPathDeEmision(int $emisionId, int $empresaId): ?string
+    {
+        $detalle = $this->detalleEmision($emisionId, $empresaId);
+        $folio = (int) ($detalle['emision']['folio'] ?? 0);
+        return $folio > 0 ? $this->rutaBoletaPdf($empresaId, $folio) : null;
     }
 
     private function adminRequest(string $endpoint, string $action, array $payload, string $apiKey): array

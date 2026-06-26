@@ -712,8 +712,22 @@ if ($action) {
                 file_put_contents(__DIR__ . '/debug_api.log', date('Y-m-d H:i:s') . ' | DEBUG RESPONSE: ' . json_encode($debug) . PHP_EOL, FILE_APPEND);
                 break;
             }
-            echo json_encode(generateDTE($data)); break;
-        case 'next_folio': 
+            $genRes = generateDTE($data);
+            // with_pdf=1: además del XML, devolver la representación impresa en PDF
+            // (base64) reutilizando MuestraPdfGenerator. El PDF se construye con el
+            // XML firmado EN MEMORIA (ISO-8859-1, TED intacto) — no hay round-trip
+            // que re-codifique el TED. base64 viaja seguro por JSON.
+            if (!empty($genRes['ok']) && !empty($data['with_pdf']) && !empty($genRes['xml'])) {
+                try {
+                    $genRes['pdf_base64'] = base64_encode(
+                        buildDtePdf((string)$genRes['xml'], (int)$genRes['tipo'], (int)$genRes['folio'])
+                    );
+                } catch (\Throwable $e) {
+                    $genRes['pdf_error'] = $e->getMessage();
+                }
+            }
+            echo json_encode($genRes); break;
+        case 'next_folio':
             $t = (int)($_GET['tipo'] ?? 33);
             try {
                 $c = loadCAF($t);
@@ -1690,6 +1704,32 @@ function generateDTE(array $data): array {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // ENVIAR AL SII
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/**
+ * Representación impresa de un DTE como PDF (bytes), reutilizando el generador de
+ * certificación (MuestraPdfGenerator) — el MISMO timbre PDF417 y layout, sin
+ * duplicar código. Usado por la acción 'generate' (with_pdf) para el respaldo en
+ * la nube de boletas cuando no hay print server local. La resolución sale de la
+ * empresa real en PRODUCCION; en CERTIFICACION va N° 0 como exige el SII.
+ */
+function buildDtePdf(string $xmlFirmado, int $tipo, int $folio): string {
+    global $globalContext;
+    $emp  = $globalContext ? $globalContext->getEmpresa() : [];
+    $cert = $globalContext && $globalContext->getAmbiente() === 'CERTIFICACION';
+    $opts = [
+        'resolNum'  => $cert ? 0 : (int)($emp['numero_resolucion'] ?? $emp['nro_resol'] ?? 0),
+        'resolFch'  => (string)($emp['fecha_resolucion'] ?? $emp['fch_resol'] ?? ''),
+        'unidadSII' => (string)($emp['unidad_sii'] ?? ''),
+    ];
+    $gen = new \App\Services\MuestraPdfGenerator();
+    // xml y raw apuntan al mismo string firmado: loadXML respeta la declaración
+    // ISO-8859-1 y el TED se extrae de los bytes originales (no re-codificados).
+    return $gen->render(
+        ['xml' => $xmlFirmado, 'raw' => $xmlFirmado, 'tipo' => $tipo, 'folio' => $folio],
+        $opts,
+        'TRIBUTARIA'
+    );
+}
+
 function sendDTE(array $data): array {
     $xml   = $data['xml']   ?? '';
     $tipo  = (int)($data['tipo']  ?? 0);
