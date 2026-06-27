@@ -601,12 +601,14 @@ function provisionarCredenciales(array $data, $ctx): array {
 
     // ── CAF ──────────────────────────────────────────────────────────────────
     if ($cafXml !== '') {
-        $prev = libxml_use_internal_errors(true);
-        $dom  = new DOMDocument();
-        $okXml = $dom->loadXML($cafXml);
-        libxml_clear_errors();
-        libxml_use_internal_errors($prev);
-        if (!$okXml || stripos($cafXml, '<AUTORIZACION') === false || stripos($cafXml, '<CAF') === false) {
+        // El CAF del SII viene en ISO-8859-1 SIN declaracion de encoding (trae Ñ/acentos),
+        // por lo que DOMDocument::loadXML lo rechaza al asumir UTF-8. Validamos por
+        // marcadores de texto (insensibles al encoding); el SII valida el CAF real al emitir.
+        $looksLikeCaf = stripos($cafXml, '<AUTORIZACION') !== false
+            && stripos($cafXml, '<CAF') !== false
+            && stripos($cafXml, '<RNG') !== false
+            && stripos($cafXml, '<RSASK') !== false;
+        if (!$looksLikeCaf) {
             return ['ok' => false, 'error' => 'El CAF no es un XML de autorizacion valido del SII.'];
         }
 
