@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.1.5"
+VERSION = "1.1.6"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
@@ -420,7 +420,7 @@ def etiquetas_pdf_lines(data: dict[str, Any]) -> list[str]:
 
 
 def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
-    if Image is None or not data.get("ted_xml"):
+    if Image is None or not (data.get("ted_b64") or data.get("ted_xml")):
         return False
 
     try:
@@ -494,9 +494,9 @@ def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
         center(f"TOTAL {money(data.get('total'))}", bold_font, 28)
         y += 8
 
-        ted_safe = text(data.get("ted_xml")).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
-        codes = pdf417_encode(ted_safe, columns=17, security_level=5, encoding="iso-8859-1")
-        barcode_img = pdf417_render(codes, scale=2, ratio=5).convert("RGB")
+        ted_safe = resolve_ted(data).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
+        codes = pdf417_encode(ted_safe, columns=8, security_level=5, encoding="iso-8859-1")
+        barcode_img = pdf417_render(codes, scale=3, ratio=3, padding=12).convert("RGB")
         if barcode_img.width > 540:
             ratio = 540 / barcode_img.width
             barcode_img = barcode_img.resize((540, max(1, int(barcode_img.height * ratio))))
@@ -572,8 +572,21 @@ def image_to_escpos_raster(img: Any, max_width: int = DEFAULT_RASTER_WIDTH) -> b
     return bytes(data)
 
 
-def append_pdf417(ticket: bytearray, ted_xml: str) -> None:
-    if not ted_xml:
+def resolve_ted(data: dict[str, Any]) -> str:
+    """Devuelve el TED en ISO-8859-1 byte-exacto. Prefiere ted_b64 (base64) porque
+    el TED incluye el CAF con Ñ/tildes y, como texto JSON, se corrompe en transito;
+    cae a ted_xml por compatibilidad."""
+    b64 = text(data.get("ted_b64"))
+    if b64:
+        try:
+            return base64.b64decode(b64).decode("iso-8859-1")
+        except Exception as exc:
+            print(f"[TED] base64 decode fallback: {exc}")
+    return text(data.get("ted_xml"))
+
+
+def append_pdf417(ticket: bytearray, ted: str) -> None:
+    if not ted:
         ticket.extend(CMD_CENTER)
         ticket.extend(enc("*** SIN TIMBRE ELECTRONICO ***\n"))
         return
@@ -582,18 +595,22 @@ def append_pdf417(ticket: bytearray, ted_xml: str) -> None:
         from pdf417 import encode as pdf417_encode
         from pdf417 import render_image as pdf417_render
 
-        ted_safe = ted_xml.encode("iso-8859-1", errors="replace").decode("iso-8859-1")
-        codes = pdf417_encode(ted_safe, columns=17, security_level=5, encoding="iso-8859-1")
-        img = pdf417_render(codes, scale=1, ratio=5)
+        ted_safe = ted.encode("iso-8859-1", errors="replace").decode("iso-8859-1")
+        # SII exige ECC nivel 5. 8 columnas dan un timbre compacto que cabe en 80mm
+        # con modulos legibles; scale=2 (~0.25 mm/modulo a 203 dpi), ratio=3 (alto de
+        # fila = 3x el ancho del modulo) y padding=10 (zona de silencio, imprescindible
+        # para que el lector del SII reconozca el codigo).
+        codes = pdf417_encode(ted_safe, columns=8, security_level=5, encoding="iso-8859-1")
+        img = pdf417_render(codes, scale=2, ratio=3, padding=10)
         ticket.extend(CMD_CENTER)
-        ticket.extend(image_to_escpos_raster(img, max_width=PDF417_RASTER_WIDTH))
+        ticket.extend(image_to_escpos_raster(img, max_width=560))
         ticket.extend(b"\n")
         return
     except Exception as raster_error:
         print(f"[PDF417] raster fallback: {raster_error}")
 
     try:
-        data_bytes = ted_xml.encode("latin-1", errors="replace")[:1850]
+        data_bytes = ted.encode("latin-1", errors="replace")[:1850]
         ticket.extend(GS_K + bytes([3, 0, 48, 68, 3]))
         ticket.extend(GS_K + bytes([3, 0, 48, 70, 3]))
         ticket.extend(GS_K + bytes([4, 0, 48, 69, 48, 0]))
@@ -837,12 +854,11 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
 
     ticket.extend(CMD_LEFT)
     ticket.extend(line("Fecha", text(data.get("fecha_dte") or data.get("fecha"))))
-    ticket.extend(line("Tipo DTE", text(data.get("tipo_dte") or 39)))
     if data.get("track_id"):
         ticket.extend(line("Track ID", text(data.get("track_id"))))
 
     ticket.extend(format_ticket_body(data))
-    append_pdf417(ticket, text(data.get("ted_xml")))
+    append_pdf417(ticket, resolve_ted(data))
     ticket.extend(CMD_CENTER)
     ticket.extend(CMD_BOLD_ON)
     ticket.extend(enc("Timbre Electronico SII\n"))
@@ -880,11 +896,14 @@ def format_ticket_body(data: dict[str, Any]) -> bytes:
     tax_rate = number(data.get("tasa_iva"), 19)
     net = number(data.get("neto"), 0)
     tax = number(data.get("iva"), 0)
-    if net <= 0 and total > 0:
-        tax = round(total - total / (1 + tax_rate / 100))
-        net = total - tax
-    body.extend(line("Neto", money(net)))
-    body.extend(line(f"IVA {int(tax_rate)}%", money(tax)))
+    exento = number(data.get("exento"), 0)
+    # Desglose fiel al DTE: Neto/IVA solo si la boleta es afecta; Exento solo si
+    # hay monto exento. No se inventa IVA cuando el documento es exento.
+    if net > 0 or tax > 0:
+        body.extend(line("Neto", money(net)))
+        body.extend(line(f"IVA {int(tax_rate)}%", money(tax)))
+    if exento > 0:
+        body.extend(line("Monto Exento", money(exento)))
     body.extend(CMD_RIGHT)
     body.extend(CMD_BOLD_ON)
     body.extend(CMD_DOUBLE_ON)

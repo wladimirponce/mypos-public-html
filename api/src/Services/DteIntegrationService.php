@@ -774,6 +774,10 @@ final class DteIntegrationService
             'fecha_dte' => (string) $document['fecha_emision'],
             'track_id' => isset($send['trackId']) ? (string) $send['trackId'] : null,
             'ted_xml' => $tedXml,
+            // El TED está en ISO-8859-1 (incluye el CAF con Ñ/tildes). En base64
+            // viaja byte-exacto hasta el print server sin que JSON_INVALID_UTF8_SUBSTITUTE
+            // lo corrompa; si no, el PDF417 codifica un TED roto y el SII lo rechaza.
+            'ted_b64' => $tedXml !== null && $tedXml !== '' ? base64_encode($tedXml) : null,
             'razon_social' => $emisor['razon_social'] ?? null,
             'nombre_fantasia' => $emisor['nombre_fantasia'] ?? null,
             'rut_emisor' => $emisor['rut'] ?? null,
@@ -789,6 +793,7 @@ final class DteIntegrationService
             'total' => (int) $document['total'],
             'neto' => (int) $document['neto'],
             'iva' => (int) $document['impuestos'],
+            'exento' => (int) ($document['exento'] ?? 0),
             'productos' => $items,
         ];
     }

@@ -356,28 +356,38 @@ class MuestraPdfGenerator
         // El manual recomienda incrustarlo como imagen PNG (su lector lo
         // reconoce más rápido que los vectores); fallback a vector si no hay GD.
         $tedY = min($y + 2, 235.0);
+        $tedW = 58.0;
+        $tedH = 22.0; // alto efectivo; se ajusta al aspecto real del PDF417
         $pngOk = false;
         if (function_exists('imagecreate')) {
             require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
             $bc  = new \TCPDF2DBarcode($ted, 'PDF417');
-            $png = $bc->getBarcodePngData(4, 4, [0, 0, 0]); // alta densidad de píxeles
+            // Modulo 2px ancho x 6px alto: aspecto PDF417 correcto (fila = 3x el
+            // modulo). Antes se usaba 4x4 (modulo cuadrado) y luego se ESTIRABA a
+            // 60x22mm fijos, distorsionando los modulos -> el SII no lo reconocia.
+            $png = $bc->getBarcodePngData(2, 6, [0, 0, 0]);
             if ($png !== false && $png !== '') {
-                $pdf->Image('@' . $png, 20, $tedY, 60, 22, 'PNG');
+                $dim = @getimagesizefromstring($png);
+                if (is_array($dim) && (int) $dim[0] > 0) {
+                    // Preservar el aspecto: alto = ancho * (px_alto / px_ancho).
+                    $tedH = $tedW * (int) $dim[1] / (int) $dim[0];
+                }
+                $pdf->Image('@' . $png, 20, $tedY, $tedW, $tedH, 'PNG');
                 $pngOk = true;
             }
         }
         if (!$pngOk) {
-            $pdf->write2DBarcode($ted, 'PDF417', 20, $tedY, 60, 22, [
-                'border' => false, 'padding' => 0,
+            $pdf->write2DBarcode($ted, 'PDF417', 20, $tedY, $tedW, $tedH, [
+                'border' => false, 'padding' => 2,
                 'fgcolor' => [0, 0, 0], 'bgcolor' => false,
             ], 'N');
         }
         $pdf->SetFont('helvetica', 'B', 8);
-        $pdf->SetXY(20, $tedY + 23);
-        $pdf->Cell(60, 3.5, 'Timbre Electrónico SII', 0, 2, 'C');
+        $pdf->SetXY(20, $tedY + $tedH + 1.5);
+        $pdf->Cell($tedW, 3.5, 'Timbre Electrónico SII', 0, 2, 'C');
         $pdf->SetFont('helvetica', '', 8);
-        $pdf->Cell(60, 3.5, "Res. {$resolNum} de {$resolAno}", 0, 2, 'C');
-        $pdf->Cell(60, 3.5, 'Verifique documento: www.sii.cl', 0, 2, 'C');
+        $pdf->Cell($tedW, 3.5, "Res. {$resolNum} de {$resolAno}", 0, 2, 'C');
+        $pdf->Cell($tedW, 3.5, 'Verifique documento: www.sii.cl', 0, 2, 'C');
 
         // Marca CEDIBLE
         if ($esCedible) {
