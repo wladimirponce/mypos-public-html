@@ -873,6 +873,9 @@ final class DteIntegrationService
     {
         $row['empresa_id'] = (int) $row['empresa_id'];
         $row['activo'] = (bool) (int) $row['activo'];
+        if (empty($row['endpoint_http'])) {
+            $row['endpoint_http'] = $_ENV['DTE_ENDPOINT_HTTP'] ?? getenv('DTE_ENDPOINT_HTTP') ?: null;
+        }
 
         return $row;
     }
