@@ -778,6 +778,10 @@ final class DteIntegrationService
             // viaja byte-exacto hasta el print server sin que JSON_INVALID_UTF8_SUBSTITUTE
             // lo corrompa; si no, el PDF417 codifica un TED roto y el SII lo rechaza.
             'ted_b64' => $tedXml !== null && $tedXml !== '' ? base64_encode($tedXml) : null,
+            // Imagen PNG del timbre PDF417 renderizada por el admin (TCPDF), que es la
+            // que la app del SII reconoce. Si viene, el print server la usa tal cual en
+            // vez de rasterizar su propio PDF417.
+            'timbre_png_b64' => is_string($generate['ted_png_base64'] ?? null) ? $generate['ted_png_base64'] : null,
             'razon_social' => $emisor['razon_social'] ?? null,
             'nombre_fantasia' => $emisor['nombre_fantasia'] ?? null,
             'rut_emisor' => $emisor['rut'] ?? null,

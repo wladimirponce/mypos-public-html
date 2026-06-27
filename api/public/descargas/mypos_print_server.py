@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.1.7"
+VERSION = "1.1.8"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
@@ -494,9 +494,11 @@ def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
         center(f"TOTAL {money(data.get('total'))}", bold_font, 28)
         y += 8
 
-        ted_safe = resolve_ted(data).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
-        codes = pdf417_encode(ted_safe, columns=8, security_level=5, encoding="iso-8859-1")
-        barcode_img = pdf417_render(codes, scale=3, ratio=3, padding=12).convert("RGB")
+        barcode_img = timbre_image(data)
+        if barcode_img is None:
+            ted_safe = resolve_ted(data).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
+            codes = pdf417_encode(ted_safe, columns=8, security_level=5, encoding="iso-8859-1")
+            barcode_img = pdf417_render(codes, scale=3, ratio=3, padding=12).convert("RGB")
         if barcode_img.width > 540:
             ratio = 540 / barcode_img.width
             barcode_img = barcode_img.resize((540, max(1, int(barcode_img.height * ratio))))
@@ -583,6 +585,21 @@ def resolve_ted(data: dict[str, Any]) -> str:
         except Exception as exc:
             print(f"[TED] base64 decode fallback: {exc}")
     return text(data.get("ted_xml"))
+
+
+def timbre_image(data: dict[str, Any]) -> Any:
+    """Imagen PNG del timbre PDF417 que renderizó el admin (TCPDF), la que la app del
+    SII reconoce. Devuelve un PIL.Image o None si no viene / no se puede leer."""
+    if Image is None:
+        return None
+    b64 = text(data.get("timbre_png_b64"))
+    if not b64:
+        return None
+    try:
+        return Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+    except Exception as exc:
+        print(f"[TIMBRE] png decode fallback: {exc}")
+        return None
 
 
 def append_pdf417(ticket: bytearray, ted: str, columns: int = 8, raster_width: int = 560) -> None:
@@ -865,7 +882,15 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
         ticket.extend(line("Track ID", text(data.get("track_id")), width))
 
     ticket.extend(format_ticket_body(data, width))
-    append_pdf417(ticket, resolve_ted(data), columns=pdf_cols, raster_width=raster_w)
+    # Timbre: preferir la imagen del admin (TCPDF, la que el SII reconoce); si no
+    # viene, rasterizar el PDF417 propio como respaldo.
+    tpng = timbre_image(data)
+    if tpng is not None:
+        ticket.extend(CMD_CENTER)
+        ticket.extend(image_to_escpos_raster(tpng, max_width=raster_w))
+        ticket.extend(b"\n")
+    else:
+        append_pdf417(ticket, resolve_ted(data), columns=pdf_cols, raster_width=raster_w)
     ticket.extend(CMD_CENTER)
     ticket.extend(CMD_BOLD_ON)
     ticket.extend(enc("Timbre Electronico SII\n"))

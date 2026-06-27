@@ -824,6 +824,21 @@ if ($action) {
                 } catch (\Throwable $e) {
                     $genRes['pdf_error'] = $e->getMessage();
                 }
+                // Imagen PNG del timbre PDF417 con el MISMO render TCPDF que la carta
+                // (que la app del SII sí reconoce). El print server la usa para el
+                // ticket termico en vez de renderizar su propio PDF417 (que no se lee).
+                try {
+                    if (preg_match('/<TED\b[^>]*>[\s\S]*?<\/TED>/', (string)$genRes['xml'], $mTed)) {
+                        require_once __DIR__ . '/lib/tcpdf/tcpdf_barcodes_2d.php';
+                        $bcTed = new \TCPDF2DBarcode($mTed[0], 'PDF417');
+                        $pngTed = $bcTed->getBarcodePngData(4, 4, [0, 0, 0]);
+                        if ($pngTed !== false && $pngTed !== '') {
+                            $genRes['ted_png_base64'] = base64_encode($pngTed);
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    $genRes['ted_png_error'] = $e->getMessage();
+                }
             }
             // El XML firmado está en ISO-8859-1 y no sobrevive json_encode (devuelve
             // false). Se transporta en base64 (byte-exacto, preserva la firma); el
