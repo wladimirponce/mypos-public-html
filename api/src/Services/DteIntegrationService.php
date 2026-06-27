@@ -1065,7 +1065,15 @@ final class DteIntegrationService
 
     private function encodeJson(array $payload): string
     {
-        return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        // JSON_INVALID_UTF8_SUBSTITUTE: el response trae el TED/XML del SII en
+        // ISO-8859-1 (bytes no-UTF8); sin esta bandera json_encode devuelve false y
+        // se perdía todo (o se violaba el CHECK json_valid de las columnas JSON en
+        // MariaDB). Con la bandera, los bytes invalidos se sustituyen y el JSON
+        // siempre es valido. El timbre real para imprimir viene del PDF del admin.
+        return json_encode(
+            $payload,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR
+        ) ?: '{}';
     }
 
     private function decodeJson(mixed $value): ?array

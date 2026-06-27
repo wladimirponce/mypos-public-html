@@ -549,7 +549,13 @@ final class DocumentoTributarioService
 
     private function encodeJson(array $payload): string
     {
-        return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        // JSON_INVALID_UTF8_SUBSTITUTE evita que datos con bytes no-UTF8 (nombres de
+        // productos/cliente en Latin-1) hagan fallar json_encode y violen el CHECK
+        // json_valid de las columnas JSON (MariaDB).
+        return json_encode(
+            $payload,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR
+        ) ?: '{}';
     }
 
     private function decodeJson(mixed $value): ?array
