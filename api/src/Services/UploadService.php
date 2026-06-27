@@ -252,6 +252,25 @@ final class UploadService
 
     public function verificarVigenciaCertificadoSii(int $empresaId): array
     {
+        try {
+            return $this->verificarVigenciaCertificadoSiiInterno($empresaId);
+        } catch (HttpException $exception) {
+            // Validaciones legítimas (empresa no encontrada, etc.): propagar tal cual.
+            throw $exception;
+        } catch (\Throwable $exception) {
+            // Cualquier otro fallo (BD/OpenSSL/lectura) NO debe devolver 500 en un
+            // widget de estado: degradar con gracia mostrando el motivo.
+            error_log('[UploadService] vigencia certificado fallo: ' . $exception->getMessage());
+            return [
+                'registrado' => true,
+                'valido' => false,
+                'mensaje' => 'No se pudo verificar el certificado: ' . $exception->getMessage(),
+            ];
+        }
+    }
+
+    private function verificarVigenciaCertificadoSiiInterno(int $empresaId): array
+    {
         $this->requireEmpresa($empresaId);
         $file = $this->repository->findActiveCertificate($empresaId);
 
