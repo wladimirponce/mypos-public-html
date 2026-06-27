@@ -570,6 +570,84 @@ final class DteIntegrationService
         return $folio > 0 ? $this->rutaBoletaPdf($empresaId, $folio) : null;
     }
 
+    /**
+     * Provisiona en el facturador (admin) el certificado digital (.pfx + clave) y/o
+     * el CAF de producción de la empresa. El navegador sube los archivos al backend
+     * web (multipart) y este los reenvía al admin con la API key, que los escribe en
+     * su filesystem por RUT/AMBIENTE. Cierra el hueco de tener que copiarlos a mano.
+     *
+     * @param array $payload  Campos de texto ($_POST): empresa_id, password_certificado, caf_tipo
+     * @param array $files    Archivos ($_FILES): 'certificado' (.pfx) y/o 'caf' (XML)
+     */
+    public function provisionarCredenciales(int $userId, array $payload, array $files): array
+    {
+        $empresaId = (int) ($payload['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        $config = $this->assertReadyForEmission($empresaId);
+        $endpoint = (string) $config['endpoint_http'];
+        $apiKey = $this->adminApiKey($config, $empresaId);
+
+        $request = ['empresa_id' => $empresaId];
+
+        $pfxTmp = (string) ($files['certificado']['tmp_name'] ?? '');
+        if ($pfxTmp !== '' && is_uploaded_file($pfxTmp)) {
+            $bytes = file_get_contents($pfxTmp);
+            if ($bytes === false || $bytes === '') {
+                throw new HttpException('No se pudo leer el certificado subido', 422);
+            }
+            $request['pfx_base64'] = base64_encode($bytes);
+            $request['pfx_password'] = (string) ($payload['password_certificado'] ?? $payload['pfx_password'] ?? '');
+        }
+
+        $cafTmp = (string) ($files['caf']['tmp_name'] ?? '');
+        if ($cafTmp !== '' && is_uploaded_file($cafTmp)) {
+            $cafXml = file_get_contents($cafTmp);
+            if ($cafXml === false || $cafXml === '') {
+                throw new HttpException('No se pudo leer el archivo CAF subido', 422);
+            }
+            $request['caf_xml'] = $cafXml;
+            $request['caf_tipo'] = (int) ($payload['caf_tipo'] ?? 39);
+        }
+
+        if (!isset($request['pfx_base64']) && !isset($request['caf_xml'])) {
+            throw new HttpException('Debe enviar el certificado (.pfx) y/o el CAF (XML).', 422);
+        }
+
+        $response = $this->adminRequest($endpoint, 'provisionar_credenciales', $request, $apiKey);
+        if (empty($response['ok'])) {
+            throw new HttpException(
+                (string) ($response['error'] ?? 'No se pudieron provisionar las credenciales en el facturador'),
+                422
+            );
+        }
+
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'usuario_id' => $userId,
+            'modulo' => 'dte',
+            'accion' => 'provisionar_credenciales',
+            'entidad' => 'facturador',
+            'entidad_id' => $empresaId,
+            'descripcion' => 'Credenciales (cert/CAF) provisionadas en el facturador',
+            'datos_nuevos' => [
+                'ambiente' => $response['ambiente'] ?? null,
+                'cert' => isset($request['pfx_base64']),
+                'caf' => isset($request['caf_xml']),
+                'tipo_caf' => $request['caf_tipo'] ?? null,
+            ],
+        ]);
+
+        return [
+            'provisionado' => true,
+            'ambiente' => $response['ambiente'] ?? null,
+            'archivos' => $response['escritos'] ?? [],
+            'mensaje' => (string) ($response['mensaje'] ?? 'Credenciales provisionadas en el facturador.'),
+        ];
+    }
+
     private function adminRequest(string $endpoint, string $action, array $payload, string $apiKey): array
     {
         if (!function_exists('curl_init')) {

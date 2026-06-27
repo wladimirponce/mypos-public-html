@@ -1,0 +1,1 @@
+import{aH as e}from"./index-g3WB6Jzf.js";function r({title:s,description:t}){return e.jsxs("header",{className:"mb-6",children:[e.jsx("h1",{className:"text-2xl font-semibold tracking-tight text-slate-950",children:s}),t?e.jsx("p",{className:"mt-1 text-sm text-muted-foreground",children:t}):null]})}export{r as P};

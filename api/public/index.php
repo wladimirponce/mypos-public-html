@@ -706,6 +706,7 @@ $router->post('/api/v1/dte/emisiones/{id}/reintentar', protectedRoute([$dteContr
 $router->post('/api/v1/dte/emisiones/{id}/marcar-aceptado', protectedRoute([$dteController, 'markAccepted'], 'dte.emitir'));
 $router->post('/api/v1/dte/emisiones/{id}/marcar-rechazado', protectedRoute([$dteController, 'markRejected'], 'dte.emitir'));
 $router->get('/api/v1/dte/emisiones/{id}/pdf', protectedRoute([$dteController, 'downloadPdf'], 'dte.ver'));
+$router->post('/api/v1/dte/provisionar-credenciales', protectedRoute([$dteController, 'provisionarCredenciales'], 'dte.configuracion.editar'));
 
 $f29Controller = new F29Controller();
 $router->get('/api/v1/f29/calcular', protectedRoute([$f29Controller, 'calcular'], 'libros.resumen_iva.ver'));

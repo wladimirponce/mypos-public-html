@@ -58,6 +58,23 @@ final class DteController
     }
 
     /**
+     * Provisiona en el facturador (admin) el certificado (.pfx + clave) y/o el CAF
+     * de producción. Recibe multipart ($_FILES: 'certificado', 'caf'; $_POST:
+     * password_certificado, caf_tipo) y empresa_id por query string.
+     */
+    public function provisionarCredenciales(): void
+    {
+        $this->respond(
+            fn (int $empresaId, int $userId): array => $this->service->provisionarCredenciales(
+                $userId,
+                array_merge($_POST, ['empresa_id' => $empresaId]),
+                $_FILES
+            ),
+            'dte.configuracion.editar'
+        );
+    }
+
+    /**
      * Sirve el PDF de respaldo de una boleta/DTE emitido (storage/boletas/...).
      * Usado por el POS para ver/descargar la boleta cuando no hay impresora local.
      * Respeta auth + tenant + permiso; entrega binario (no JSON).

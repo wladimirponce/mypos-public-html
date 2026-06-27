@@ -539,6 +539,96 @@ function resendStoredDTE(int $tipo, int $folio, array $opts = []): array {
     }
 }
 
+/**
+ * Provisiona en el filesystem del facturador el certificado (.pfx + clave) y/o el
+ * CAF de una empresa, en su carpeta por RUT/AMBIENTE. La empresa se resuelve por
+ * el Context (empresa_id explicito). Valida que el .pfx abra con la clave y que el
+ * CAF sea un XML de autorizacion antes de escribir. No falla la app si algo no
+ * viene: solo escribe lo que se envie.
+ *
+ * Inputs en $data: pfx_base64, pfx_password, caf_xml, caf_tipo (default 39).
+ */
+function provisionarCredenciales(array $data, $ctx): array {
+    if (!$ctx || !method_exists($ctx, 'getRut')) {
+        return ['ok' => false, 'error' => 'Sin contexto de empresa: envie empresa_id valido.'];
+    }
+
+    $rut      = $ctx->getRut();
+    $ambiente = $ctx->getAmbiente();
+    $tipo     = (int)($data['caf_tipo'] ?? 39);
+
+    $pfxB64  = (string)($data['pfx_base64'] ?? '');
+    $pfxPass = (string)($data['pfx_password'] ?? '');
+    $cafXml  = (string)($data['caf_xml'] ?? '');
+
+    if ($pfxB64 === '' && $cafXml === '') {
+        return ['ok' => false, 'error' => 'No se envio certificado ni CAF.'];
+    }
+
+    $escritos = [];
+
+    // ── Certificado ──────────────────────────────────────────────────────────
+    if ($pfxB64 !== '') {
+        $pfxBytes = base64_decode($pfxB64, true);
+        if ($pfxBytes === false || $pfxBytes === '') {
+            return ['ok' => false, 'error' => 'pfx_base64 invalido.'];
+        }
+        $certs = [];
+        if (!openssl_pkcs12_read($pfxBytes, $certs, $pfxPass)) {
+            return ['ok' => false, 'error' => 'El certificado no abre con la clave indicada: ' . (openssl_error_string() ?: 'error desconocido')];
+        }
+
+        $certDir = dirname($ctx->getCertPath()); // cert/{RUT}/{AMB}
+        if (!is_dir($certDir) && !@mkdir($certDir, 0755, true) && !is_dir($certDir)) {
+            return ['ok' => false, 'error' => 'No se pudo crear el directorio del certificado: ' . $certDir];
+        }
+        $pfxOut = $certDir . '/firma.pfx';
+        if (@file_put_contents($pfxOut, $pfxBytes) === false) {
+            return ['ok' => false, 'error' => 'No se pudo escribir el .pfx en ' . $pfxOut];
+        }
+        // cert.conf: normaliza a firma.pfx; clave en "password" y "pass" por compat.
+        $conf = ['pfx_file' => 'firma.pfx', 'password' => $pfxPass, 'pass' => $pfxPass];
+        if (@file_put_contents($certDir . '/cert.conf', json_encode($conf, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) === false) {
+            return ['ok' => false, 'error' => 'No se pudo escribir cert.conf en ' . $certDir];
+        }
+        @chmod($pfxOut, 0600);
+        @chmod($certDir . '/cert.conf', 0600);
+        $escritos[] = $pfxOut;
+        $escritos[] = $certDir . '/cert.conf';
+    }
+
+    // ── CAF ──────────────────────────────────────────────────────────────────
+    if ($cafXml !== '') {
+        $prev = libxml_use_internal_errors(true);
+        $dom  = new DOMDocument();
+        $okXml = $dom->loadXML($cafXml);
+        libxml_clear_errors();
+        libxml_use_internal_errors($prev);
+        if (!$okXml || stripos($cafXml, '<AUTORIZACION') === false || stripos($cafXml, '<CAF') === false) {
+            return ['ok' => false, 'error' => 'El CAF no es un XML de autorizacion valido del SII.'];
+        }
+
+        $cafPath = $ctx->getCafPath($tipo); // caf/{RUT}/{AMB}/caf_{tipo}.xml
+        $cafDir  = dirname($cafPath);
+        if (!is_dir($cafDir) && !@mkdir($cafDir, 0755, true) && !is_dir($cafDir)) {
+            return ['ok' => false, 'error' => 'No se pudo crear el directorio del CAF: ' . $cafDir];
+        }
+        if (@file_put_contents($cafPath, $cafXml) === false) {
+            return ['ok' => false, 'error' => 'No se pudo escribir el CAF en ' . $cafPath];
+        }
+        $escritos[] = $cafPath;
+    }
+
+    return [
+        'ok'        => true,
+        'rut'       => $rut,
+        'ambiente'  => $ambiente,
+        'tipo_caf'  => $tipo,
+        'escritos'  => $escritos,
+        'mensaje'   => 'Credenciales provisionadas en el facturador.',
+    ];
+}
+
 function storedDTEPath(int $tipo, int $folio): string {
     global $actualTmpDir;
     $newFile = $actualTmpDir . "/dte_T{$tipo}F{$folio}.xml";
@@ -741,6 +831,12 @@ if ($action) {
             break;
         case 'send':     echo json_encode(sendDTE($data));    break;
         case 'validate': echo json_encode(validateDTE($data)); break;
+        case 'provisionar_credenciales':
+            // Recibe (JSON) el certificado .pfx (base64) + su clave y/o el CAF XML, y
+            // los deja en el filesystem del facturador bajo cert/{RUT}/{AMB}/ y
+            // caf/{RUT}/{AMB}/. La empresa se resuelve por empresa_id (Context).
+            echo json_encode(provisionarCredenciales($data, $globalContext ?? null));
+            break;
         case 'reclamo_dte':
             echo json_encode(registroReclamoDTE($data));
             break;
