@@ -415,7 +415,11 @@ final class DteIntegrationService
             ];
         }
 
-        $xml = (string) ($generate['xml'] ?? '');
+        // El admin devuelve el XML firmado en base64 (byte-exacto; en ISO-8859-1 no
+        // sobrevive json_encode). Decodificar para usarlo en send y extraer el TED.
+        $xml = !empty($generate['xml_base64'])
+            ? (string) base64_decode((string) $generate['xml_base64'], true)
+            : (string) ($generate['xml'] ?? '');
         $tipo = (int) ($generate['tipo'] ?? $request['tipo']);
         $folio = (int) ($generate['folio'] ?? $request['folio'] ?? 0);
 
@@ -436,9 +440,11 @@ final class DteIntegrationService
             ];
         }
 
+        // Reenviar el XML firmado en base64: en ISO-8859-1 rompería el json_encode
+        // del payload hacia el admin ("No se pudo serializar payload DTE").
         $send = $this->adminRequest($endpoint, 'send', [
             'empresa_id' => (int) $payload['documento']['empresa_id'],
-            'xml' => $xml,
+            'xml_base64' => base64_encode($xml),
             'tipo' => $tipo,
             'folio' => $folio,
         ], $apiKey);
@@ -737,6 +743,10 @@ final class DteIntegrationService
         if (isset($response['xml'])) {
             $response['xml_length'] = strlen((string) $response['xml']);
             unset($response['xml']);
+        }
+        if (isset($response['xml_base64'])) {
+            $response['xml_length'] = strlen((string) base64_decode((string) $response['xml_base64'], true));
+            unset($response['xml_base64']);
         }
 
         return $response;

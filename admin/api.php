@@ -825,7 +825,14 @@ if ($action) {
                     $genRes['pdf_error'] = $e->getMessage();
                 }
             }
-            echo json_encode($genRes); break;
+            // El XML firmado está en ISO-8859-1 y no sobrevive json_encode (devuelve
+            // false). Se transporta en base64 (byte-exacto, preserva la firma); el
+            // consumidor headless lo decodifica desde xml_base64.
+            if (isset($genRes['xml'])) {
+                $genRes['xml_base64'] = base64_encode((string)$genRes['xml']);
+                unset($genRes['xml']);
+            }
+            echo json_encode($genRes, JSON_INVALID_UTF8_SUBSTITUTE); break;
         case 'next_folio':
             $t = (int)($_GET['tipo'] ?? 33);
             try {
@@ -1837,6 +1844,11 @@ function buildDtePdf(string $xmlFirmado, int $tipo, int $folio): string {
 
 function sendDTE(array $data): array {
     $xml   = $data['xml']   ?? '';
+    // El consumidor headless envía el XML firmado en base64 (byte-exacto) porque el
+    // XML está en ISO-8859-1 y no sobrevive json_encode.
+    if ($xml === '' && !empty($data['xml_base64'])) {
+        $xml = (string) base64_decode((string)$data['xml_base64'], true);
+    }
     $tipo  = (int)($data['tipo']  ?? 0);
     $folio = (int)($data['folio'] ?? 0);
 
