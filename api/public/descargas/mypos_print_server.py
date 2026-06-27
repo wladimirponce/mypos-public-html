@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.1.6"
+VERSION = "1.1.7"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
@@ -145,8 +145,8 @@ def line(left: str, right: str = "", width: int = DEFAULT_WIDTH) -> bytes:
     return enc(left[:available].ljust(available) + right[:width] + "\n")
 
 
-def separator(char: str = "-") -> bytes:
-    return enc(char * DEFAULT_WIDTH + "\n")
+def separator(char: str = "-", width: int = DEFAULT_WIDTH) -> bytes:
+    return enc(char * width + "\n")
 
 
 def wrap_label(value: str, width: int = 28) -> list[str]:
@@ -585,7 +585,7 @@ def resolve_ted(data: dict[str, Any]) -> str:
     return text(data.get("ted_xml"))
 
 
-def append_pdf417(ticket: bytearray, ted: str) -> None:
+def append_pdf417(ticket: bytearray, ted: str, columns: int = 8, raster_width: int = 560) -> None:
     if not ted:
         ticket.extend(CMD_CENTER)
         ticket.extend(enc("*** SIN TIMBRE ELECTRONICO ***\n"))
@@ -596,14 +596,14 @@ def append_pdf417(ticket: bytearray, ted: str) -> None:
         from pdf417 import render_image as pdf417_render
 
         ted_safe = ted.encode("iso-8859-1", errors="replace").decode("iso-8859-1")
-        # SII exige ECC nivel 5. 8 columnas dan un timbre compacto que cabe en 80mm
-        # con modulos legibles; scale=2 (~0.25 mm/modulo a 203 dpi), ratio=3 (alto de
-        # fila = 3x el ancho del modulo) y padding=10 (zona de silencio, imprescindible
-        # para que el lector del SII reconozca el codigo).
-        codes = pdf417_encode(ted_safe, columns=8, security_level=5, encoding="iso-8859-1")
+        # SII exige ECC nivel 5. Las columnas se eligen segun el ancho del papel
+        # (8 en 80mm, menos en 56mm) para que el timbre quepa sin encoger los modulos.
+        # scale=2 (~0.25 mm/modulo a 203 dpi), ratio=3 (alto de fila = 3x el ancho del
+        # modulo) y padding=10 (zona de silencio, imprescindible para el lector del SII).
+        codes = pdf417_encode(ted_safe, columns=columns, security_level=5, encoding="iso-8859-1")
         img = pdf417_render(codes, scale=2, ratio=3, padding=10)
         ticket.extend(CMD_CENTER)
-        ticket.extend(image_to_escpos_raster(img, max_width=560))
+        ticket.extend(image_to_escpos_raster(img, max_width=raster_width))
         ticket.extend(b"\n")
         return
     except Exception as raster_error:
@@ -824,11 +824,18 @@ def format_ticket(data: dict[str, Any]) -> bytes:
 
 
 def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
+    # Ancho del papel: 56mm => 32 caracteres; 80mm (o por defecto) => 48.
+    ancho_mm = int(number(data.get("ancho"), 80))
+    if ancho_mm <= 58:
+        width, pdf_cols, raster_w = 32, 5, 376
+    else:
+        width, pdf_cols, raster_w = 48, 8, 560
+
     ticket = bytearray()
     ticket.extend(CMD_INIT)
     ticket.extend(CMD_CODEPAGE_PC858)
     ticket.extend(CMD_CENTER)
-    ticket.extend(separator("="))
+    ticket.extend(separator("=", width))
     ticket.extend(CMD_BOLD_ON)
     rut = format_rut(data.get("rut_emisor"))
     if rut:
@@ -838,27 +845,27 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
     if folio:
         ticket.extend(enc(f"Nro {folio}\n"))
     ticket.extend(CMD_BOLD_OFF)
-    ticket.extend(separator("="))
+    ticket.extend(separator("=", width))
     ticket.extend(enc(sii_unit_line(data) + "\n"))
     ticket.extend(enc("\n"))
 
     ticket.extend(CMD_LEFT)
     ticket.extend(CMD_BOLD_ON)
-    ticket.extend(enc((text(data.get("razon_social") or data.get("nombre_fantasia"), 46) or "Empresa no informada") + "\n"))
+    ticket.extend(enc((text(data.get("razon_social") or data.get("nombre_fantasia"), width) or "Empresa no informada") + "\n"))
     ticket.extend(CMD_BOLD_OFF)
 
     for key, label in (("giro", "Giro"), ("direccion", "Casa Matriz"), ("comuna", "Comuna"), ("ciudad", "Ciudad"), ("telefono", "Telefono"), ("sitio_web", "Web")):
-        value = text(data.get(key), 46)
+        value = text(data.get(key), width)
         if value:
             ticket.extend(enc((f"{label}: " if label else "") + value + "\n"))
 
     ticket.extend(CMD_LEFT)
-    ticket.extend(line("Fecha", text(data.get("fecha_dte") or data.get("fecha"))))
+    ticket.extend(line("Fecha", text(data.get("fecha_dte") or data.get("fecha")), width))
     if data.get("track_id"):
-        ticket.extend(line("Track ID", text(data.get("track_id"))))
+        ticket.extend(line("Track ID", text(data.get("track_id")), width))
 
-    ticket.extend(format_ticket_body(data))
-    append_pdf417(ticket, resolve_ted(data))
+    ticket.extend(format_ticket_body(data, width))
+    append_pdf417(ticket, resolve_ted(data), columns=pdf_cols, raster_width=raster_w)
     ticket.extend(CMD_CENTER)
     ticket.extend(CMD_BOLD_ON)
     ticket.extend(enc("Timbre Electronico SII\n"))
@@ -868,30 +875,34 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
         ticket.extend(enc(resol + "\n"))
     ticket.extend(enc("Verifique documento: www.sii.cl\n"))
     if data.get("verify_url"):
-        ticket.extend(enc(text(data.get("verify_url"), 46) + "\n"))
+        ticket.extend(enc(text(data.get("verify_url"), width) + "\n"))
     ticket.extend(CMD_FEED_CUT)
     return bytes(ticket)
 
 
-def format_ticket_body(data: dict[str, Any]) -> bytes:
+def format_ticket_body(data: dict[str, Any], width: int = DEFAULT_WIDTH) -> bytes:
     body = bytearray()
-    body.extend(separator())
+    total_w = 12 if width <= 32 else 15
+    cant_w = 5
+    name_w = max(8, width - cant_w - total_w)
+
+    body.extend(separator("-", width))
     body.extend(CMD_BOLD_ON)
-    body.extend(enc(f"{'Producto':<28}{'Cant':>5}{'Total':>15}\n"))
+    body.extend(enc(f"{'Producto':<{name_w}}{'Cant':>{cant_w}}{'Total':>{total_w}}\n"))
     body.extend(CMD_BOLD_OFF)
-    body.extend(separator())
+    body.extend(separator("-", width))
 
     for item in data.get("productos") or []:
         quantity = number(item.get("cantidad"), 1)
         subtotal = item.get("subtotal")
         if subtotal is None:
             subtotal = number(item.get("precio") or item.get("precio_unitario"), 0) * quantity
-        rows = wrap_label(text(item.get("nombre")) or "Producto", 28)
-        body.extend(enc(f"{rows[0]:<28}{quantity:>5.2f}{money(subtotal):>15}\n"))
+        rows = wrap_label(text(item.get("nombre")) or "Producto", name_w)
+        body.extend(enc(f"{rows[0]:<{name_w}}{quantity:>{cant_w}.2f}{money(subtotal):>{total_w}}\n"))
         for extra in rows[1:]:
-            body.extend(enc(extra[:28] + "\n"))
+            body.extend(enc(extra[:name_w] + "\n"))
 
-    body.extend(separator("="))
+    body.extend(separator("=", width))
     total = number(data.get("total"), 0)
     tax_rate = number(data.get("tasa_iva"), 19)
     net = number(data.get("neto"), 0)
@@ -900,10 +911,10 @@ def format_ticket_body(data: dict[str, Any]) -> bytes:
     # Desglose fiel al DTE: Neto/IVA solo si la boleta es afecta; Exento solo si
     # hay monto exento. No se inventa IVA cuando el documento es exento.
     if net > 0 or tax > 0:
-        body.extend(line("Neto", money(net)))
-        body.extend(line(f"IVA {int(tax_rate)}%", money(tax)))
+        body.extend(line("Neto", money(net), width))
+        body.extend(line(f"IVA {int(tax_rate)}%", money(tax), width))
     if exento > 0:
-        body.extend(line("Monto Exento", money(exento)))
+        body.extend(line("Monto Exento", money(exento), width))
     body.extend(CMD_RIGHT)
     body.extend(CMD_BOLD_ON)
     body.extend(CMD_DOUBLE_ON)
