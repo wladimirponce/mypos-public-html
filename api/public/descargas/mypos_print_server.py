@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.1.4"
+VERSION = "1.1.5"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
@@ -995,10 +995,15 @@ def print_ticket():
             return jsonify({"success": ok, "message": message}), 200 if ok else 500
 
         if kind == "boleta_electronica_dte":
-            return jsonify({
-                "success": False,
-                "error": "La boleta electronica debe imprimirse con el PDF oficial generado por admin.",
-            }), 422
+            # Boleta electronica termica nativa (ESC/POS) con timbre PDF417 raster.
+            # En impresoras "PDF" (Microsoft Print to PDF, etc.) cae al PDF imagen
+            # que tambien lleva el timbre.
+            if is_pdf_printer(effective_printer):
+                ok, message = print_as_pdf_file(data, "boleta_electronica_dte")
+                return jsonify({"success": ok, "message": message}), 200 if ok else 500
+            payload = format_boleta_electronica_dte(data)
+            ok, message = print_raw(payload, printer)
+            return jsonify({"success": ok, "message": message}), 200 if ok else 500
 
         if is_pdf_printer(effective_printer):
             ok, message = print_as_pdf_file(data, kind)
