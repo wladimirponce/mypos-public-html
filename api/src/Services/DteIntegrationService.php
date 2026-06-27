@@ -111,6 +111,9 @@ final class DteIntegrationService
         $config = $this->assertReadyForEmission($empresaId);
 
         $request = $this->construirPayloadDesdeDocumento((int) $document['id'], $empresaId);
+        // Formato del PDF elegido en la caja (carta / 80 / 58): viaja al admin para
+        // que genere la representación impresa en ese formato.
+        $request['formato_pdf'] = (string) ($options['formato_pdf'] ?? 'carta');
         $connection = $this->repository->connection();
 
         try {
@@ -500,6 +503,8 @@ final class DteIntegrationService
             // XML, para guardarla como respaldo en la nube. Reutiliza el generador
             // de certificación (MuestraPdfGenerator) — mismo timbre PDF417.
             'with_pdf' => 1,
+            // Formato del PDF que eligió la caja (carta / 80 / 58). Solo aplica a boletas.
+            'formato_pdf' => (string) ($payload['formato_pdf'] ?? 'carta'),
             'receptor' => [
                 'rut' => (string) ($receptor['rut'] ?? '66666666-6'),
                 'nombre' => (string) ($receptor['nombre'] ?? 'Consumidor Final'),

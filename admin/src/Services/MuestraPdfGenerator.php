@@ -87,7 +87,7 @@ class MuestraPdfGenerator
      * @param string $copia 'TRIBUTARIA' | 'CEDIBLE'
      * @return string bytes del PDF
      */
-    public function render(array $dte, array $opts, string $copia = 'TRIBUTARIA'): string
+    public function render(array $dte, array $opts, string $copia = 'TRIBUTARIA', string $formato = 'carta'): string
     {
         require_once __DIR__ . '/../../lib/tcpdf/tcpdf.php';
 
@@ -117,6 +117,12 @@ class MuestraPdfGenerator
         }
         if ($ted === '') {
             throw new Exception("No se encontró el TED en el XML de T{$tipo}F{$folio}");
+        }
+
+        // Formato térmico (80mm / 58mm): ticket angosto para boletas, mismo TED.
+        // La carta sigue siendo el camino por defecto (facturas, copias cedibles).
+        if (in_array($formato, ['80', '58'], true) && $copia !== 'CEDIBLE') {
+            return $this->renderTermico($xp, $q, $tipo, $folio, $opts, $ted, $formato);
         }
 
         // ── Datos del documento ──────────────────────────────────────────────
@@ -378,6 +384,10 @@ class MuestraPdfGenerator
         $pdf->SetFont('helvetica', '', 8);
         $pdf->Cell(60, 3.5, "Res. {$resolNum} de {$resolAno}", 0, 2, 'C');
         $pdf->Cell(60, 3.5, 'Verifique documento: www.sii.cl', 0, 2, 'C');
+        // Verificación en MyPOS: el cliente abre el link (auto-carga por RUT + folio).
+        $rutUrl = str_replace('.', '', (string) $emRut);
+        $pdf->SetFont('helvetica', '', 7);
+        $pdf->Cell(60, 3.2, "Ver boleta: www.mypos.cl/boleta?rut={$rutUrl}&folio={$folio}", 0, 2, 'C');
 
         // Marca CEDIBLE
         if ($esCedible) {
@@ -399,5 +409,157 @@ class MuestraPdfGenerator
         }
 
         return $bytes;
+    }
+
+    /**
+     * Representación TÉRMICA (ticket 80mm / 58mm) de una boleta como PDF, con el
+     * mismo TED byte-exacto que la carta. Se usa cuando la caja eligió formato
+     * térmico: así "ver boleta" y la verificación pública coinciden con lo impreso.
+     */
+    private function renderTermico(DOMXPath $xp, callable $q, int $tipo, int $folio, array $opts, string $ted, string $formato): string
+    {
+        $width = $formato === '58' ? 58.0 : 80.0;
+        $mg = 3.0;
+        $cw = $width - 2 * $mg;
+
+        $emRzn  = $q('//s:Encabezado/s:Emisor/s:RznSoc');
+        $emRutR = preg_replace('/[^0-9kK]/', '', $q('//s:Encabezado/s:Emisor/s:RUTEmisor')) ?? '';
+        $emRut  = self::formatRut($q('//s:Encabezado/s:Emisor/s:RUTEmisor'));
+        $emGiro = $q('//s:Encabezado/s:Emisor/s:GiroEmis');
+        $cmna   = $q('//s:Encabezado/s:Emisor/s:CmnaOrigen');
+        $emDir  = trim($q('//s:Encabezado/s:Emisor/s:DirOrigen') . ($cmna !== '' ? ', ' . $cmna : ''));
+        $fchEmis = $q('//s:Encabezado/s:IdDoc/s:FchEmis');
+        $mntNeto = $q('//s:Encabezado/s:Totales/s:MntNeto');
+        $mntExe  = $q('//s:Encabezado/s:Totales/s:MntExe');
+        $iva     = $q('//s:Encabezado/s:Totales/s:IVA');
+        $tasa    = $q('//s:Encabezado/s:Totales/s:TasaIVA') ?: '19';
+        $mntTot  = $q('//s:Encabezado/s:Totales/s:MntTotal');
+
+        $items = [];
+        foreach ($xp->query('//s:Detalle') as $det) {
+            $nm = $q('.//s:NmbItem', $det);
+            if ($q('.//s:IndExe', $det) === '1') {
+                $nm .= ' (EXENTO)';
+            }
+            $items[] = ['nm' => $nm, 'cant' => $q('.//s:QtyItem', $det), 'mont' => $q('.//s:MontoItem', $det)];
+        }
+
+        $resolNum = (int) ($opts['resolNum'] ?? 0);
+        $resolAno = substr((string) ($opts['resolFch'] ?? '2021-01-04'), 0, 4) ?: '2021';
+        $unidad   = self::unidadSii((string) ($opts['unidadSII'] ?? ''));
+
+        // Alto del ticket: estimación generosa (mejor algo de espacio abajo que cortar).
+        $alto = 128.0 + count($items) * 9.0;
+
+        $pdf = new \TCPDF('P', 'mm', [$width, $alto], true, 'UTF-8', false);
+        $pdf->SetMargins($mg, 4, $mg);
+        $pdf->SetAutoPageBreak(false);
+        $pdf->setPrintHeader(false);
+        $pdf->setPrintFooter(false);
+        $pdf->AddPage();
+
+        // ── Recuadro SII (RUT / tipo / folio) ──
+        $by = $pdf->GetY();
+        $pdf->SetDrawColor(0, 0, 0);
+        $pdf->SetLineWidth(0.3);
+        $pdf->Rect($mg, $by, $cw, 17);
+        $pdf->SetFont('helvetica', 'B', 9);
+        $pdf->SetXY($mg, $by + 1.5);
+        $pdf->Cell($cw, 4, 'R.U.T.: ' . $emRut, 0, 2, 'C');
+        $pdf->Cell($cw, 4, self::TIPO_NOMBRE[$tipo] ?? "DOCUMENTO TIPO $tipo", 0, 2, 'C');
+        $pdf->SetFont('helvetica', 'B', 11);
+        $pdf->Cell($cw, 5, 'N° ' . $folio, 0, 2, 'C');
+        $pdf->SetY($by + 18);
+        $pdf->SetFont('helvetica', '', 7);
+        $pdf->Cell($cw, 3.5, 'S.I.I.' . ($unidad !== '' ? ' - ' . $unidad : ''), 0, 2, 'C');
+        $pdf->Ln(1.5);
+
+        // ── Emisor ──
+        $pdf->SetFont('helvetica', 'B', 8);
+        $pdf->MultiCell($cw, 3.6, $emRzn, 0, 'L');
+        $pdf->SetFont('helvetica', '', 7);
+        if ($emGiro !== '') {
+            $pdf->MultiCell($cw, 3.2, 'Giro: ' . $emGiro, 0, 'L');
+        }
+        if ($emDir !== '') {
+            $pdf->MultiCell($cw, 3.2, $emDir, 0, 'L');
+        }
+        $pdf->Cell($cw, 3.6, 'Fecha: ' . $fchEmis, 0, 2, 'L');
+        $this->lineaTermica($pdf, $mg, $cw);
+
+        // ── Detalle ──
+        $colTotal = 20.0;
+        $colCant  = 11.0;
+        $colNm    = $cw - $colTotal - $colCant;
+        $pdf->SetFont('helvetica', 'B', 7);
+        $pdf->Cell($colNm, 4, 'Producto', 0, 0, 'L');
+        $pdf->Cell($colCant, 4, 'Cant', 0, 0, 'R');
+        $pdf->Cell($colTotal, 4, 'Total', 0, 1, 'R');
+        $pdf->SetFont('helvetica', '', 7);
+        foreach ($items as $it) {
+            $y0 = $pdf->GetY();
+            $pdf->MultiCell($colNm, 3.4, mb_substr((string) $it['nm'], 0, 70), 0, 'L');
+            $yNm = $pdf->GetY();
+            $pdf->SetXY($mg + $colNm, $y0);
+            $pdf->Cell($colCant, 3.4, self::qty($it['cant']), 0, 0, 'R');
+            $pdf->Cell($colTotal, 3.4, '$' . self::n($it['mont']), 0, 0, 'R');
+            $pdf->SetY(max($yNm, $y0 + 3.4));
+        }
+        $this->lineaTermica($pdf, $mg, $cw);
+
+        // ── Totales ──
+        $pdf->SetFont('helvetica', '', 8);
+        if ($mntNeto !== '' && (float) $mntNeto > 0) {
+            $this->totalTermico($pdf, $cw, 'Monto Neto', '$' . self::n($mntNeto));
+        }
+        if ($iva !== '' && (float) $iva > 0) {
+            $this->totalTermico($pdf, $cw, "IVA ({$tasa}%)", '$' . self::n($iva));
+        }
+        if ($mntExe !== '' && (float) $mntExe > 0) {
+            $this->totalTermico($pdf, $cw, 'Monto Exento', '$' . self::n($mntExe));
+        }
+        $pdf->SetFont('helvetica', 'B', 10);
+        $this->totalTermico($pdf, $cw, 'TOTAL', '$' . self::n($mntTot));
+        $pdf->Ln(2.5);
+
+        // ── Timbre PDF417 (aspecto preservado, no estirado) ──
+        $tedY = $pdf->GetY();
+        $tw = min($cw, $width === 58.0 ? 50.0 : 64.0);
+        $tx = $mg + ($cw - $tw) / 2;
+        $th = $tw * 0.36;
+        if (function_exists('imagecreate')) {
+            require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
+            $bc = new \TCPDF2DBarcode($ted, 'PDF417');
+            $png = $bc->getBarcodePngData(3, 3, [0, 0, 0]);
+            if ($png !== false && $png !== '') {
+                $dim = @getimagesizefromstring($png);
+                if (is_array($dim) && (int) $dim[0] > 0) {
+                    $th = $tw * (int) $dim[1] / (int) $dim[0];
+                }
+                $pdf->Image('@' . $png, $tx, $tedY, $tw, $th, 'PNG');
+            }
+        }
+        $pdf->SetY($tedY + $th + 1.5);
+        $pdf->SetFont('helvetica', 'B', 7);
+        $pdf->Cell($cw, 3.2, 'Timbre Electrónico SII', 0, 2, 'C');
+        $pdf->SetFont('helvetica', '', 6.5);
+        $pdf->Cell($cw, 3, "Res. {$resolNum} de {$resolAno}", 0, 2, 'C');
+        $pdf->Cell($cw, 3, 'Verifique documento: www.sii.cl', 0, 2, 'C');
+        $pdf->Cell($cw, 3, "Ver boleta: www.mypos.cl/boleta?rut={$emRutR}&folio={$folio}", 0, 2, 'C');
+
+        return $pdf->Output('', 'S');
+    }
+
+    private function lineaTermica(\TCPDF $pdf, float $mg, float $cw): void
+    {
+        $y = $pdf->GetY() + 0.6;
+        $pdf->Line($mg, $y, $mg + $cw, $y);
+        $pdf->SetY($y + 1.2);
+    }
+
+    private function totalTermico(\TCPDF $pdf, float $cw, string $label, string $value): void
+    {
+        $pdf->Cell($cw * 0.6, 4.4, $label, 0, 0, 'L');
+        $pdf->Cell($cw * 0.4, 4.4, $value, 0, 1, 'R');
     }
 }

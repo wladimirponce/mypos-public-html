@@ -295,11 +295,18 @@ final class VentaService
                         'empresa_id' => $empresaId,
                         'venta_id'   => $saleId,
                     ]);
+                    // Formato del PDF de la boleta según lo elegido en la caja
+                    // (la térmica imprime ESC/POS; esto define el PDF guardado/visible).
+                    $formatoBoleta = strtolower(trim((string) ($payload['formato_boleta'] ?? 'carta')));
+                    if (!in_array($formatoBoleta, ['carta', '80', '58'], true)) {
+                        $formatoBoleta = 'carta';
+                    }
                     $emision = $docSvc->emitirDte($userId, (int) $doc['documento_emitido_id'], [
                         'empresa_id'              => $empresaId,
                         'sucursal_id'             => $sucursalId,
                         'asignar_folio_si_falta'  => true,
                         'origen'                  => 'ONLINE',
+                        'formato_pdf'             => $formatoBoleta,
                     ]);
                     $response['dte_print_payload'] = $emision['dte_print_payload'] ?? null;
                     $response['dte_pdf_path']      = $emision['pdf_path'] ?? null;

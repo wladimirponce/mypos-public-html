@@ -818,8 +818,12 @@ if ($action) {
             // que re-codifique el TED. base64 viaja seguro por JSON.
             if (!empty($genRes['ok']) && !empty($data['with_pdf']) && !empty($genRes['xml'])) {
                 try {
+                    // El formato (80/58/carta) solo aplica a boletas; el resto siempre carta.
+                    $formatoPdf = in_array((int)$genRes['tipo'], [39, 41], true)
+                        ? (string)($data['formato_pdf'] ?? 'carta')
+                        : 'carta';
                     $genRes['pdf_base64'] = base64_encode(
-                        buildDtePdf((string)$genRes['xml'], (int)$genRes['tipo'], (int)$genRes['folio'])
+                        buildDtePdf((string)$genRes['xml'], (int)$genRes['tipo'], (int)$genRes['folio'], $formatoPdf)
                     );
                 } catch (\Throwable $e) {
                     $genRes['pdf_error'] = $e->getMessage();
@@ -1838,7 +1842,7 @@ function generateDTE(array $data): array {
  * la nube de boletas cuando no hay print server local. La resolución sale de la
  * empresa real en PRODUCCION; en CERTIFICACION va N° 0 como exige el SII.
  */
-function buildDtePdf(string $xmlFirmado, int $tipo, int $folio): string {
+function buildDtePdf(string $xmlFirmado, int $tipo, int $folio, string $formato = 'carta'): string {
     global $globalContext;
     $emp  = $globalContext ? $globalContext->getEmpresa() : [];
     $cert = $globalContext && $globalContext->getAmbiente() === 'CERTIFICACION';
@@ -1850,10 +1854,12 @@ function buildDtePdf(string $xmlFirmado, int $tipo, int $folio): string {
     $gen = new \App\Services\MuestraPdfGenerator();
     // xml y raw apuntan al mismo string firmado: loadXML respeta la declaración
     // ISO-8859-1 y el TED se extrae de los bytes originales (no re-codificados).
+    // El formato (carta / 80 / 58) lo elige la caja; solo boletas usan térmico.
     return $gen->render(
         ['xml' => $xmlFirmado, 'raw' => $xmlFirmado, 'tipo' => $tipo, 'folio' => $folio],
         $opts,
-        'TRIBUTARIA'
+        'TRIBUTARIA',
+        $formato
     );
 }
 
