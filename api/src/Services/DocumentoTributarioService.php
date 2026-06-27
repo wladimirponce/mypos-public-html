@@ -554,7 +554,7 @@ final class DocumentoTributarioService
         // json_valid de las columnas JSON (MariaDB).
         return json_encode(
             $payload,
-            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
         ) ?: '{}';
     }
 

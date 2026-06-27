@@ -1072,7 +1072,7 @@ final class DteIntegrationService
         // siempre es valido. El timbre real para imprimir viene del PDF del admin.
         return json_encode(
             $payload,
-            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
         ) ?: '{}';
     }
 
