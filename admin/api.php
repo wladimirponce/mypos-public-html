@@ -239,10 +239,15 @@ try {
     } elseif ($isAdminRequest && isset($_SESSION['active_empresa_id'])) {
         $globalContext = new Context((int)$_SESSION['active_empresa_id']);
     } elseif (!empty($apiKey)) {
-        $globalContext = new Context($apiKey);
-        if ($requestedEmpresaId !== null && $requestedEmpresaId > 0
-            && $globalContext->getEmpresaId() !== $requestedEmpresaId) {
-            throw new Exception('Acceso denegado: la API key no pertenece a la empresa solicitada.');
+        // Llamada servidor-a-servidor (POS / web app) con API key como gate
+        // compartido. En el modelo SaaS la empresa NO se resuelve por API key
+        // (getByApiKey devuelve null: no hay key por empresa), sino por el
+        // empresa_id explicito que envia el consumidor -> getById. Si no se envia
+        // empresa_id se conserva la resolucion legacy por API key (tablas sii_*).
+        if ($requestedEmpresaId !== null && $requestedEmpresaId > 0) {
+            $globalContext = new Context($requestedEmpresaId);
+        } else {
+            $globalContext = new Context($apiKey);
         }
     }
 } catch (Exception $e) {

@@ -437,6 +437,7 @@ final class DteIntegrationService
         }
 
         $send = $this->adminRequest($endpoint, 'send', [
+            'empresa_id' => (int) $payload['documento']['empresa_id'],
             'xml' => $xml,
             'tipo' => $tipo,
             'folio' => $folio,
@@ -483,6 +484,9 @@ final class DteIntegrationService
         $receptor = $payload['receptor'];
 
         return [
+            // empresa_id explicito: el admin (modo SaaS) resuelve la empresa por id
+            // via getById; getByApiKey no aplica porque no hay key por empresa.
+            'empresa_id' => (int) $document['empresa_id'],
             'tipo' => (int) $document['tipo_dte'],
             'folio' => (int) $document['folio'],
             'fecha' => (string) $document['fecha_emision'],
