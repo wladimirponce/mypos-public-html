@@ -2372,10 +2372,15 @@ function loadCAF(int $tipo, int $folio = 0): array {
             }
         }
 
-        if (!empty($dbCaf['xml_path'])) {
-            $xmlCont = normalizeCafXmlContent((string)file_get_contents($dbCaf['xml_path']));
-        } elseif (!empty($dbCaf['xml_content'])) {
+        // Preferir el XML guardado en BD (xml_content = caf_xml): siempre accesible.
+        // El archivo_path del SaaS es RELATIVO al storage del web app; el admin corre
+        // en otro directorio y file_get_contents falla, dejando el CAF vacio →
+        // "No se pudo extraer el bloque <CAF>". El path se usa solo como respaldo y
+        // unicamente si el archivo existe y es legible.
+        if (!empty($dbCaf['xml_content'])) {
             $xmlCont = normalizeCafXmlContent((string)$dbCaf['xml_content']);
+        } elseif (!empty($dbCaf['xml_path']) && is_file((string)$dbCaf['xml_path'])) {
+            $xmlCont = normalizeCafXmlContent((string)file_get_contents((string)$dbCaf['xml_path']));
         } else {
             throw new Exception("CAF sin contenido XML disponible para folio $folio (tipo $tipo)");
         }
