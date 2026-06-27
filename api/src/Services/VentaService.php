@@ -309,6 +309,7 @@ final class VentaService
                 } catch (Throwable $dteEx) {
                     error_log('[POS DTE] Boleta no emitida (venta ' . $saleId . ' OK): ' . $dteEx->getMessage());
                     $response['dte_error'] = 'Boleta electrónica pendiente de emisión.';
+                    $response['dte_error_detalle'] = $dteEx->getMessage();
                 }
             }
 

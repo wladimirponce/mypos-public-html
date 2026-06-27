@@ -5,7 +5,7 @@ title MyPOS Print Server - Instalador
 echo.
 echo  ============================================================
 echo   MyPOS Print Server - Instalador Automatico
-echo   Puerto 5555 ^| Python 3.11 ^| ESC/POS
+echo   Puerto 5555 ^| Python 3.11 ^| ESC/POS ^| PDF SII
 echo  ============================================================
 echo.
 
@@ -120,6 +120,20 @@ if exist "%~dp0requirements.txt" (
 ) else (
     powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12,Tls13'; Invoke-WebRequest '%REQ_URL%' -OutFile '%INSTALL_DIR%\requirements.txt' -UseBasicParsing"
 )
+
+if exist "%~dp0python-3.11.9-amd64.exe" copy /Y "%~dp0python-3.11.9-amd64.exe" "%INSTALL_DIR%\python-3.11.9-amd64.exe" >nul
+if exist "%~dp0VC_redist.x64.exe" copy /Y "%~dp0VC_redist.x64.exe" "%INSTALL_DIR%\VC_redist.x64.exe" >nul
+if exist "%~dp0README.md" copy /Y "%~dp0README.md" "%INSTALL_DIR%\README.md" >nul
+if exist "%~dp0SumatraPDF.exe" (
+    copy /Y "%~dp0SumatraPDF.exe" "%INSTALL_DIR%\SumatraPDF.exe" >nul
+    echo       SumatraPDF.exe: copiado desde instalador local.
+) else (
+    echo  [ADVERTENCIA] SumatraPDF.exe no viene en el instalador. Las boletas PDF no se imprimiran en silencio.
+)
+
+if exist "%~dp0SumatraPDF-3.6.1-64-install.exe" copy /Y "%~dp0SumatraPDF-3.6.1-64-install.exe" "%INSTALL_DIR%\SumatraPDF-3.6.1-64-install.exe" >nul
+if exist "%~dp0PdfFilter.dll" copy /Y "%~dp0PdfFilter.dll" "%INSTALL_DIR%\PdfFilter.dll" >nul
+if exist "%~dp0PdfPreview.dll" copy /Y "%~dp0PdfPreview.dll" "%INSTALL_DIR%\PdfPreview.dll" >nul
 
 :: ── Paso 5: Librerias Python ─────────────────────────────────
 echo.

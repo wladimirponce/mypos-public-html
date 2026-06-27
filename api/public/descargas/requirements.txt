@@ -1,0 +1,6 @@
+flask
+flask-cors
+pywin32
+Pillow
+pdf417
+python-barcode

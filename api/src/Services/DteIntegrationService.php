@@ -690,7 +690,6 @@ final class DteIntegrationService
             'sitio_web' => $emisor['sitio_web'] ?? null,
             'nro_resol' => $generate['nro_resol'] ?? null,
             'fch_resol' => $generate['fch_resol'] ?? null,
-            'unidad_sii' => $generate['unidad_sii'] ?? $generate['unidadSII'] ?? null,
             'verify_url' => $generate['verify_url'] ?? null,
             'total' => (int) $document['total'],
             'neto' => (int) $document['neto'],

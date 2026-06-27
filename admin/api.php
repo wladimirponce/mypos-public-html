@@ -1689,18 +1689,12 @@ function generateDTE(array $data): array {
         $repo->registrarConsumoFolio($caf['id_db'], $globalContext->getEmpresaId(), $tipo, $folio, $dteId, $globalContext->getAmbiente());
     }
 
-    $empResol = $globalContext ? $globalContext->getEmpresa() : [];
-    $certAmbiente = $globalContext && $globalContext->getAmbiente() === 'CERTIFICACION';
-
     return [
         'ok'          => true,
         'xml'         => $xmlFirmado,
         'folio'       => $folio,
         'tipo'        => $tipo,
         'montos'      => $montos,
-        'nro_resol'   => $certAmbiente ? 0 : ($empResol['numero_resolucion'] ?? $empResol['nro_resol'] ?? NRO_RESOL),
-        'fch_resol'   => $empResol['fecha_resolucion'] ?? $empResol['fch_resol'] ?? FCH_RESOL,
-        'unidadSII'   => $empResol['unidad_sii'] ?? UNIDAD_SII,
         'alerta'      => $caf['alerta'] ?? 'normal',
         'advertencias'=> $advertencias,
         'mensaje'     => "DTE tipo $tipo folio $folio generado correctamente. Alerta: " . ($caf['alerta'] ?? 'normal'),
