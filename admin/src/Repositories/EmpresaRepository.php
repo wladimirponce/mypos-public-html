@@ -389,12 +389,20 @@ class EmpresaRepository extends BaseRepository
                     empresa_id, tipo_documento, folio, estado, total, fecha_emision, payload_json
                 ) VALUES (?, ?, ?, 'EMITIDO', ?, ?, ?)";
         
+        // El XML firmado del SII viene en ISO-8859-1; sin convertir, json_encode
+        // devuelve false (bytes no-UTF8) y se guarda '' → viola el CHECK
+        // json_valid(payload_json) de MariaDB. Convertimos a UTF-8 (preserva Ñ/tildes)
+        // y dejamos JSON_INVALID_UTF8_SUBSTITUTE + fallback como red de seguridad.
+        $xmlForStore = (string)($data['xml'] ?? '');
+        if ($xmlForStore !== '' && !mb_check_encoding($xmlForStore, 'UTF-8')) {
+            $xmlForStore = mb_convert_encoding($xmlForStore, 'UTF-8', 'ISO-8859-1');
+        }
         $payloadJson = json_encode([
-            'xml_firmado' => $data['xml'],
+            'xml_firmado' => $xmlForStore,
             'rut_receptor' => $data['rut_receptor'] ?? '',
             'razon_receptor' => $data['razon_receptor'] ?? '',
             'ambiente' => strtolower($data['ambiente'])
-        ]);
+        ], JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}';
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute([
