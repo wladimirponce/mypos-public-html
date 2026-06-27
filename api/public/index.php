@@ -294,6 +294,7 @@ $router->post('/api/v1/auth/verify-email', [$authController, 'verifyEmail']);
 // Verificación pública de boletas (sin autenticación) — mypos.cl/boleta
 $publicController = new PublicController();
 $router->get('/api/v1/public/boleta', [$publicController, 'boleta']);
+$router->get('/api/v1/public/boleta/pdf', [$publicController, 'boletaPdf']);
 
 $onboardingController = new OnboardingController();
 $router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);

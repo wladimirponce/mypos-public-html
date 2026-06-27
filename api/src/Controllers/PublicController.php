@@ -80,6 +80,64 @@ final class PublicController
         }
     }
 
+    /**
+     * Sirve el PDF oficial (representación impresa con timbre) de una boleta,
+     * buscado por RUT del emisor + folio. Es el mismo PDF que generó el admin y
+     * que se guarda en storage/boletas/{empresa}/{folio}.pdf. Público, solo lectura.
+     */
+    public function boletaPdf(): void
+    {
+        try {
+            $rut = $this->normalizeRut((string) ($_GET['rut'] ?? ''));
+            $folio = (int) ($_GET['folio'] ?? 0);
+
+            if ($rut === '' || $folio <= 0) {
+                http_response_code(422);
+                echo 'Indique el RUT del emisor y el número de boleta.';
+                return;
+            }
+
+            $conn = Database::connection();
+            $stmt = $conn->prepare(
+                "SELECT id FROM empresas
+                 WHERE REPLACE(REPLACE(UPPER(rut), '.', ''), ' ', '') = :rut
+                 LIMIT 1"
+            );
+            $stmt->execute(['rut' => $rut]);
+            $empresaId = (int) ($stmt->fetchColumn() ?: 0);
+
+            if ($empresaId <= 0) {
+                http_response_code(404);
+                echo 'Comercio no encontrado.';
+                return;
+            }
+
+            $dir = dirname(__DIR__, 2) . '/storage/boletas/' . $empresaId;
+            $path = $dir . '/' . $folio . '.pdf';
+            if (!is_file($path)) {
+                $matches = glob($dir . '/T*-' . $folio . '.pdf') ?: [];
+                $path = $matches[0] ?? '';
+            }
+
+            if ($path === '' || !is_file($path)) {
+                http_response_code(404);
+                echo 'No hay PDF disponible para esta boleta.';
+                return;
+            }
+
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: inline; filename="boleta-' . $folio . '.pdf"');
+            header('Content-Length: ' . (string) filesize($path));
+            header('Cache-Control: public, max-age=300');
+            readfile($path);
+            exit;
+        } catch (Throwable $exception) {
+            error_log('[PublicController.boletaPdf] ' . $exception->getMessage());
+            http_response_code(500);
+            echo 'No se pudo cargar el PDF de la boleta.';
+        }
+    }
+
     private function normalizeRut(string $rut): string
     {
         return strtoupper(str_replace(['.', ' '], '', trim($rut)));
