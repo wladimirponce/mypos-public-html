@@ -608,11 +608,14 @@ final class DteIntegrationService
             if ($cafXml === false || $cafXml === '') {
                 throw new HttpException('No se pudo leer el archivo CAF subido', 422);
             }
-            $request['caf_xml'] = $cafXml;
+            // El CAF del SII viene en ISO-8859-1; enviarlo en base64 preserva los
+            // bytes exactos (criticos para el timbre) y evita que json_encode falle
+            // por contenido no-UTF8.
+            $request['caf_xml_base64'] = base64_encode($cafXml);
             $request['caf_tipo'] = (int) ($payload['caf_tipo'] ?? 39);
         }
 
-        if (!isset($request['pfx_base64']) && !isset($request['caf_xml'])) {
+        if (!isset($request['pfx_base64']) && !isset($request['caf_xml_base64'])) {
             throw new HttpException('Debe enviar el certificado (.pfx) y/o el CAF (XML).', 422);
         }
 
@@ -635,7 +638,7 @@ final class DteIntegrationService
             'datos_nuevos' => [
                 'ambiente' => $response['ambiente'] ?? null,
                 'cert' => isset($request['pfx_base64']),
-                'caf' => isset($request['caf_xml']),
+                'caf' => isset($request['caf_xml_base64']),
                 'tipo_caf' => $request['caf_tipo'] ?? null,
             ],
         ]);

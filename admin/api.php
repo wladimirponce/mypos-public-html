@@ -559,7 +559,9 @@ function provisionarCredenciales(array $data, $ctx): array {
 
     $pfxB64  = (string)($data['pfx_base64'] ?? '');
     $pfxPass = (string)($data['pfx_password'] ?? '');
-    $cafXml  = (string)($data['caf_xml'] ?? '');
+    // El CAF viaja en base64 (preserva bytes ISO-8859-1); compat con 'caf_xml' crudo.
+    $cafB64  = (string)($data['caf_xml_base64'] ?? '');
+    $cafXml  = $cafB64 !== '' ? (string)base64_decode($cafB64, true) : (string)($data['caf_xml'] ?? '');
 
     if ($pfxB64 === '' && $cafXml === '') {
         return ['ok' => false, 'error' => 'No se envio certificado ni CAF.'];
