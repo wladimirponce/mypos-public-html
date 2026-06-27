@@ -793,7 +793,10 @@ final class DteIntegrationService
             'sitio_web' => $emisor['sitio_web'] ?? null,
             'nro_resol' => $generate['nro_resol'] ?? null,
             'fch_resol' => $generate['fch_resol'] ?? null,
-            'verify_url' => $generate['verify_url'] ?? null,
+            // Link de verificación pública en MyPOS (se imprime abajo en el ticket):
+            // el cliente puede ver la boleta por RUT + folio sin login.
+            'verify_url' => 'www.mypos.cl/boleta?rut=' . rawurlencode((string) ($emisor['rut'] ?? ''))
+                . '&folio=' . (int) ($generate['folio'] ?? $document['folio']),
             'total' => (int) $document['total'],
             'neto' => (int) $document['neto'],
             'iva' => (int) $document['impuestos'],

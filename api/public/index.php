@@ -47,6 +47,7 @@ use Mypos\Controllers\InventarioFisicoController;
 use Mypos\Controllers\LibroController;
 use Mypos\Controllers\OnboardingController;
 use Mypos\Controllers\PermissionController;
+use Mypos\Controllers\PublicController;
 use Mypos\Controllers\ProductoAtributoController;
 use Mypos\Controllers\ProductoController;
 use Mypos\Controllers\ProveedorController;
@@ -289,6 +290,10 @@ $router->post('/api/v1/auth/login', [$authController, 'login']);
 $router->get('/api/v1/auth/me', [$authController, 'me']);
 $router->post('/api/v1/auth/logout', [$authController, 'logout']);
 $router->post('/api/v1/auth/verify-email', [$authController, 'verifyEmail']);
+
+// Verificación pública de boletas (sin autenticación) — mypos.cl/boleta
+$publicController = new PublicController();
+$router->get('/api/v1/public/boleta', [$publicController, 'boleta']);
 
 $onboardingController = new OnboardingController();
 $router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);

@@ -1,0 +1,1 @@
+import{b1 as a}from"./index-TgIHV9-Y.js";import{r}from"./reporteService-oB2iX0-N.js";function s(e){return a({queryKey:["dashboard",e.empresa_id,e.sucursal_id,e.fecha_desde,e.fecha_hasta],queryFn:()=>r.getDashboard(e),enabled:e.empresa_id>0,staleTime:3e4})}export{s as u};
