@@ -464,7 +464,7 @@ final class DteIntegrationService
             'folio' => $folio,
         ], $apiKey);
 
-        $tedXml = $this->extractTedXml($xml);
+        $tedXml = $this->tedXmlFromGenerateResponse($generate) ?? $this->extractTedXml($xml);
         $sendOk = !empty($send['ok']);
         $trackId = isset($send['trackId']) ? (string) $send['trackId'] : (isset($send['track_id']) ? (string) $send['track_id'] : null);
         $printPayload = $this->buildPrintPayload($payload, $generate, $send, $tedXml);
@@ -849,6 +849,21 @@ final class DteIntegrationService
         }
 
         return null;
+    }
+
+    private function tedXmlFromGenerateResponse(array $generate): ?string
+    {
+        $base64 = $generate['ted_xml_base64'] ?? null;
+        if (!is_string($base64) || trim($base64) === '') {
+            return null;
+        }
+
+        $decoded = base64_decode($base64, true);
+        if (!is_string($decoded) || $decoded === '') {
+            return null;
+        }
+
+        return $this->extractTedXml($decoded);
     }
 
     private function withoutXml(array $response): array

@@ -844,6 +844,11 @@ if ($action) {
                 $xmlParaPdf = is_string($decodedXmlParaPdf) ? $decodedXmlParaPdf : '';
             }
             if (!empty($genRes['ok']) && !empty($data['with_pdf']) && $xmlParaPdf !== '') {
+                $tedParaImpresion = '';
+                if (preg_match('/<TED\b[^>]*>[\s\S]*?<\/TED>/', $xmlParaPdf, $mTedPayload)) {
+                    $tedParaImpresion = $mTedPayload[0];
+                    $genRes['ted_xml_base64'] = base64_encode($tedParaImpresion);
+                }
                 try {
                     // El formato (80/58/carta) solo aplica a boletas; el resto siempre carta.
                     $formatoPdf = in_array((int)$genRes['tipo'], [39, 41], true)
@@ -859,9 +864,9 @@ if ($action) {
                 // (que la app del SII sí reconoce). El print server la usa para el
                 // ticket termico en vez de renderizar su propio PDF417 (que no se lee).
                 try {
-                    if (preg_match('/<TED\b[^>]*>[\s\S]*?<\/TED>/', (string)$genRes['xml'], $mTed)) {
+                    if ($tedParaImpresion !== '') {
                         require_once __DIR__ . '/lib/tcpdf/tcpdf_barcodes_2d.php';
-                        $bcTed = new \TCPDF2DBarcode($mTed[0], 'PDF417');
+                        $bcTed = new \TCPDF2DBarcode($tedParaImpresion, 'PDF417');
                         $pngTed = $bcTed->getBarcodePngData(4, 4, [0, 0, 0]);
                         if ($pngTed !== false && $pngTed !== '') {
                             $pngTed = padBarcodePngBytes($pngTed, 40, 28);
