@@ -333,7 +333,7 @@ final class VentaService
                         $response['dte_error'] = 'Boleta electronica no imprimible.';
                         $response['dte_error_detalle'] = $modoDte === 'SIMULADO'
                             ? 'La configuracion DTE de la empresa esta en modo SIMULADO; debe estar en REAL/PRODUCCION para emitir e imprimir boletas legales.'
-                            : 'La emision DTE no devolvio TED/payload de impresion; revisa la respuesta del facturador antes de imprimir.';
+                            : (string) ($emision['error'] ?? 'La emision DTE no devolvio TED/payload de impresion; revisa la respuesta del facturador antes de imprimir.');
                     }
                 } catch (Throwable $dteEx) {
                     error_log('[POS DTE] Boleta no emitida (venta ' . $saleId . ' OK): ' . $dteEx->getMessage());

@@ -403,14 +403,11 @@ final class DteIntegrationService
         $endpoint = (string) $config['endpoint_http'];
         $apiKey = $this->adminApiKey($config, (int) $payload['documento']['empresa_id']);
         $request = $this->adminGeneratePayload($payload);
-        $cafXml = $this->cafXmlForEmission(
-            (int) $payload['documento']['empresa_id'],
-            (int) $payload['documento']['tipo_dte'],
-            (int) $payload['documento']['folio']
-        );
-        if ($cafXml !== null) {
-            $request['caf_xml_base64'] = base64_encode($cafXml);
-        }
+        // No enviamos caf_xml_base64 al admin: la columna caf_archivos.caf_xml puede
+        // tener '?' en lugar de Ñ (corrupción utf8mb4 al insertar bytes ISO-8859-1 raw).
+        // Si se enviara, el admin lo usaría como SII_CAF_XML_OVERRIDE con prioridad
+        // sobre su filesystem, donde provisionarCredenciales ya escribió bytes exactos.
+        // El admin resuelve el CAF desde su filesystem (ruta caf/{RUT}/PRODUCCION/).
         $generate = $this->adminRequest($endpoint, 'generate', $request, $apiKey);
 
         if (empty($generate['ok'])) {
@@ -471,6 +468,15 @@ final class DteIntegrationService
         if ($printPayload !== null && isset($generate['pdf_error'])) {
             $printPayload['pdf_error'] = (string) $generate['pdf_error'];
         }
+        $printDiagnostics = [
+            'has_xml_base64' => isset($generate['xml_base64']) && is_string($generate['xml_base64']) && trim($generate['xml_base64']) !== '',
+            'has_ted_xml_base64' => isset($generate['ted_xml_base64']) && is_string($generate['ted_xml_base64']) && trim($generate['ted_xml_base64']) !== '',
+            'has_ted_png_base64' => isset($generate['ted_png_base64']) && is_string($generate['ted_png_base64']) && trim($generate['ted_png_base64']) !== '',
+            'has_pdf_base64' => isset($generate['pdf_base64']) && is_string($generate['pdf_base64']) && trim($generate['pdf_base64']) !== '',
+            'pdf_error' => isset($generate['pdf_error']) ? (string) $generate['pdf_error'] : null,
+            'ted_png_error' => isset($generate['ted_png_error']) ? (string) $generate['ted_png_error'] : null,
+            'ted_extraido' => $tedXml !== null && $tedXml !== '',
+        ];
 
         // Respaldo en la nube: guardar el PDF que devolvió el admin (with_pdf) en
         // storage/boletas/{empresa}/{folio}.pdf. La venta no falla si esto falla.
@@ -495,11 +501,30 @@ final class DteIntegrationService
                 'generate' => $this->withoutXml($generate),
                 'send' => $send,
                 'ted_xml' => $tedXml,
+                'print_diagnostics' => $printDiagnostics,
                 'dte_print_payload' => $printPayload,
             ],
             'dte_print_payload' => $printPayload,
-            'error' => $sendOk ? null : (string) ($send['error'] ?? $send['mensaje'] ?? $generate['pdf_error'] ?? 'No se pudo enviar DTE al SII'),
+            'error' => $sendOk
+                ? ($printPayload === null ? $this->printPayloadErrorMessage($printDiagnostics) : null)
+                : (string) ($send['error'] ?? $send['mensaje'] ?? $generate['pdf_error'] ?? 'No se pudo enviar DTE al SII'),
         ];
+    }
+
+    private function printPayloadErrorMessage(array $diagnostics): string
+    {
+        $parts = [];
+        if (!empty($diagnostics['pdf_error'])) {
+            $parts[] = 'PDF: ' . $diagnostics['pdf_error'];
+        }
+        if (!empty($diagnostics['ted_png_error'])) {
+            $parts[] = 'PNG timbre: ' . $diagnostics['ted_png_error'];
+        }
+        if ($parts !== []) {
+            return 'El facturador emitio la boleta, pero no genero payload imprimible. ' . implode(' | ', $parts);
+        }
+
+        return 'El facturador emitio la boleta, pero no devolvio TED, PNG ni PDF imprimible.';
     }
 
     private function adminGeneratePayload(array $payload): array
@@ -537,55 +562,6 @@ final class DteIntegrationService
                 'exento' => (int) ($item['exento'] ?? 0) > 0,
             ], $payload['items'] ?? []),
         ];
-    }
-
-    private function cafXmlForEmission(int $empresaId, int $tipoDte, int $folio): ?string
-    {
-        $tipoDocumento = match ($tipoDte) {
-            33, 34 => 'FACTURA',
-            39, 41 => 'BOLETA',
-            52 => 'GUIA_DESPACHO',
-            56 => 'NOTA_DEBITO',
-            61 => 'NOTA_CREDITO',
-            default => null,
-        };
-        if ($tipoDocumento === null || $folio <= 0) {
-            return null;
-        }
-
-        $statement = Database::connection()->prepare(
-            'SELECT caf_xml, archivo_path
-             FROM caf_archivos
-             WHERE empresa_id = :empresa_id
-               AND tipo_documento = :tipo_documento
-               AND estado = \'ACTIVO\'
-               AND :folio BETWEEN folio_desde AND folio_hasta
-             ORDER BY folio_desde ASC
-             LIMIT 1'
-        );
-        $statement->execute([
-            'empresa_id' => $empresaId,
-            'tipo_documento' => $tipoDocumento,
-            'folio' => $folio,
-        ]);
-        $row = $statement->fetch();
-        if (!is_array($row)) {
-            return null;
-        }
-
-        $path = trim((string) ($row['archivo_path'] ?? ''));
-        if ($path !== '') {
-            $fullPath = dirname(__DIR__, 2) . '/storage/' . str_replace(['\\', '/'], DIRECTORY_SEPARATOR, ltrim($path, '/\\'));
-            if (is_file($fullPath)) {
-                $bytes = file_get_contents($fullPath);
-                if (is_string($bytes) && $bytes !== '') {
-                    return $bytes;
-                }
-            }
-        }
-
-        $xml = (string) ($row['caf_xml'] ?? '');
-        return trim($xml) !== '' ? $xml : null;
     }
 
     /** Directorio base de respaldo de boletas/DTE en PDF (en la nube/servidor). */
@@ -882,7 +858,9 @@ final class DteIntegrationService
 
     private function buildPrintPayload(array $payload, array $generate, array $send, ?string $tedXml): ?array
     {
-        if ($tedXml === null || $tedXml === '') {
+        $pdfBase64 = is_string($generate['pdf_base64'] ?? null) ? trim((string) $generate['pdf_base64']) : '';
+        $timbrePngBase64 = is_string($generate['ted_png_base64'] ?? null) ? trim((string) $generate['ted_png_base64']) : '';
+        if (($tedXml === null || $tedXml === '') && $pdfBase64 === '' && $timbrePngBase64 === '') {
             return null;
         }
 
@@ -908,11 +886,11 @@ final class DteIntegrationService
             'ted_b64' => $tedXml !== null && $tedXml !== '' ? base64_encode($tedXml) : null,
             // PDF oficial generado por admin (mismo layout que "Ver boleta"). El print
             // server lo usa al guardar/imprimir PDF para no reconstruir otro formato.
-            'pdf_base64' => is_string($generate['pdf_base64'] ?? null) ? $generate['pdf_base64'] : null,
+            'pdf_base64' => $pdfBase64 !== '' ? $pdfBase64 : null,
             // Imagen PNG del timbre PDF417 renderizada por el admin (TCPDF), que es la
             // que la app del SII reconoce. Si viene, el print server la usa tal cual en
             // vez de rasterizar su propio PDF417.
-            'timbre_png_b64' => is_string($generate['ted_png_base64'] ?? null) ? $generate['ted_png_base64'] : null,
+            'timbre_png_b64' => $timbrePngBase64 !== '' ? $timbrePngBase64 : null,
             'razon_social' => $emisor['razon_social'] ?? null,
             'nombre_fantasia' => $emisor['nombre_fantasia'] ?? null,
             'rut_emisor' => $emisor['rut'] ?? null,
