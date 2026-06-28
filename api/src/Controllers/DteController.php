@@ -92,16 +92,16 @@ final class DteController
             (new TenantMiddleware())->handle($userId, $empresaId);
             (new PermissionMiddleware())->handle($userId, $empresaId, 'dte.ver');
 
-            $path = $this->service->pdfPathDeEmision((int) $params['id'], $empresaId);
-            if ($path === null || !is_file($path)) {
+            $pdf = $this->service->pdfBytesDeEmision((int) $params['id'], $empresaId);
+            if ($pdf === null) {
                 throw new HttpException('PDF de la boleta no disponible', 404);
             }
 
             header('Content-Type: application/pdf');
-            header('Content-Disposition: inline; filename="' . basename($path) . '"');
-            header('Content-Length: ' . (string) filesize($path));
+            header('Content-Disposition: inline; filename="' . (string) ($pdf['filename'] ?? 'boleta.pdf') . '"');
+            header('Content-Length: ' . (string) strlen((string) $pdf['bytes']));
             header('Cache-Control: private, max-age=0, must-revalidate');
-            readfile($path);
+            echo (string) $pdf['bytes'];
             exit;
         } catch (HttpException $exception) {
             Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());

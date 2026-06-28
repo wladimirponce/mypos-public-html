@@ -639,6 +639,50 @@ final class DteIntegrationService
     }
 
     /**
+     * Devuelve el PDF de una emision desde storage o, si no se pudo persistir el
+     * archivo, desde el pdf_base64 guardado en response_json.
+     */
+    public function pdfBytesDeEmision(int $emisionId, int $empresaId): ?array
+    {
+        $detalle = $this->detalleEmision($emisionId, $empresaId);
+        $emision = $detalle['emision'] ?? [];
+        $folio = (int) ($emision['folio'] ?? 0);
+        if ($folio <= 0) {
+            return null;
+        }
+
+        $path = $this->rutaBoletaPdf($empresaId, $folio);
+        if ($path !== null && is_file($path)) {
+            $bytes = file_get_contents($path);
+            if (is_string($bytes) && $bytes !== '') {
+                return [
+                    'bytes' => $bytes,
+                    'filename' => basename($path),
+                ];
+            }
+        }
+
+        $base64 = $this->pdfBase64FromEmissionResponse($detalle['response'] ?? null);
+        if ($base64 === null) {
+            return null;
+        }
+
+        $bytes = base64_decode($base64, true);
+        if ($bytes === false || $bytes === '') {
+            return null;
+        }
+
+        $tipo = $this->tipoDteFromEmission($emision['tipo_documento'] ?? 39);
+        $this->guardarBoletaPdf($empresaId, $tipo, $folio, $base64);
+
+        $filename = in_array($tipo, [39, 41], true) ? "{$folio}.pdf" : "T{$tipo}-{$folio}.pdf";
+        return [
+            'bytes' => $bytes,
+            'filename' => $filename,
+        ];
+    }
+
+    /**
      * Provisiona en el facturador (admin) el certificado digital (.pfx + clave) y/o
      * el CAF de producción de la empresa. El navegador sube los archivos al backend
      * web (multipart) y este los reenvía al admin con la API key, que los escribe en
@@ -1058,6 +1102,43 @@ final class DteIntegrationService
         unset($event['metadata_json']);
 
         return $event;
+    }
+
+    private function pdfBase64FromEmissionResponse(?array $response): ?string
+    {
+        $candidates = [
+            $response['generate']['pdf_base64'] ?? null,
+            $response['dte_print_payload']['pdf_base64'] ?? null,
+            $response['generate']['dte_print_payload']['pdf_base64'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (!is_string($candidate)) {
+                continue;
+            }
+            $candidate = trim($candidate);
+            if ($candidate !== '') {
+                return str_contains($candidate, ',') ? explode(',', $candidate, 2)[1] : $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function tipoDteFromEmission(mixed $value): int
+    {
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        return match (strtoupper(trim((string) $value))) {
+            'BOLETA' => 39,
+            'BOLETA_EXENTA' => 41,
+            'FACTURA' => 33,
+            'FACTURA_EXENTA' => 34,
+            'GUIA_DESPACHO' => 52,
+            default => 39,
+        };
     }
 
     private function positiveInt(array $data, string $field): int
