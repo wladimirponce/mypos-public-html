@@ -836,14 +836,21 @@ if ($action) {
             // (base64) reutilizando MuestraPdfGenerator. El PDF se construye con el
             // XML firmado EN MEMORIA (ISO-8859-1, TED intacto) — no hay round-trip
             // que re-codifique el TED. base64 viaja seguro por JSON.
-            if (!empty($genRes['ok']) && !empty($data['with_pdf']) && !empty($genRes['xml'])) {
+            $xmlParaPdf = '';
+            if (!empty($genRes['xml'])) {
+                $xmlParaPdf = (string)$genRes['xml'];
+            } elseif (!empty($genRes['xml_base64'])) {
+                $decodedXmlParaPdf = base64_decode((string)$genRes['xml_base64'], true);
+                $xmlParaPdf = is_string($decodedXmlParaPdf) ? $decodedXmlParaPdf : '';
+            }
+            if (!empty($genRes['ok']) && !empty($data['with_pdf']) && $xmlParaPdf !== '') {
                 try {
                     // El formato (80/58/carta) solo aplica a boletas; el resto siempre carta.
                     $formatoPdf = in_array((int)$genRes['tipo'], [39, 41], true)
                         ? (string)($data['formato_pdf'] ?? 'carta')
                         : 'carta';
                     $genRes['pdf_base64'] = base64_encode(
-                        buildDtePdf((string)$genRes['xml'], (int)$genRes['tipo'], (int)$genRes['folio'], $formatoPdf)
+                        buildDtePdf($xmlParaPdf, (int)$genRes['tipo'], (int)$genRes['folio'], $formatoPdf)
                     );
                 } catch (\Throwable $e) {
                     $genRes['pdf_error'] = $e->getMessage();

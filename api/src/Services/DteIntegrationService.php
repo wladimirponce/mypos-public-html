@@ -464,6 +464,9 @@ final class DteIntegrationService
         $sendOk = !empty($send['ok']);
         $trackId = isset($send['trackId']) ? (string) $send['trackId'] : (isset($send['track_id']) ? (string) $send['track_id'] : null);
         $printPayload = $this->buildPrintPayload($payload, $generate, $send, $tedXml);
+        if ($printPayload !== null && isset($generate['pdf_error'])) {
+            $printPayload['pdf_error'] = (string) $generate['pdf_error'];
+        }
 
         // Respaldo en la nube: guardar el PDF que devolvió el admin (with_pdf) en
         // storage/boletas/{empresa}/{folio}.pdf. La venta no falla si esto falla.
@@ -491,7 +494,7 @@ final class DteIntegrationService
                 'dte_print_payload' => $printPayload,
             ],
             'dte_print_payload' => $printPayload,
-            'error' => $sendOk ? null : (string) ($send['error'] ?? $send['mensaje'] ?? 'No se pudo enviar DTE al SII'),
+            'error' => $sendOk ? null : (string) ($send['error'] ?? $send['mensaje'] ?? $generate['pdf_error'] ?? 'No se pudo enviar DTE al SII'),
         ];
     }
 
