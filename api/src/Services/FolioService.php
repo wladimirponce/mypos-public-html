@@ -44,11 +44,7 @@ final class FolioService
 
         $ambiente = $this->ambienteEmpresa($empresaId);
 
-        if ($this->repository->cafOverlapExists($empresaId, $type, $from, $to, $ambiente)) {
-            throw new HttpException('Existe un CAF activo que se solapa con el rango informado', 422);
-        }
-
-        $cafId = $this->repository->createCaf([
+        $cafData = [
             'empresa_id' => $empresaId,
             'tipo_documento' => $type,
             'rut_emisor' => $this->nullableString($payload['rut_emisor'] ?? null),
@@ -61,18 +57,38 @@ final class FolioService
             'caf_xml' => $this->nullableCafXml($payload['caf_xml'] ?? null),
             'ambiente' => $ambiente,
             'created_by_usuario_id' => $userId,
-        ]);
+        ];
 
-        $this->autoAsignarCaf($userId, $cafId, $empresaId, $type, $from, $to);
+        $overlap = $this->repository->findOverlappingCaf($empresaId, $type, $from, $to, $ambiente);
+        if ($overlap !== null) {
+            $sameRange = (int) $overlap['folio_desde'] === $from && (int) $overlap['folio_hasta'] === $to;
+            if (!$sameRange) {
+                throw new HttpException('Existe un CAF activo que se solapa con el rango informado', 422);
+            }
+
+            $cafId = (int) $overlap['id'];
+            $this->repository->updateCaf($cafId, [
+                'empresa_id' => $empresaId,
+                'rut_emisor' => $cafData['rut_emisor'],
+                'razon_social_emisor' => $cafData['razon_social_emisor'],
+                'fecha_autorizacion' => $cafData['fecha_autorizacion'],
+                'fecha_vencimiento' => $cafData['fecha_vencimiento'],
+                'archivo_path' => $cafData['archivo_path'],
+                'caf_xml' => $cafData['caf_xml'],
+            ]);
+        } else {
+            $cafId = $this->repository->createCaf($cafData);
+            $this->autoAsignarCaf($userId, $cafId, $empresaId, $type, $from, $to);
+        }
 
         AuditoriaService::registrarEvento([
             'empresa_id' => $empresaId,
             'usuario_id' => $userId,
             'modulo' => 'folios',
-            'accion' => 'crear_caf',
+            'accion' => $overlap !== null ? 'actualizar_caf' : 'crear_caf',
             'entidad' => 'caf_archivos',
             'entidad_id' => $cafId,
-            'descripcion' => 'CAF registrado',
+            'descripcion' => $overlap !== null ? 'CAF reemplazado' : 'CAF registrado',
             'datos_nuevos' => [
                 'tipo_documento' => $type,
                 'folio_desde' => $from,

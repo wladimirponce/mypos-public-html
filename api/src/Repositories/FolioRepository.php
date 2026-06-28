@@ -72,7 +72,12 @@ final class FolioRepository
 
     public function cafOverlapExists(int $empresaId, string $type, int $from, int $to, string $ambiente = ''): bool
     {
-        $sql = 'SELECT 1
+        return $this->findOverlappingCaf($empresaId, $type, $from, $to, $ambiente) !== null;
+    }
+
+    public function findOverlappingCaf(int $empresaId, string $type, int $from, int $to, string $ambiente = ''): ?array
+    {
+        $sql = 'SELECT id, empresa_id, tipo_documento, folio_desde, folio_hasta, ambiente
              FROM caf_archivos
              WHERE empresa_id = :empresa_id
                AND tipo_documento = :tipo_documento
@@ -94,8 +99,29 @@ final class FolioRepository
         $sql .= ' LIMIT 1';
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
+        $row = $statement->fetch();
 
-        return (bool) $statement->fetchColumn();
+        return is_array($row) ? $row : null;
+    }
+
+    public function updateCaf(int $cafId, array $data): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE caf_archivos
+             SET rut_emisor = :rut_emisor,
+                 razon_social_emisor = :razon_social_emisor,
+                 fecha_autorizacion = :fecha_autorizacion,
+                 fecha_vencimiento = :fecha_vencimiento,
+                 archivo_path = :archivo_path,
+                 caf_xml = :caf_xml,
+                 estado = \'ACTIVO\',
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id
+               AND empresa_id = :empresa_id'
+        );
+
+        $data['id'] = $cafId;
+        $statement->execute($data);
     }
 
     public function createCaf(array $data): int
