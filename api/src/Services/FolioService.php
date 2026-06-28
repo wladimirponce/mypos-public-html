@@ -58,7 +58,7 @@ final class FolioService
             'fecha_autorizacion' => $authDate,
             'fecha_vencimiento' => $expirationDate,
             'archivo_path' => $this->nullableString($payload['archivo_path'] ?? null),
-            'caf_xml' => $this->nullableString($payload['caf_xml'] ?? null),
+            'caf_xml' => $this->nullableCafXml($payload['caf_xml'] ?? null),
             'ambiente' => $ambiente,
             'created_by_usuario_id' => $userId,
         ]);
@@ -106,15 +106,8 @@ final class FolioService
 
         // Leer XML — los CAF del SII usan ISO-8859-1 (Ñ, tildes) sin declarar
         // encoding en el prólogo, lo que hace que simplexml asuma UTF-8 y falle.
-        $xmlContent = file_get_contents((string) $file['tmp_name']);
-        if (!preg_match('/encoding\s*=/i', substr($xmlContent, 0, 200))) {
-            $xmlContent = preg_replace(
-                '/<\?xml\s+version\s*=\s*"1\.0"\s*\?>/',
-                '<?xml version="1.0" encoding="ISO-8859-1"?>',
-                $xmlContent,
-                1
-            );
-        }
+        $rawXmlContent = file_get_contents((string) $file['tmp_name']);
+        $xmlContent = $this->cafXmlForParsing((string) $rawXmlContent);
 
         // Deshabilitar entidades externas por seguridad XML (previene XXE)
         $disableEntities = libxml_disable_entity_loader(true);
@@ -204,7 +197,7 @@ final class FolioService
             'fecha_autorizacion' => $fechaAutorizacion,
             'fecha_vencimiento' => $expirationDate,
             'archivo_path' => $archivoPath,
-            'caf_xml' => $xmlContent,
+            'caf_xml' => $this->cafXmlForDatabase($xmlContent),
         ]);
     }
 
@@ -944,6 +937,53 @@ final class FolioService
         }
 
         return trim((string) $value);
+    }
+
+    private function nullableCafXml(mixed $value): ?string
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+
+        return $this->cafXmlForDatabase((string) $value);
+    }
+
+    private function cafXmlForParsing(string $content): string
+    {
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
+        if (preg_match('/encoding\s*=/i', substr($content, 0, 200))) {
+            return $content;
+        }
+
+        $encoding = preg_match('//u', $content) ? 'UTF-8' : 'ISO-8859-1';
+        return preg_replace(
+            '/<\?xml\s+version\s*=\s*"1\.0"\s*\?>/',
+            '<?xml version="1.0" encoding="' . $encoding . '"?>',
+            $content,
+            1
+        ) ?? $content;
+    }
+
+    private function cafXmlForDatabase(string $content): string
+    {
+        $content = $this->cafXmlForParsing($content);
+        if (!preg_match('//u', $content)) {
+            $content = mb_convert_encoding($content, 'UTF-8', 'ISO-8859-1');
+        }
+
+        $content = preg_replace(
+            '/<\?xml([^>]*?)encoding=["\'][^"\']+["\']([^>]*?)\?>/i',
+            '<?xml$1encoding="UTF-8"$2?>',
+            $content,
+            1,
+            $count
+        ) ?? $content;
+
+        if (empty($count)) {
+            $content = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . ltrim($content);
+        }
+
+        return $content;
     }
 
     private function nullableDate(mixed $value): ?string

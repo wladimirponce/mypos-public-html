@@ -42,6 +42,39 @@ class EmpresaRepository extends BaseRepository
         }
     }
 
+    private function cafXmlForDatabase(string $content): string
+    {
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
+
+        if (!preg_match('/encoding\s*=/i', substr($content, 0, 200))) {
+            $encoding = preg_match('//u', $content) ? 'UTF-8' : 'ISO-8859-1';
+            $content = preg_replace(
+                '/<\?xml\s+version\s*=\s*"1\.0"\s*\?>/',
+                '<?xml version="1.0" encoding="' . $encoding . '"?>',
+                $content,
+                1
+            ) ?? $content;
+        }
+
+        if (!preg_match('//u', $content)) {
+            $content = mb_convert_encoding($content, 'UTF-8', 'ISO-8859-1');
+        }
+
+        $content = preg_replace(
+            '/<\?xml([^>]*?)encoding=["\'][^"\']+["\']([^>]*?)\?>/i',
+            '<?xml$1encoding="UTF-8"$2?>',
+            $content,
+            1,
+            $count
+        ) ?? $content;
+
+        if (empty($count)) {
+            $content = '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . ltrim($content);
+        }
+
+        return $content;
+    }
+
     /**
      * Obtiene los datos de una empresa mediante su API Key.
      */
@@ -556,7 +589,7 @@ class EmpresaRepository extends BaseRepository
 
         $xmlContent = '';
         if (file_exists($data['xml_path'])) {
-            $xmlContent = file_get_contents($data['xml_path']);
+            $xmlContent = $this->cafXmlForDatabase((string)file_get_contents($data['xml_path']));
         }
 
         $fechaVenc = null;

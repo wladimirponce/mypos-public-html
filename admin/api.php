@@ -1679,6 +1679,16 @@ function emisorInfo(): array {
     ];
 }
 
+function siiDateOnly(string $value): string {
+    $value = trim($value);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}/', $value, $m)) {
+        return $m[0];
+    }
+
+    $ts = strtotime($value);
+    return $ts !== false ? date('Y-m-d', $ts) : date('Y-m-d');
+}
+
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // GENERAR DTE
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1709,7 +1719,7 @@ function generateDTE(array $data): array {
     // Aceptar 'tipo' o 'tipoDTE' indistintamente para evitar errores por nomenclatura
     $tipo    = (int)($data['tipoDTE'] ?? $data['tipo'] ?? 0);
     $folio   = (int)($data['folio']   ?? 0);
-    $fecha   = $data['fecha']   ?? date('Y-m-d');
+    $fecha   = siiDateOnly((string)($data['fecha'] ?? date('Y-m-d')));
     // Modo certificaciÃ³n: NO consumir folios (no registrar DTE ni consumo en BD)
     // para poder REUTILIZAR siempre los mismos primeros folios del CAF en cada
     // reintento, sin perderlos. El XML igual se guarda en tmp/ para las muestras.
