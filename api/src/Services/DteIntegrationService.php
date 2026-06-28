@@ -189,6 +189,7 @@ final class DteIntegrationService
                 'pdf_path' => $result['pdf_path'],
                 'track_id' => $result['track_id'] ?? null,
                 'dte_print_payload' => $result['dte_print_payload'] ?? null,
+                'error' => $result['error'] ?? null,
             ];
         } catch (Throwable $exception) {
             if ($connection->inTransaction()) {
