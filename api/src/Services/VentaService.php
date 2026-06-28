@@ -267,6 +267,7 @@ final class VentaService
 
             $response = [
                 'venta_id' => $saleId,
+                'empresa_rut' => $printContext['rut_emisor'] ?? null,
                 'total' => $totals['total'],
                 'items' => count($preparedItems),
                 'condicion_pago' => $paymentCondition,
