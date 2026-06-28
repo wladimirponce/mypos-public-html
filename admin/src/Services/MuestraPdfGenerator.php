@@ -55,6 +55,33 @@ class MuestraPdfGenerator
     /** Tipos que requieren ejemplar CEDIBLE además del tributario */
     public const TIPOS_CEDIBLE = [33, 34, 43, 46, 52];
 
+    private static function padBarcodePng(string $png, int $padX = 32, int $padY = 32): string
+    {
+        if (!function_exists('imagecreatefromstring')) {
+            return $png;
+        }
+
+        $src = @imagecreatefromstring($png);
+        if (!$src) {
+            return $png;
+        }
+
+        $w = imagesx($src);
+        $h = imagesy($src);
+        $dst = imagecreatetruecolor($w + 2 * $padX, $h + 2 * $padY);
+        $white = imagecolorallocate($dst, 255, 255, 255);
+        imagefill($dst, 0, 0, $white);
+        imagecopy($dst, $src, $padX, $padY, 0, 0, $w, $h);
+
+        ob_start();
+        imagepng($dst);
+        $padded = (string) ob_get_clean();
+        imagedestroy($src);
+        imagedestroy($dst);
+
+        return $padded !== '' ? $padded : $png;
+    }
+
     public static function formatRut(string $rut): string
     {
         $rut = trim($rut);
@@ -368,6 +395,7 @@ class MuestraPdfGenerator
             $bc  = new \TCPDF2DBarcode($ted, 'PDF417');
             $png = $bc->getBarcodePngData(4, 4, [0, 0, 0]); // alta densidad de píxeles
             if ($png !== false && $png !== '') {
+                $png = self::padBarcodePng($png, 36, 24);
                 $pdf->Image('@' . $png, 20, $tedY, 60, 22, 'PNG');
                 $pngOk = true;
             }
@@ -524,7 +552,7 @@ class MuestraPdfGenerator
 
         // ── Timbre PDF417 (aspecto preservado, no estirado) ──
         $tedY = $pdf->GetY();
-        $tw = min($cw, $width === 58.0 ? 50.0 : 64.0);
+        $tw = min($cw, $width === 58.0 ? 52.0 : 72.0);
         $tx = $mg + ($cw - $tw) / 2;
         $th = $tw * 0.36;
         if (function_exists('imagecreate')) {
@@ -532,6 +560,7 @@ class MuestraPdfGenerator
             $bc = new \TCPDF2DBarcode($ted, 'PDF417');
             $png = $bc->getBarcodePngData(3, 3, [0, 0, 0]);
             if ($png !== false && $png !== '') {
+                $png = self::padBarcodePng($png, 32, 24);
                 $dim = @getimagesizefromstring($png);
                 if (is_array($dim) && (int) $dim[0] > 0) {
                     $th = $tw * (int) $dim[1] / (int) $dim[0];

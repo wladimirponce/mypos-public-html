@@ -857,6 +857,7 @@ if ($action) {
                         $bcTed = new \TCPDF2DBarcode($mTed[0], 'PDF417');
                         $pngTed = $bcTed->getBarcodePngData(4, 4, [0, 0, 0]);
                         if ($pngTed !== false && $pngTed !== '') {
+                            $pngTed = padBarcodePngBytes($pngTed, 40, 28);
                             $genRes['ted_png_base64'] = base64_encode($pngTed);
                         }
                     }
@@ -1891,6 +1892,32 @@ function buildDtePdf(string $xmlFirmado, int $tipo, int $folio, string $formato 
         'TRIBUTARIA',
         $formato
     );
+}
+
+function padBarcodePngBytes(string $png, int $padX = 32, int $padY = 24): string {
+    if (!function_exists('imagecreatefromstring')) {
+        return $png;
+    }
+
+    $src = @imagecreatefromstring($png);
+    if (!$src) {
+        return $png;
+    }
+
+    $w = imagesx($src);
+    $h = imagesy($src);
+    $dst = imagecreatetruecolor($w + 2 * $padX, $h + 2 * $padY);
+    $white = imagecolorallocate($dst, 255, 255, 255);
+    imagefill($dst, 0, 0, $white);
+    imagecopy($dst, $src, $padX, $padY, 0, 0, $w, $h);
+
+    ob_start();
+    imagepng($dst);
+    $padded = (string)ob_get_clean();
+    imagedestroy($src);
+    imagedestroy($dst);
+
+    return $padded !== '' ? $padded : $png;
 }
 
 function sendDTE(array $data): array {
