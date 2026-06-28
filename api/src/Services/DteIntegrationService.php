@@ -783,6 +783,9 @@ final class DteIntegrationService
             // viaja byte-exacto hasta el print server sin que JSON_INVALID_UTF8_SUBSTITUTE
             // lo corrompa; si no, el PDF417 codifica un TED roto y el SII lo rechaza.
             'ted_b64' => $tedXml !== null && $tedXml !== '' ? base64_encode($tedXml) : null,
+            // PDF oficial generado por admin (mismo layout que "Ver boleta"). El print
+            // server lo usa al guardar/imprimir PDF para no reconstruir otro formato.
+            'pdf_base64' => is_string($generate['pdf_base64'] ?? null) ? $generate['pdf_base64'] : null,
             // Imagen PNG del timbre PDF417 renderizada por el admin (TCPDF), que es la
             // que la app del SII reconoce. Si viene, el print server la usa tal cual en
             // vez de rasterizar su propio PDF417.

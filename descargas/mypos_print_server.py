@@ -528,7 +528,15 @@ def print_as_pdf_file(data: dict[str, Any], kind: str = "ticket") -> tuple[bool,
     venta = text(data.get("venta_id") or data.get("folio_dte") or data.get("folio") or stamp, 40)
     filename = f"MyPOS ticket {venta}.pdf".replace("/", "-").replace("\\", "-").replace(":", "-")
     path = os.path.join(documents, filename)
-    if kind != "boleta_electronica_dte" or not write_boleta_dte_image_pdf(path, data):
+    if kind == "boleta_electronica_dte" and data.get("pdf_base64"):
+        try:
+            with open(path, "wb") as handle:
+                handle.write(base64.b64decode(text(data.get("pdf_base64"))))
+        except Exception as exc:
+            print(f"[PDF DTE] official pdf fallback failed: {exc}")
+            if not write_boleta_dte_image_pdf(path, data):
+                write_text_pdf(path, ticket_pdf_lines(data, kind), title="MyPOS ticket")
+    elif kind != "boleta_electronica_dte" or not write_boleta_dte_image_pdf(path, data):
         lines = etiquetas_pdf_lines(data) if kind == "etiquetas" else ticket_pdf_lines(data, kind)
         write_text_pdf(path, lines, title="MyPOS ticket")
     try:
@@ -846,7 +854,7 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
     if ancho_mm <= 58:
         width, pdf_cols, raster_w = 32, 5, 376
     else:
-        width, pdf_cols, raster_w = 48, 8, 560
+        width, pdf_cols, raster_w = 48, 8, 576
 
     ticket = bytearray()
     ticket.extend(CMD_INIT)
