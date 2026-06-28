@@ -621,6 +621,26 @@ function provisionarCredenciales(array $data, $ctx): array {
             return ['ok' => false, 'error' => 'No se pudo escribir el CAF en ' . $cafPath];
         }
         $escritos[] = $cafPath;
+
+        // Reparar caf_archivos.caf_xml en BD: la columna es utf8mb4 pero el CAF viene
+        // en ISO-8859-1; al insertarse sin convertir, la Ñ queda como '?' (0x3F).
+        // Aquí tenemos los bytes originales → convertimos a UTF-8 y actualizamos.
+        try {
+            $cafXmlUtf8 = normalizeCafXmlContent($cafXml); // convierte ISO-8859-1 → UTF-8
+            $tipoEnumMap = [39=>'BOLETA',41=>'BOLETA',33=>'FACTURA',34=>'FACTURA',
+                            52=>'GUIA_DESPACHO',56=>'NOTA_DEBITO',61=>'NOTA_CREDITO'];
+            $tipoEnum = $tipoEnumMap[$tipo] ?? null;
+            if ($tipoEnum !== null) {
+                $pdo = \App\Core\Database::getInstance();
+                $pdo->prepare(
+                    "UPDATE caf_archivos SET caf_xml = ?
+                     WHERE empresa_id = ? AND tipo_documento = ? AND estado = 'ACTIVO'"
+                )->execute([$cafXmlUtf8, $ctx->getEmpresaId(), $tipoEnum]);
+                $escritos[] = "caf_archivos.caf_xml reparado (UTF-8)";
+            }
+        } catch (\Throwable $e) {
+            // No fatal: el archivo ya quedó correcto; la BD es secundaria.
+        }
     }
 
     return [
@@ -834,10 +854,7 @@ if ($action) {
                 try {
                     if (preg_match('/<TED\b[^>]*>[\s\S]*?<\/TED>/', (string)$genRes['xml'], $mTed)) {
                         require_once __DIR__ . '/lib/tcpdf/tcpdf_barcodes_2d.php';
-                        // El PDF417 debe contener bytes ISO-8859-1 (el SII verifica la firma
-                        // FRMA sobre esos bytes exactos). El XML DTE interno es UTF-8, pero
-                        // el timbre impreso debe ser ISO-8859-1 para que la Ñ quede como 0xD1.
-                        $bcTed = new \TCPDF2DBarcode(mb_convert_encoding($mTed[0], 'ISO-8859-1', 'UTF-8'), 'PDF417');
+                        $bcTed = new \TCPDF2DBarcode($mTed[0], 'PDF417');
                         $pngTed = $bcTed->getBarcodePngData(4, 4, [0, 0, 0]);
                         if ($pngTed !== false && $pngTed !== '') {
                             $genRes['ted_png_base64'] = base64_encode($pngTed);

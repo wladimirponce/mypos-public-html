@@ -365,9 +365,7 @@ class MuestraPdfGenerator
         $pngOk = false;
         if (function_exists('imagecreate')) {
             require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
-            // ISO-8859-1: el SII verifica FRMA sobre los bytes exactos; Ñ debe ser 0xD1.
-            $tedIso = mb_convert_encoding($ted, 'ISO-8859-1', 'UTF-8');
-            $bc  = new \TCPDF2DBarcode($tedIso, 'PDF417');
+            $bc  = new \TCPDF2DBarcode($ted, 'PDF417');
             $png = $bc->getBarcodePngData(4, 4, [0, 0, 0]); // alta densidad de píxeles
             if ($png !== false && $png !== '') {
                 $pdf->Image('@' . $png, 20, $tedY, 60, 22, 'PNG');
@@ -375,7 +373,7 @@ class MuestraPdfGenerator
             }
         }
         if (!$pngOk) {
-            $pdf->write2DBarcode(mb_convert_encoding($ted, 'ISO-8859-1', 'UTF-8'), 'PDF417', 20, $tedY, 60, 22, [
+            $pdf->write2DBarcode($ted, 'PDF417', 20, $tedY, 60, 22, [
                 'border' => false, 'padding' => 0,
                 'fgcolor' => [0, 0, 0], 'bgcolor' => false,
             ], 'N');
@@ -531,8 +529,7 @@ class MuestraPdfGenerator
         $th = $tw * 0.36;
         if (function_exists('imagecreate')) {
             require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
-            // ISO-8859-1: bytes exactos para que el SII verifique la firma FRMA correctamente.
-            $bc = new \TCPDF2DBarcode(mb_convert_encoding($ted, 'ISO-8859-1', 'UTF-8'), 'PDF417');
+            $bc = new \TCPDF2DBarcode($ted, 'PDF417');
             $png = $bc->getBarcodePngData(3, 3, [0, 0, 0]);
             if ($png !== false && $png !== '') {
                 $dim = @getimagesizefromstring($png);
