@@ -834,7 +834,10 @@ if ($action) {
                 try {
                     if (preg_match('/<TED\b[^>]*>[\s\S]*?<\/TED>/', (string)$genRes['xml'], $mTed)) {
                         require_once __DIR__ . '/lib/tcpdf/tcpdf_barcodes_2d.php';
-                        $bcTed = new \TCPDF2DBarcode($mTed[0], 'PDF417');
+                        // El PDF417 debe contener bytes ISO-8859-1 (el SII verifica la firma
+                        // FRMA sobre esos bytes exactos). El XML DTE interno es UTF-8, pero
+                        // el timbre impreso debe ser ISO-8859-1 para que la Ñ quede como 0xD1.
+                        $bcTed = new \TCPDF2DBarcode(mb_convert_encoding($mTed[0], 'ISO-8859-1', 'UTF-8'), 'PDF417');
                         $pngTed = $bcTed->getBarcodePngData(4, 4, [0, 0, 0]);
                         if ($pngTed !== false && $pngTed !== '') {
                             $genRes['ted_png_base64'] = base64_encode($pngTed);
@@ -2415,12 +2418,17 @@ function loadCAF(int $tipo, int $folio = 0): array {
             }
         }
 
-        // Preferir el XML guardado en BD (xml_content = caf_xml): siempre accesible.
-        // El archivo_path del SaaS es RELATIVO al storage del web app; el admin corre
-        // en otro directorio y file_get_contents falla, dejando el CAF vacio →
-        // "No se pudo extraer el bloque <CAF>". El path se usa solo como respaldo y
-        // unicamente si el archivo existe y es legible.
-        if (!empty($dbCaf['xml_content'])) {
+        // Prioridad de lectura del CAF:
+        // 1. Filesystem del admin (escrito por provisionarCredenciales con bytes ISO-8859-1
+        //    exactos): preserva la Ñ y otros acentos sin la corrupción que sufre la columna
+        //    utf8mb4 cuando recibe bytes ISO-8859-1 raw (los sustituye por '?').
+        // 2. BD xml_content: accesible siempre, pero puede tener bytes dañados si el CAF
+        //    fue insertado sin convertir a UTF-8 primero.
+        // 3. xml_path relativo (SaaS storage): el admin corre en otro dir, suele fallar.
+        $fsCafPath = $globalContext->getCafPath($tipo);
+        if (is_file($fsCafPath)) {
+            $xmlCont = normalizeCafXmlContent((string)file_get_contents($fsCafPath));
+        } elseif (!empty($dbCaf['xml_content'])) {
             $xmlCont = normalizeCafXmlContent((string)$dbCaf['xml_content']);
         } elseif (!empty($dbCaf['xml_path']) && is_file((string)$dbCaf['xml_path'])) {
             $xmlCont = normalizeCafXmlContent((string)file_get_contents((string)$dbCaf['xml_path']));
