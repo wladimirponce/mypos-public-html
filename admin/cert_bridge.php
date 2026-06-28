@@ -51,6 +51,7 @@ if (session_status() === PHP_SESSION_NONE) session_start();
 
 require_once __DIR__ . '/autoload.php';
 use App\Core\Context;
+use App\Core\Database;
 use App\Services\CertificationManager;
 use App\Repositories\EmpresaRepository;
 
@@ -82,6 +83,98 @@ function resolveCertEmpresaId(): int
     throw new \Exception('Seleccione explicitamente una empresa antes de iniciar la certificacion.');
 }
 
+function certProductionState(Context $context): array
+{
+    $now = date('Y-m-d\TH:i:s');
+    return [
+        'rut'          => $context->getRut(),
+        'started'      => $now,
+        'updated'      => $now,
+        'pruebas'      => [],
+        'simulacion'   => [],
+        'boletas'      => ['status' => 'skipped'],
+        'intercambio'  => ['status' => 'skipped'],
+        'libros'       => ['status' => 'skipped'],
+        'muestras'     => ['status' => 'generated'],
+        'produccion'   => [
+            'status'   => 'enabled',
+            'ambiente' => $context->getAmbiente(),
+            'ts'       => $now,
+        ],
+    ];
+}
+
+function certEnsureProductionConfig(Context $context, string $numeroResolucion = '80', string $fechaResolucion = '2014-08-22'): array
+{
+    $numeroResolucion = trim($numeroResolucion) !== '' ? trim($numeroResolucion) : '80';
+    $fechaResolucion = preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaResolucion) ? $fechaResolucion : '2014-08-22';
+
+    $db = Database::getInstance();
+    $empresaId = $context->getEmpresaId();
+    $messages = [];
+    $warnings = [];
+    $endpoint = 'https://www.mypos.cl/admin/api.php';
+
+    try {
+        $db->beginTransaction();
+
+        $stmt = $db->prepare('SELECT id, endpoint_http FROM dte_configuracion WHERE empresa_id = ? LIMIT 1');
+        $stmt->execute([$empresaId]);
+        $dteCfg = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($dteCfg && is_string($dteCfg['endpoint_http'] ?? null) && trim((string)$dteCfg['endpoint_http']) !== '') {
+            $endpoint = trim((string)$dteCfg['endpoint_http']);
+        }
+
+        if ($dteCfg) {
+            $db->prepare(
+                "UPDATE dte_configuracion
+                 SET modo = 'REAL', ambiente = 'PRODUCCION', endpoint_http = ?, activo = 1
+                 WHERE empresa_id = ?"
+            )->execute([$endpoint, $empresaId]);
+            $messages[] = 'dte_configuracion confirmado en REAL/PRODUCCION.';
+        } else {
+            $db->prepare(
+                "INSERT INTO dte_configuracion (empresa_id, modo, ambiente, endpoint_http, activo)
+                 VALUES (?, 'REAL', 'PRODUCCION', ?, 1)"
+            )->execute([$empresaId, $endpoint]);
+            $messages[] = 'dte_configuracion creado en REAL/PRODUCCION.';
+        }
+
+        $stmt = $db->prepare('SELECT metadata_json FROM empresa_configuracion WHERE empresa_id = ? LIMIT 1');
+        $stmt->execute([$empresaId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row) {
+            $meta = json_decode((string)($row['metadata_json'] ?? '{}'), true);
+            if (!is_array($meta)) {
+                $meta = [];
+            }
+            $meta['numero_resolucion'] = $numeroResolucion;
+            $meta['fecha_resolucion'] = $fechaResolucion;
+            $db->prepare('UPDATE empresa_configuracion SET metadata_json = ? WHERE empresa_id = ?')
+                ->execute([json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), $empresaId]);
+            $messages[] = "Resolucion SII confirmada: {$numeroResolucion} / {$fechaResolucion}.";
+        } else {
+            $warnings[] = 'No existe empresa_configuracion; revise numero y fecha de resolucion en MyPOS.';
+        }
+
+        $db->prepare(
+            "INSERT INTO empresa_configuracion_operativa (empresa_id, documentos_tributarios_habilitados)
+             VALUES (?, 1)
+             ON DUPLICATE KEY UPDATE documentos_tributarios_habilitados = 1"
+        )->execute([$empresaId]);
+        $messages[] = 'Documentos tributarios habilitados para POS.';
+
+        $db->commit();
+    } catch (\Throwable $e) {
+        if ($db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
+    }
+
+    return [$endpoint, $messages, $warnings];
+}
+
 // ── Las muestras impresas ahora se renderizan en el cliente (jscript.js →
 //    DTE.renderMuestras), única fuente de verdad. El servidor solo entrega los
 //    XML vía la acción JSON 'cert_muestras_xml' (más abajo). ────────────────────
@@ -106,7 +199,8 @@ try {
     }
 
     $globalContext = new Context($empresaId);
-    if ($globalContext->getAmbiente() !== 'CERTIFICACION') {
+    $accionesPermitidasFueraDeCert = ['cert_state', 'cert_empresa_info', 'cert_promover_produccion'];
+    if ($globalContext->getAmbiente() !== 'CERTIFICACION' && !in_array($action, $accionesPermitidasFueraDeCert, true)) {
         throw new \Exception('La empresa seleccionada no esta en ambiente CERTIFICACION.');
     }
 
@@ -128,6 +222,49 @@ try {
         $actualCafDir    = dirname($globalContext->getCafPath(0)) . '/';
         $actualCertPfx   = $globalContext->getCertPath();
         if (!is_dir($actualTmpDir)) @mkdir($actualTmpDir, 0755, true);
+    }
+
+    if ($globalContext->getAmbiente() !== 'CERTIFICACION') {
+        switch ($action) {
+            case 'cert_state':
+                ob_clean();
+                echo certJsonOut(['ok' => true, 'estado' => certProductionState($globalContext)]);
+                exit;
+
+            case 'cert_empresa_info':
+                ob_clean();
+                $empData = $globalContext->getEmpresa();
+                echo certJsonOut([
+                    'ok'        => true,
+                    'rut'       => $globalContext->getRut(),
+                    'ambiente'  => $globalContext->getAmbiente(),
+                    'nro_resol' => $empData['nro_resol'] ?? 'NO DEFINIDO',
+                    'fch_resol' => $empData['fch_resol'] ?? 'NO DEFINIDO',
+                    'empresa'   => $empData,
+                ]);
+                exit;
+
+            case 'cert_promover_produccion':
+                ob_clean();
+                $numeroResol = trim((string)($_GET['numero_resolucion'] ?? $_POST['numero_resolucion'] ?? '80'));
+                $fechaResol = trim((string)($_GET['fecha_resolucion'] ?? $_POST['fecha_resolucion'] ?? '2014-08-22'));
+                [$endpoint, $messages, $warnings] = certEnsureProductionConfig($globalContext, $numeroResol, $fechaResol);
+                array_unshift($messages, 'La empresa ya esta en PRODUCCION; se re-aplico la configuracion POS.');
+                echo certJsonOut([
+                    'ok'           => true,
+                    'empresa_id'   => $empresaId,
+                    'rut'          => $globalContext->getRut(),
+                    'ambiente'     => $globalContext->getAmbiente(),
+                    'modo'         => 'REAL',
+                    'endpoint_http' => $endpoint,
+                    'mensajes'     => $messages,
+                    'advertencias' => $warnings,
+                    'estado'       => certProductionState($globalContext),
+                ]);
+                exit;
+        }
+
+        throw new \Exception('La empresa seleccionada no esta en ambiente CERTIFICACION.');
     }
 
     $mgr = new CertificationManager($globalContext);
