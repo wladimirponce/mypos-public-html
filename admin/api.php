@@ -1782,6 +1782,15 @@ function generateDTE(array $data): array {
     // Multi-CAF: si el consumidor pidiÃ³ un folio especÃ­fico, se carga el CAF
     // cuyo rango lo contiene; si no, se elige el primer CAF activo con folios
     // disponibles y se autoasigna el siguiente folio dentro de ese rango.
+    if (!empty($data['caf_xml_base64'])) {
+        $cafOverride = base64_decode((string)$data['caf_xml_base64'], true);
+        if ($cafOverride === false || $cafOverride === '') {
+            throw new Exception('CAF adjunto invalido: caf_xml_base64 no se pudo decodificar.');
+        }
+        $GLOBALS['SII_CAF_XML_OVERRIDE'] = $cafOverride;
+    } else {
+        unset($GLOBALS['SII_CAF_XML_OVERRIDE']);
+    }
     $caf      = loadCAF($tipo, $folio > 0 ? $folio : 0);
     $lastUsed = (int)$caf['last'];
     if ($folio <= 0) {
@@ -2470,8 +2479,36 @@ function loadCAF(int $tipo, int $folio = 0): array {
         //    fue insertado sin convertir a UTF-8 primero.
         // 3. xml_path relativo (SaaS storage): el admin corre en otro dir, suele fallar.
         $xmlCont = null;
+        $overrideCaf = $GLOBALS['SII_CAF_XML_OVERRIDE'] ?? null;
+        if (is_string($overrideCaf) && trim($overrideCaf) !== '') {
+            $overrideXmlCont = normalizeCafXmlContent($overrideCaf);
+            $overrideXml = @simplexml_load_string($overrideXmlCont);
+            if (!$overrideXml || !isset($overrideXml->CAF->DA)) {
+                throw new Exception("CAF adjunto invalido para folio $folio (tipo $tipo)");
+            }
+
+            $overrideRut = strtoupper(preg_replace('/[^0-9K]/i', '', (string)$overrideXml->CAF->DA->RE));
+            $empRut = strtoupper(preg_replace('/[^0-9K]/i', '', $globalContext->getRut()));
+            $overrideDesde = (int)$overrideXml->CAF->DA->RNG->D;
+            $overrideHasta = (int)$overrideXml->CAF->DA->RNG->H;
+            $dbDesde = (int)$dbCaf['folio_desde'];
+            $dbHasta = (int)$dbCaf['folio_hasta'];
+
+            if (
+                $overrideRut !== $empRut
+                || (int)$overrideXml->CAF->DA->TD !== $tipo
+                || $overrideDesde !== $dbDesde
+                || $overrideHasta !== $dbHasta
+                || ($folio > 0 && ($folio < $overrideDesde || $folio > $overrideHasta))
+            ) {
+                throw new Exception("CAF adjunto no coincide con empresa/tipo/rango para folio $folio");
+            }
+
+            $xmlCont = $overrideXmlCont;
+        }
+
         $fsCafPath = $globalContext->getCafPath($tipo);
-        if (is_file($fsCafPath)) {
+        if ($xmlCont === null && is_file($fsCafPath)) {
             $fsXmlCont = normalizeCafXmlContent((string)file_get_contents($fsCafPath));
             $fsXml = @simplexml_load_string($fsXmlCont);
             if ($fsXml && isset($fsXml->CAF->DA)) {

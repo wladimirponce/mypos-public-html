@@ -399,6 +399,14 @@ final class DteIntegrationService
         $endpoint = (string) $config['endpoint_http'];
         $apiKey = $this->adminApiKey($config, (int) $payload['documento']['empresa_id']);
         $request = $this->adminGeneratePayload($payload);
+        $cafXml = $this->cafXmlForEmission(
+            (int) $payload['documento']['empresa_id'],
+            (int) $payload['documento']['tipo_dte'],
+            (int) $payload['documento']['folio']
+        );
+        if ($cafXml !== null) {
+            $request['caf_xml_base64'] = base64_encode($cafXml);
+        }
         $generate = $this->adminRequest($endpoint, 'generate', $request, $apiKey);
 
         if (empty($generate['ok'])) {
@@ -522,6 +530,55 @@ final class DteIntegrationService
                 'exento' => (int) ($item['exento'] ?? 0) > 0,
             ], $payload['items'] ?? []),
         ];
+    }
+
+    private function cafXmlForEmission(int $empresaId, int $tipoDte, int $folio): ?string
+    {
+        $tipoDocumento = match ($tipoDte) {
+            33, 34 => 'FACTURA',
+            39, 41 => 'BOLETA',
+            52 => 'GUIA_DESPACHO',
+            56 => 'NOTA_DEBITO',
+            61 => 'NOTA_CREDITO',
+            default => null,
+        };
+        if ($tipoDocumento === null || $folio <= 0) {
+            return null;
+        }
+
+        $statement = Database::connection()->prepare(
+            'SELECT caf_xml, archivo_path
+             FROM caf_archivos
+             WHERE empresa_id = :empresa_id
+               AND tipo_documento = :tipo_documento
+               AND estado = \'ACTIVO\'
+               AND :folio BETWEEN folio_desde AND folio_hasta
+             ORDER BY folio_desde ASC
+             LIMIT 1'
+        );
+        $statement->execute([
+            'empresa_id' => $empresaId,
+            'tipo_documento' => $tipoDocumento,
+            'folio' => $folio,
+        ]);
+        $row = $statement->fetch();
+        if (!is_array($row)) {
+            return null;
+        }
+
+        $path = trim((string) ($row['archivo_path'] ?? ''));
+        if ($path !== '') {
+            $fullPath = dirname(__DIR__, 2) . '/storage/' . str_replace(['\\', '/'], DIRECTORY_SEPARATOR, ltrim($path, '/\\'));
+            if (is_file($fullPath)) {
+                $bytes = file_get_contents($fullPath);
+                if (is_string($bytes) && $bytes !== '') {
+                    return $bytes;
+                }
+            }
+        }
+
+        $xml = (string) ($row['caf_xml'] ?? '');
+        return trim($xml) !== '' ? $xml : null;
     }
 
     /** Directorio base de respaldo de boletas/DTE en PDF (en la nube/servidor). */
