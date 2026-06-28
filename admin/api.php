@@ -2469,17 +2469,40 @@ function loadCAF(int $tipo, int $folio = 0): array {
         // 2. BD xml_content: accesible siempre, pero puede tener bytes dañados si el CAF
         //    fue insertado sin convertir a UTF-8 primero.
         // 3. xml_path relativo (SaaS storage): el admin corre en otro dir, suele fallar.
+        $xmlCont = null;
         $fsCafPath = $globalContext->getCafPath($tipo);
         if (is_file($fsCafPath)) {
-            $xmlCont = normalizeCafXmlContent((string)file_get_contents($fsCafPath));
-        } elseif (!empty($dbCaf['xml_content'])) {
+            $fsXmlCont = normalizeCafXmlContent((string)file_get_contents($fsCafPath));
+            $fsXml = @simplexml_load_string($fsXmlCont);
+            if ($fsXml && isset($fsXml->CAF->DA)) {
+                $fsRut = strtoupper(preg_replace('/[^0-9K]/i', '', (string)$fsXml->CAF->DA->RE));
+                $empRut = strtoupper(preg_replace('/[^0-9K]/i', '', $globalContext->getRut()));
+                $fsDesde = (int)$fsXml->CAF->DA->RNG->D;
+                $fsHasta = (int)$fsXml->CAF->DA->RNG->H;
+                $dbDesde = (int)$dbCaf['folio_desde'];
+                $dbHasta = (int)$dbCaf['folio_hasta'];
+                if (
+                    $fsRut === $empRut
+                    && (int)$fsXml->CAF->DA->TD === $tipo
+                    && $fsDesde === $dbDesde
+                    && $fsHasta === $dbHasta
+                ) {
+                    $xmlCont = $fsXmlCont;
+                }
+            }
+        }
+
+        if ($xmlCont === null && !empty($dbCaf['xml_content'])) {
             $xmlCont = normalizeCafXmlContent((string)$dbCaf['xml_content']);
-        } elseif (!empty($dbCaf['xml_path']) && is_file((string)$dbCaf['xml_path'])) {
+        } elseif ($xmlCont === null && !empty($dbCaf['xml_path']) && is_file((string)$dbCaf['xml_path'])) {
             $xmlCont = normalizeCafXmlContent((string)file_get_contents((string)$dbCaf['xml_path']));
-        } else {
+        } elseif ($xmlCont === null) {
             throw new Exception("CAF sin contenido XML disponible para folio $folio (tipo $tipo)");
         }
         $xml = simplexml_load_string($xmlCont);
+        if (!$xml || !isset($xml->CAF->DA)) {
+            throw new Exception("CAF XML invalido para folio $folio (tipo $tipo)");
+        }
         $last    = $repo->getUltimoFolioUsadoEnRango(
             $empId, $tipo, $amb,
             (int)$dbCaf['folio_desde'], (int)$dbCaf['folio_hasta']
