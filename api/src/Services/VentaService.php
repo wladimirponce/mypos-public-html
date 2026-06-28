@@ -291,6 +291,14 @@ final class VentaService
             // pdf_path es el respaldo usado cuando no hay impresora local.
             if (!empty($config['documentos_tributarios_habilitados'])) {
                 try {
+                    $dteConfig = $this->dteEmissionConfig($empresaId);
+                    if (($dteConfig['modo'] ?? '') !== 'REAL' || ($dteConfig['ambiente'] ?? '') !== 'PRODUCCION') {
+                        throw new HttpException(
+                            'La configuracion DTE de la empresa no esta en REAL/PRODUCCION; no se emitira boleta desde el POS.',
+                            422
+                        );
+                    }
+
                     $docSvc = new \Mypos\Services\DocumentoTributarioService();
                     $doc = $docSvc->crearDesdeVenta($userId, [
                         'empresa_id' => $empresaId,
@@ -314,10 +322,18 @@ final class VentaService
                     $response['dte_folio']         = $emision['folio'] ?? null;
                     $response['dte_estado']        = $emision['estado'] ?? null;
                     $response['dte_emision_id']    = $emision['dte_emision_id'] ?? null;
+                    $response['dte_modo']          = $emision['modo'] ?? null;
                     if (!empty($response['dte_folio']) && !empty($printContext['rut_emisor'])) {
                         $response['dte_verify_url'] = 'https://www.mypos.cl/boleta?rut='
                             . rawurlencode((string) $printContext['rut_emisor'])
                             . '&folio=' . (int) $response['dte_folio'];
+                    }
+                    if (empty($response['dte_print_payload'])) {
+                        $modoDte = strtoupper((string) ($emision['modo'] ?? ''));
+                        $response['dte_error'] = 'Boleta electronica no imprimible.';
+                        $response['dte_error_detalle'] = $modoDte === 'SIMULADO'
+                            ? 'La configuracion DTE de la empresa esta en modo SIMULADO; debe estar en REAL/PRODUCCION para emitir e imprimir boletas legales.'
+                            : 'La emision DTE no devolvio TED/payload de impresion; revisa la respuesta del facturador antes de imprimir.';
                     }
                 } catch (Throwable $dteEx) {
                     error_log('[POS DTE] Boleta no emitida (venta ' . $saleId . ' OK): ' . $dteEx->getMessage());
@@ -543,6 +559,23 @@ final class VentaService
     private function formatQuantity(float $value): string
     {
         return number_format($value, 3, '.', '');
+    }
+
+    private function dteEmissionConfig(int $empresaId): array
+    {
+        $statement = $this->repository->connection()->prepare(
+            'SELECT modo, ambiente FROM dte_configuracion WHERE empresa_id = :empresa_id AND activo = 1 LIMIT 1'
+        );
+        $statement->execute(['empresa_id' => $empresaId]);
+        $row = $statement->fetch();
+        if (!is_array($row)) {
+            $row = [];
+        }
+
+        return [
+            'modo' => strtoupper((string) ($row['modo'] ?? 'SIMULADO')),
+            'ambiente' => strtoupper((string) ($row['ambiente'] ?? 'CERTIFICACION')),
+        ];
     }
 
     private function auditConfigBlock(int $empresaId, int $sucursalId, int $userId, string $field, string $message): void
