@@ -314,6 +314,11 @@ final class VentaService
                     $response['dte_folio']         = $emision['folio'] ?? null;
                     $response['dte_estado']        = $emision['estado'] ?? null;
                     $response['dte_emision_id']    = $emision['dte_emision_id'] ?? null;
+                    if (!empty($response['dte_folio']) && !empty($printContext['rut_emisor'])) {
+                        $response['dte_verify_url'] = 'https://www.mypos.cl/boleta?rut='
+                            . rawurlencode((string) $printContext['rut_emisor'])
+                            . '&folio=' . (int) $response['dte_folio'];
+                    }
                 } catch (Throwable $dteEx) {
                     error_log('[POS DTE] Boleta no emitida (venta ' . $saleId . ' OK): ' . $dteEx->getMessage());
                     $response['dte_error'] = 'Boleta electrónica pendiente de emisión.';

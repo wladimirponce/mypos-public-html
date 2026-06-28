@@ -1,0 +1,1 @@
+import{aN as t,aU as a}from"./index-by_0TDtu.js";import{c as u}from"./compraService-B6BiaDuw.js";function i(e){const r=t(o=>o.empresaActiva);return a({queryKey:["compras","productos",r==null?void 0:r.empresa_id,e],queryFn:()=>u.products((r==null?void 0:r.empresa_id)??0,e),enabled:!!(r!=null&&r.empresa_id&&e.trim().length>=2),staleTime:2e4})}export{i as u};
