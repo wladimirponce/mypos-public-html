@@ -586,6 +586,14 @@ try {
             echo certJsonOut(['ok' => true, 'archivos' => $files]);
             break;
 
+        // ── Paso final: promover empresa certificada a producción ───────────
+        case 'cert_promover_produccion':
+            ob_clean();
+            $numeroResol = trim((string)($_GET['numero_resolucion'] ?? $_POST['numero_resolucion'] ?? '80'));
+            $fechaResol = trim((string)($_GET['fecha_resolucion'] ?? $_POST['fecha_resolucion'] ?? '2014-08-22'));
+            echo certJsonOut($mgr->promoverAProduccion($numeroResol, $fechaResol));
+            break;
+
         // ── Descarga individual de una muestra PDF generada ──
         case 'cert_muestras_pdfdl':
             $f    = basename((string)($_GET['file'] ?? ''));

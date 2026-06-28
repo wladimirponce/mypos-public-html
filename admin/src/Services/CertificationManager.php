@@ -4,10 +4,12 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Core\Context;
+use App\Core\Database;
 use App\Repositories\EmpresaRepository;
 use Exception;
 use DOMDocument;
 use DOMXPath;
+use PDO;
 
 /**
  * Gestiona el proceso completo de certificación SII.
@@ -1977,6 +1979,192 @@ class CertificationManager
             'ok' => count($files) === self::TOTAL_PDFS_EXIGIDOS && empty($errors),
             'archivos' => $files,
             'errores' => $errors,
+        ];
+    }
+
+    public function promoverAProduccion(string $numeroResolucion = '80', string $fechaResolucion = '2014-08-22'): array
+    {
+        $state = $this->loadState();
+        $muestrasStatus = (string)($state['muestras']['status'] ?? '');
+        if (!in_array($muestrasStatus, ['generated', 'ok'], true)) {
+            throw new Exception('Complete el Paso 7 generando las muestras PDF antes de pasar a produccion.');
+        }
+
+        $numeroResolucion = trim($numeroResolucion) !== '' ? trim($numeroResolucion) : '80';
+        $fechaResolucion = preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaResolucion) ? $fechaResolucion : '2014-08-22';
+
+        $db = Database::getInstance();
+        $empresaId = $this->context->getEmpresaId();
+        $rut = $this->context->getRut();
+        $basePath = dirname(__DIR__, 2);
+        $messages = [];
+        $warnings = [];
+
+        try {
+            $db->beginTransaction();
+
+            $stmt = $db->prepare('SELECT id, modo, ambiente, endpoint_http FROM dte_configuracion WHERE empresa_id = ? LIMIT 1');
+            $stmt->execute([$empresaId]);
+            $dteCfg = $stmt->fetch(PDO::FETCH_ASSOC);
+            $endpoint = $dteCfg['endpoint_http'] ?? null;
+            if (!is_string($endpoint) || trim($endpoint) === '') {
+                $endpoint = 'https://www.mypos.cl/admin/api.php';
+            }
+
+            if ($dteCfg) {
+                $db->prepare(
+                    "UPDATE dte_configuracion
+                     SET modo = 'REAL', ambiente = 'PRODUCCION', endpoint_http = ?, activo = 1
+                     WHERE empresa_id = ?"
+                )->execute([$endpoint, $empresaId]);
+                $messages[] = 'dte_configuracion actualizado a REAL/PRODUCCION.';
+            } else {
+                $db->prepare(
+                    "INSERT INTO dte_configuracion (empresa_id, modo, ambiente, endpoint_http, activo)
+                     VALUES (?, 'REAL', 'PRODUCCION', ?, 1)"
+                )->execute([$empresaId, $endpoint]);
+                $messages[] = 'dte_configuracion creado en REAL/PRODUCCION.';
+            }
+
+            $stmt = $db->prepare('SELECT metadata_json FROM empresa_configuracion WHERE empresa_id = ? LIMIT 1');
+            $stmt->execute([$empresaId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) {
+                $meta = json_decode((string)($row['metadata_json'] ?? '{}'), true);
+                if (!is_array($meta)) {
+                    $meta = [];
+                }
+                $meta['numero_resolucion'] = $numeroResolucion;
+                $meta['fecha_resolucion'] = $fechaResolucion;
+                $db->prepare('UPDATE empresa_configuracion SET metadata_json = ? WHERE empresa_id = ?')
+                    ->execute([json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), $empresaId]);
+                $messages[] = "Resolucion SII guardada: {$numeroResolucion} / {$fechaResolucion}.";
+            } else {
+                $warnings[] = 'No existe empresa_configuracion; revise numero y fecha de resolucion en MyPOS.';
+            }
+
+            $db->prepare(
+                "INSERT INTO empresa_configuracion_operativa (empresa_id, documentos_tributarios_habilitados)
+                 VALUES (?, 1)
+                 ON DUPLICATE KEY UPDATE documentos_tributarios_habilitados = 1"
+            )->execute([$empresaId]);
+            $messages[] = 'Documentos tributarios habilitados en configuracion operativa.';
+
+            $db->prepare(
+                "UPDATE caf_archivos
+                 SET estado = 'ANULADO'
+                 WHERE empresa_id = ? AND ambiente = 'CERTIFICACION' AND estado = 'ACTIVO'"
+            )->execute([$empresaId]);
+            $certCafs = $db->prepare(
+                "UPDATE folios_asignaciones
+                 SET estado = 'AGOTADA'
+                 WHERE empresa_id = ? AND estado = 'ACTIVA'
+                   AND caf_id IN (SELECT id FROM caf_archivos WHERE empresa_id = ? AND ambiente = 'CERTIFICACION')"
+            );
+            $certCafs->execute([$empresaId, $empresaId]);
+            $messages[] = 'CAF/asignaciones de certificacion desactivados.';
+
+            $stmt = $db->prepare(
+                "SELECT id, folio_desde, folio_hasta
+                 FROM caf_archivos
+                 WHERE empresa_id = ? AND ambiente = 'PRODUCCION' AND tipo_documento = 'BOLETA' AND estado = 'ACTIVO'
+                 ORDER BY folio_desde ASC
+                 LIMIT 1"
+            );
+            $stmt->execute([$empresaId]);
+            $caf = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($caf) {
+                $stmt = $db->prepare('SELECT id FROM sucursales WHERE empresa_id = ? AND activo = 1 ORDER BY id ASC LIMIT 1');
+                $stmt->execute([$empresaId]);
+                $sucursalId = (int)$stmt->fetchColumn();
+                if ($sucursalId > 0) {
+                    $stmt = $db->prepare(
+                        "SELECT id FROM folios_asignaciones
+                         WHERE empresa_id = ? AND caf_id = ? AND estado = 'ACTIVA'
+                         LIMIT 1"
+                    );
+                    $stmt->execute([$empresaId, (int)$caf['id']]);
+                    if ($stmt->fetchColumn()) {
+                        $messages[] = 'Asignacion de CAF de produccion ya existia.';
+                    } else {
+                        $db->prepare(
+                            "INSERT INTO folios_asignaciones
+                                (empresa_id, sucursal_id, caf_id, tipo_documento, folio_desde, folio_hasta,
+                                 folio_actual, alerta_minimo, estado, asignado_at, created_at)
+                             VALUES (?, ?, ?, 'BOLETA', ?, ?, ?, 50, 'ACTIVA', NOW(), NOW())"
+                        )->execute([
+                            $empresaId,
+                            $sucursalId,
+                            (int)$caf['id'],
+                            (int)$caf['folio_desde'],
+                            (int)$caf['folio_hasta'],
+                            (int)$caf['folio_desde'] - 1,
+                        ]);
+                        $messages[] = 'CAF de produccion asignado a la sucursal principal.';
+                    }
+                } else {
+                    $warnings[] = 'No se encontro sucursal activa para asignar CAF de produccion.';
+                }
+            } else {
+                $warnings[] = 'No hay CAF BOLETA de PRODUCCION activo. Suba el CAF real desde Folios antes de vender.';
+            }
+
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $e;
+        }
+
+        $certSrc = "{$basePath}/cert/{$rut}/CERTIFICACION";
+        $certDst = "{$basePath}/cert/{$rut}/PRODUCCION";
+        $cafDst = "{$basePath}/caf/{$rut}/PRODUCCION";
+        $tmpDst = "{$basePath}/tmp/{$rut}/PRODUCCION";
+        foreach ([$certDst, $cafDst, $tmpDst] as $dir) {
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0755, true);
+            }
+        }
+        if (is_dir($certSrc)) {
+            $copied = 0;
+            foreach (scandir($certSrc) ?: [] as $file) {
+                if ($file === '.' || $file === '..') {
+                    continue;
+                }
+                $src = $certSrc . '/' . $file;
+                $dst = $certDst . '/' . $file;
+                if (is_file($src) && !is_file($dst)) {
+                    @copy($src, $dst);
+                    $copied++;
+                }
+            }
+            $messages[] = $copied > 0
+                ? "Certificado copiado a PRODUCCION ({$copied} archivo/s)."
+                : 'Certificado de PRODUCCION ya estaba preparado.';
+        } else {
+            $warnings[] = 'No existe carpeta de certificado en CERTIFICACION para copiar.';
+        }
+
+        $state['produccion'] = [
+            'status' => 'enabled',
+            'ts' => date('Y-m-d\TH:i:s'),
+            'numero_resolucion' => $numeroResolucion,
+            'fecha_resolucion' => $fechaResolucion,
+            'warnings' => $warnings,
+        ];
+        $this->saveState($state);
+
+        return [
+            'ok' => true,
+            'empresa_id' => $empresaId,
+            'rut' => $rut,
+            'ambiente' => 'PRODUCCION',
+            'modo' => 'REAL',
+            'endpoint_http' => $endpoint,
+            'mensajes' => $messages,
+            'advertencias' => $warnings,
+            'estado' => $state,
         ];
     }
 

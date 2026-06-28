@@ -95,6 +95,13 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
 .cert-status-idle { display:flex; align-items:center; gap:10px; padding:10px 16px;
   background:#e9ecef; border:1px solid var(--c-border); border-radius:8px;
   color:var(--c-text-muted); font-size:.82rem; }
+.cert-prod-panel { margin-top:14px; padding:14px; border:1px solid #b7e4c7;
+  border-left:4px solid #27ae60; border-radius:8px; background:#f0fff4; }
+.cert-prod-panel.locked { border-color:#e1e5ea; border-left-color:#95a5a6; background:#f8f9fa; opacity:.78; }
+.cert-prod-panel h4 { margin:0 0 6px; font-size:.9rem; color:#155724; }
+.cert-prod-panel p { margin:0 0 10px; font-size:.76rem; color:#3d5a45; }
+.cert-prod-grid { display:grid; grid-template-columns:repeat(2,minmax(120px,180px)); gap:8px; align-items:end; }
+.cert-prod-result { margin-top:10px; font-size:.76rem; }
 /* ── Grupo tipo ── */
 .caso-group-header { font-size:.72rem; font-weight:700; color:var(--c-text-muted);
   padding:4px 10px; background:#f4f5f7; border-bottom:1px solid var(--c-border);
@@ -556,6 +563,31 @@ $allCasesJson = json_encode(array_keys(array_merge($setCases['boletas'], $setCas
       <i class="bi bi-box-arrow-up-right"></i> Portal SII — Subir PDF
     </a>
     <div id="muestras-pdf-status" class="mt-2"></div>
+
+    <div id="cert-prod-panel" class="cert-prod-panel locked">
+      <h4><i class="bi bi-building-check"></i> Paso final: pasar empresa a Produccion</h4>
+      <p>
+        Use este boton solo despues de que el SII apruebe el proceso completo. Cambia la empresa a
+        <strong>REAL/PRODUCCION</strong>, habilita DTE, prepara carpetas productivas y asigna CAF de produccion si existe.
+      </p>
+      <div class="cert-prod-grid">
+        <label class="d-label">Nro. resolucion
+          <input id="prod-resol-num" class="d-input" value="80" style="font-size:.8rem">
+        </label>
+        <label class="d-label">Fecha resolucion
+          <input id="prod-resol-fch" class="d-input" type="date" value="2014-08-22" style="font-size:.8rem">
+        </label>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px">
+        <button id="btn-promover-produccion" class="d-btn d-btn-success" onclick="certPromoverProduccion()" disabled>
+          <i class="bi bi-check2-circle"></i> Pasar a produccion
+        </button>
+        <span id="prod-ready-hint" style="font-size:.72rem; color:var(--c-text-muted)">
+          Disponible cuando el Paso 7 tenga las muestras PDF generadas.
+        </span>
+      </div>
+      <div id="prod-promote-status" class="cert-prod-result"></div>
+    </div>
   </div>
 </div>
 
@@ -786,6 +818,41 @@ function applyState(estado) {
       pb6.textContent='✗ Error'; pb6.className='d-badge danger'; setPasoNum(6,'fail');
     } else {
       pb6.textContent=''; pb6.className='d-badge'; setPasoNum(6,'');
+    }
+  }
+
+  // Paso 7 — Muestras impresas y promoción a producción
+  const muestras = estado.muestras || {};
+  const prod = estado.produccion || {};
+  const muestrasOk = ['generated', 'ok'].includes(muestras.status);
+  const pb7 = document.getElementById('pbadge-7');
+  if (pb7) {
+    if (prod.status === 'enabled') {
+      pb7.textContent='✓ Produccion'; pb7.className='d-badge success'; setPasoNum(7,'done');
+    } else if (muestrasOk) {
+      pb7.textContent='✓ PDFs generados'; pb7.className='d-badge success'; setPasoNum(7,'done');
+    } else if (muestras.status === 'partial') {
+      pb7.textContent='Parcial'; pb7.className='d-badge warning'; setPasoNum(7,'');
+    } else {
+      pb7.textContent='Pendiente'; pb7.className='d-badge'; setPasoNum(7,'');
+    }
+  }
+  const prodPanel = document.getElementById('cert-prod-panel');
+  const prodBtn = document.getElementById('btn-promover-produccion');
+  const prodHint = document.getElementById('prod-ready-hint');
+  if (prodPanel && prodBtn) {
+    const enabled = muestrasOk && prod.status !== 'enabled';
+    prodPanel.classList.toggle('locked', !enabled && prod.status !== 'enabled');
+    prodBtn.disabled = !enabled;
+    if (prod.status === 'enabled') {
+      prodBtn.disabled = true;
+      prodBtn.innerHTML = '<i class="bi bi-check2-circle"></i> Ya esta en produccion';
+      if (prodHint) prodHint.textContent = `Promovido: ${(prod.ts || '').slice(0,16).replace('T',' ')}`;
+    } else {
+      prodBtn.innerHTML = '<i class="bi bi-check2-circle"></i> Pasar a produccion';
+      if (prodHint) prodHint.textContent = enabled
+        ? 'Listo para configurar REAL/PRODUCCION.'
+        : 'Disponible cuando el Paso 7 tenga las muestras PDF generadas.';
     }
   }
 
@@ -1526,6 +1593,39 @@ function certMuestrasPdfDlAll() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+async function certPromoverProduccion() {
+  const btn = document.getElementById('btn-promover-produccion');
+  const out = document.getElementById('prod-promote-status');
+  const numero = (document.getElementById('prod-resol-num')?.value || '80').trim();
+  const fecha = (document.getElementById('prod-resol-fch')?.value || '2014-08-22').trim();
+  const msg = 'Esta accion cambia la empresa a REAL/PRODUCCION y desactiva CAF de certificacion. '
+    + 'Ejecutela solo cuando el SII ya aprobo el proceso completo. Continuar?';
+  if (!confirm(msg)) return;
+
+  btn.disabled = true;
+  out.innerHTML = '<div class="d-alert info"><span class="spinner-border spinner-border-sm me-2"></span> Configurando produccion...</div>';
+  log('Promoviendo empresa a REAL/PRODUCCION...', 'warn');
+  try {
+    const res = await api('cert_promover_produccion', {
+      numero_resolucion: numero,
+      fecha_resolucion: fecha
+    });
+    if (!res.ok) throw new Error(res.error || 'No se pudo pasar a produccion.');
+    const mensajes = (res.mensajes || []).map(m => `<li>${String(m)}</li>`).join('');
+    const advertencias = (res.advertencias || []).map(m => `<li>${String(m)}</li>`).join('');
+    out.innerHTML = `<div class="d-alert success"><strong>Empresa en PRODUCCION / REAL.</strong>`
+      + `<ul style="margin:.4rem 0 0 1rem">${mensajes}</ul>`
+      + (advertencias ? `<div class="d-alert warning mt-2"><strong>Pendiente:</strong><ul style="margin:.4rem 0 0 1rem">${advertencias}</ul></div>` : '')
+      + `</div>`;
+    log('Empresa promovida a produccion.', 'ok');
+    applyState(res.estado);
+  } catch(e) {
+    out.innerHTML = `<div class="d-alert danger">${e.message}</div>`;
+    log('Error promoviendo a produccion: ' + e.message, 'error');
+    btn.disabled = false;
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadState();
   certLoadSetInfo();

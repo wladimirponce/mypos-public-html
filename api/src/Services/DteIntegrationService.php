@@ -47,14 +47,18 @@ final class DteIntegrationService
         $empresaId = $this->positiveInt($payload, 'empresa_id');
         $previous = $this->configuracion($empresaId);
         $mode = $this->mode($payload['modo'] ?? 'SIMULADO');
-        $path = trim((string) ($payload['sistema_path'] ?? $this->defaultSistemaPath()));
+        $path = trim((string) ($payload['sistema_path'] ?? $previous['sistema_path'] ?? $this->defaultSistemaPath()));
+        $endpointHttp = $this->nullableString($payload['endpoint_http'] ?? $previous['endpoint_http'] ?? null);
 
-        // sistema_path es obligatorio solo en modo REAL
+        // En SaaS el modo REAL usa endpoint_http hacia el facturador admin. El
+        // sistema_path queda solo para integraciones locales/legacy.
         if ($mode === 'REAL') {
-            if ($path === '') {
-                throw new HttpException('Error de validacion', 422, ['sistema_path' => ['El campo sistema_path es obligatorio para modo REAL']]);
+            if ($path === '' && $endpointHttp === null) {
+                throw new HttpException('Error de validacion', 422, [
+                    'endpoint_http' => ['Configura endpoint_http del facturador o sistema_path para modo REAL'],
+                ]);
             }
-            if ($this->looksLikeLocalPath($path) && !$this->pathExistsInRuntime($path)) {
+            if ($path !== '' && $this->looksLikeLocalPath($path) && !$this->pathExistsInRuntime($path)) {
                 throw new HttpException('El path del sistema DTE no es accesible desde este runtime', 422);
             }
         }
@@ -63,10 +67,10 @@ final class DteIntegrationService
             'empresa_id' => $empresaId,
             'modo' => $mode,
             'sistema_path' => $path,
-            'endpoint_cli' => $this->nullableString($payload['endpoint_cli'] ?? null),
-            'endpoint_http' => $this->nullableString($payload['endpoint_http'] ?? null),
-            'salida_xml_dir' => $this->nullableString($payload['salida_xml_dir'] ?? null),
-            'salida_pdf_dir' => $this->nullableString($payload['salida_pdf_dir'] ?? null),
+            'endpoint_cli' => $this->nullableString($payload['endpoint_cli'] ?? $previous['endpoint_cli'] ?? null),
+            'endpoint_http' => $endpointHttp,
+            'salida_xml_dir' => $this->nullableString($payload['salida_xml_dir'] ?? $previous['salida_xml_dir'] ?? null),
+            'salida_pdf_dir' => $this->nullableString($payload['salida_pdf_dir'] ?? $previous['salida_pdf_dir'] ?? null),
             'ambiente' => $this->environment($payload['ambiente'] ?? 'CERTIFICACION'),
             'activo' => $this->bool($payload['activo'] ?? true),
             'metadata_json' => $this->encodeJson(is_array($payload['metadata'] ?? null) ? $payload['metadata'] : []),
