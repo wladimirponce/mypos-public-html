@@ -403,11 +403,14 @@ final class DteIntegrationService
         $endpoint = (string) $config['endpoint_http'];
         $apiKey = $this->adminApiKey($config, (int) $payload['documento']['empresa_id']);
         $request = $this->adminGeneratePayload($payload);
-        // No enviamos caf_xml_base64 al admin: la columna caf_archivos.caf_xml puede
-        // tener '?' en lugar de Ñ (corrupción utf8mb4 al insertar bytes ISO-8859-1 raw).
-        // Si se enviara, el admin lo usaría como SII_CAF_XML_OVERRIDE con prioridad
-        // sobre su filesystem, donde provisionarCredenciales ya escribió bytes exactos.
-        // El admin resuelve el CAF desde su filesystem (ruta caf/{RUT}/PRODUCCION/).
+        $cafXml = $this->cafXmlForEmission(
+            (int) $payload['documento']['empresa_id'],
+            (int) $payload['documento']['tipo_dte'],
+            (int) $payload['documento']['folio']
+        );
+        if ($cafXml !== null) {
+            $request['caf_xml_base64'] = base64_encode($cafXml);
+        }
         $generate = $this->adminRequest($endpoint, 'generate', $request, $apiKey);
 
         if (empty($generate['ok'])) {
@@ -562,6 +565,61 @@ final class DteIntegrationService
                 'exento' => (int) ($item['exento'] ?? 0) > 0,
             ], $payload['items'] ?? []),
         ];
+    }
+
+    /**
+     * Lee el CAF desde el archivo en disco (bytes originales del SII, ISO-8859-1).
+     * Devuelve null si no hay archivo: el admin usará su propio filesystem
+     * (escrito por provisionarCredenciales).
+     * NUNCA lee de la columna caf_xml: puede tener '?' en lugar de Ñ por la
+     * corrupción utf8mb4 al guardar bytes ISO-8859-1 raw sin convertir primero.
+     */
+    private function cafXmlForEmission(int $empresaId, int $tipoDte, int $folio): ?string
+    {
+        $tipoDocumento = match ($tipoDte) {
+            33, 34 => 'FACTURA',
+            39, 41 => 'BOLETA',
+            52 => 'GUIA_DESPACHO',
+            56 => 'NOTA_DEBITO',
+            61 => 'NOTA_CREDITO',
+            default => null,
+        };
+        if ($tipoDocumento === null || $folio <= 0) {
+            return null;
+        }
+
+        $statement = Database::connection()->prepare(
+            'SELECT archivo_path
+             FROM caf_archivos
+             WHERE empresa_id = :empresa_id
+               AND tipo_documento = :tipo_documento
+               AND estado = \'ACTIVO\'
+               AND :folio BETWEEN folio_desde AND folio_hasta
+             ORDER BY folio_desde ASC
+             LIMIT 1'
+        );
+        $statement->execute([
+            'empresa_id' => $empresaId,
+            'tipo_documento' => $tipoDocumento,
+            'folio' => $folio,
+        ]);
+        $row = $statement->fetch();
+        if (!is_array($row)) {
+            return null;
+        }
+
+        $path = trim((string) ($row['archivo_path'] ?? ''));
+        if ($path === '') {
+            return null;
+        }
+
+        $fullPath = dirname(__DIR__, 2) . '/storage/' . str_replace(['\\', '/'], DIRECTORY_SEPARATOR, ltrim($path, '/\\'));
+        if (!is_file($fullPath)) {
+            return null;
+        }
+
+        $bytes = file_get_contents($fullPath);
+        return (is_string($bytes) && $bytes !== '') ? $bytes : null;
     }
 
     /** Directorio base de respaldo de boletas/DTE en PDF (en la nube/servidor). */
