@@ -203,7 +203,7 @@ final class FolioService
         $archivoPath = $relativeDir . '/' . $storageName;
 
         // Registrar en base de datos
-        return $this->registrarCaf($userId, [
+        $result = $this->registrarCaf($userId, [
             'empresa_id' => $empresaId,
             'tipo_documento' => $type,
             'rut_emisor' => $rutEmisor,
@@ -215,6 +215,19 @@ final class FolioService
             'archivo_path' => $archivoPath,
             'caf_xml' => $this->cafXmlForDatabase($xmlContent),
         ]);
+
+        // Auto-provisionar el CAF en el facturador (elimina el paso manual "Provisionar
+        // Facturador"). Solo ocurre si la empresa ya esta en produccion; best-effort:
+        // si falla, el CAF igual quedo guardado y se envia por override al emitir.
+        try {
+            $prov = (new DteIntegrationService())->provisionarCafSiListo($empresaId, (string) $rawXmlContent, $tipoDocSii);
+            $result['facturador_provisionado'] = (bool) ($prov['provisioned'] ?? false);
+        } catch (Throwable $provEx) {
+            error_log('[FolioService] Auto-provision CAF no critica fallo: ' . $provEx->getMessage());
+            $result['facturador_provisionado'] = false;
+        }
+
+        return $result;
     }
 
     public function listarCafs(array $filters): array

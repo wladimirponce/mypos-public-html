@@ -386,36 +386,48 @@ class MuestraPdfGenerator
         }
 
         // Timbre PDF417 — mínimo 2x5 cm (máx 4x9), a ≥2 cm del borde izquierdo.
-        // El manual recomienda incrustarlo como imagen PNG (su lector lo
-        // reconoce más rápido que los vectores); fallback a vector si no hay GD.
-        $tedY = min($y + 2, 235.0);
+        // Se dimensiona PRESERVANDO la proporción del símbolo para que cada módulo
+        // mida ~0.26mm (sobre el mínimo SII de 0.25mm). El cuadro fijo anterior
+        // (60x22) dejaba el módulo en ~0.17mm y además estiraba el símbolo: el lector
+        // del SII no lo resolvía. El blanco de la página actúa como zona de silencio.
+        require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
+        $bc    = new \TCPDF2DBarcode($ted, 'PDF417');
+        $bcArr = $bc->getBarcodeArray();            // no requiere GD
+        $cols  = (int) ($bcArr['num_cols'] ?? 0);
+        $rows  = (int) ($bcArr['num_rows'] ?? 0);
+        $tedW = 86.0; $tedH = 42.0;
+        if ($cols > 0 && $rows > 0) {
+            $mm   = min(0.26, 90.0 / $cols);        // tope 9cm (máximo SII)
+            $tedW = $cols * $mm;
+            $tedH = $rows * $mm;                     // proporción exacta del símbolo
+        }
+        // Cap de Y para que el timbre + leyenda quepan en la única página (carta).
+        $tedY = max(0.0, min($y + 2, 270.0 - $tedH - 16.0));
         $pngOk = false;
         if (function_exists('imagecreate')) {
-            require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
-            $bc  = new \TCPDF2DBarcode($ted, 'PDF417');
             $png = $bc->getBarcodePngData(4, 4, [0, 0, 0]); // alta densidad de píxeles
             if ($png !== false && $png !== '') {
-                $png = self::padBarcodePng($png, 36, 24);
-                $pdf->Image('@' . $png, 20, $tedY, 60, 22, 'PNG');
+                $pdf->Image('@' . $png, 20, $tedY, $tedW, $tedH, 'PNG');
                 $pngOk = true;
             }
         }
         if (!$pngOk) {
-            $pdf->write2DBarcode($ted, 'PDF417', 20, $tedY, 60, 22, [
+            // Vector con w/h en la misma proporción del símbolo (no deforma).
+            $pdf->write2DBarcode($ted, 'PDF417', 20, $tedY, $tedW, $tedH, [
                 'border' => false, 'padding' => 0,
                 'fgcolor' => [0, 0, 0], 'bgcolor' => false,
             ], 'N');
         }
         $pdf->SetFont('helvetica', 'B', 8);
-        $pdf->SetXY(20, $tedY + 23);
-        $pdf->Cell(60, 3.5, 'Timbre Electrónico SII', 0, 2, 'C');
+        $pdf->SetXY(20, $tedY + $tedH + 1.5);
+        $pdf->Cell($tedW, 3.5, 'Timbre Electrónico SII', 0, 2, 'C');
         $pdf->SetFont('helvetica', '', 8);
-        $pdf->Cell(60, 3.5, "Res. {$resolNum} de {$resolAno}", 0, 2, 'C');
-        $pdf->Cell(60, 3.5, 'Verifique documento: www.sii.cl', 0, 2, 'C');
+        $pdf->Cell($tedW, 3.5, "Res. {$resolNum} de {$resolAno}", 0, 2, 'C');
+        $pdf->Cell($tedW, 3.5, 'Verifique documento: www.sii.cl', 0, 2, 'C');
         // Verificación en MyPOS: el cliente abre el link (auto-carga por RUT + folio).
         $rutUrl = str_replace('.', '', (string) $emRut);
         $pdf->SetFont('helvetica', '', 7);
-        $pdf->Cell(60, 3.2, "Ver boleta: www.mypos.cl/boleta?rut={$rutUrl}&folio={$folio}", 0, 2, 'C');
+        $pdf->Cell($tedW, 3.2, "Ver boleta: www.mypos.cl/boleta?rut={$rutUrl}&folio={$folio}", 0, 2, 'C');
 
         // Marca CEDIBLE
         if ($esCedible) {
@@ -550,17 +562,21 @@ class MuestraPdfGenerator
         $this->totalTermico($pdf, $cw, 'TOTAL', '$' . self::n($mntTot));
         $pdf->Ln(2.5);
 
-        // ── Timbre PDF417 (aspecto preservado, no estirado) ──
+        // ── Timbre PDF417 (8 columnas: módulo legible en ticket angosto; aspecto
+        // preservado, no estirado). aspectratio=0.5 → ~8 col (como el render del
+        // print server). El default (aspectratio=2, ~16 col) dejaba el módulo en
+        // ~0.21mm al ancho térmico, bajo el mínimo del SII; con 8 col queda ~0.33mm
+        // en 80mm. El símbolo es más alto, lo que en un ticket de rollo no estorba. ──
         $tedY = $pdf->GetY();
         $tw = min($cw, $width === 58.0 ? 52.0 : 72.0);
         $tx = $mg + ($cw - $tw) / 2;
-        $th = $tw * 0.36;
+        $th = $tw * 1.6;
         if (function_exists('imagecreate')) {
             require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
-            $bc = new \TCPDF2DBarcode($ted, 'PDF417');
+            $bc = new \TCPDF2DBarcode($ted, 'PDF417,0.5,5');
             $png = $bc->getBarcodePngData(3, 3, [0, 0, 0]);
             if ($png !== false && $png !== '') {
-                $png = self::padBarcodePng($png, 32, 24);
+                $png = self::padBarcodePng($png, 16, 16);
                 $dim = @getimagesizefromstring($png);
                 if (is_array($dim) && (int) $dim[0] > 0) {
                     $th = $tw * (int) $dim[1] / (int) $dim[0];

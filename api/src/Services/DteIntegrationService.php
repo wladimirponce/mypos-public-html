@@ -805,6 +805,37 @@ final class DteIntegrationService
         ];
     }
 
+    /**
+     * Provisiona el CAF en el facturador (admin) automaticamente al subirlo, SOLO si la
+     * empresa ya esta en REAL/PRODUCCION con endpoint configurado. Asi se elimina el paso
+     * manual "Provisionar Facturador". Best-effort: en certificacion (SIMULADO) o si el
+     * admin no responde, no pasa nada — el CAF queda guardado y el backend lo envia por
+     * override (caf_xml_base64) en cada emision.
+     *
+     * @return array{provisioned: bool, reason?: string, response?: array}
+     */
+    public function provisionarCafSiListo(int $empresaId, string $cafXml, int $tipoDte): array
+    {
+        if ($empresaId <= 0 || trim($cafXml) === '') {
+            return ['provisioned' => false, 'reason' => 'sin_caf'];
+        }
+        $config = $this->configuracion($empresaId);
+        if (($config['modo'] ?? '') !== 'REAL' || trim((string) ($config['endpoint_http'] ?? '')) === '') {
+            // Aun en certificacion / sin endpoint: no se auto-provisiona (no se rompe).
+            return ['provisioned' => false, 'reason' => 'facturador_no_listo'];
+        }
+
+        $endpoint = (string) $config['endpoint_http'];
+        $apiKey = $this->adminApiKey($config, $empresaId);
+        $response = $this->adminRequest($endpoint, 'provisionar_credenciales', [
+            'empresa_id' => $empresaId,
+            'caf_xml_base64' => base64_encode($cafXml),
+            'caf_tipo' => $tipoDte,
+        ], $apiKey);
+
+        return ['provisioned' => !empty($response['ok']), 'response' => $response];
+    }
+
     private function adminRequest(string $endpoint, string $action, array $payload, string $apiKey): array
     {
         if (!function_exists('curl_init')) {
@@ -860,21 +891,37 @@ final class DteIntegrationService
 
     private function adminApiKey(array $config, int $empresaId): string
     {
+        // 1) Fuente principal: clave en BD (autogestionada, sin .env). El admin valida
+        //    contra esta MISMA columna (comparten base de datos), asi que ambos lados
+        //    quedan consistentes sin intervencion manual.
+        $dbKey = $this->repository->adminApiKey($empresaId);
+        if ($dbKey !== null) {
+            return $dbKey;
+        }
+
+        // 2) Compatibilidad: variable de entorno de instalaciones antiguas.
         $metadata = $this->decodeJson($config['metadata_json'] ?? null) ?? [];
         $envName = is_string($metadata['admin_api_key_env'] ?? null) && trim((string) $metadata['admin_api_key_env']) !== ''
             ? trim((string) $metadata['admin_api_key_env'])
             : 'DTE_ADMIN_API_KEY_' . $empresaId;
-
-        $apiKey = (string) ($_ENV[$envName] ?? getenv($envName) ?: '');
+        $apiKey = trim((string) ($_ENV[$envName] ?? getenv($envName) ?: ''));
         if ($apiKey === '') {
-            $apiKey = (string) ($_ENV['DTE_ADMIN_API_KEY'] ?? getenv('DTE_ADMIN_API_KEY') ?: '');
+            $apiKey = trim((string) ($_ENV['DTE_ADMIN_API_KEY'] ?? getenv('DTE_ADMIN_API_KEY') ?: ''));
         }
 
-        if (trim($apiKey) === '') {
-            throw new HttpException("Falta configurar API key de admin DTE en {$envName} o DTE_ADMIN_API_KEY", 422);
+        // 3) Sin BD ni .env: autogenerar y persistir. La proxima llamada (y el admin)
+        //    leen la misma clave desde la BD. Nunca falla por falta de configuracion.
+        if ($apiKey === '') {
+            $apiKey = bin2hex(random_bytes(24));
+        }
+        try {
+            $this->repository->setAdminApiKey($empresaId, $apiKey);
+        } catch (\Throwable $e) {
+            // Si la columna no existe aun (migracion 065 sin aplicar), seguimos con la
+            // clave en memoria; el admin no exige match mientras la columna este vacia.
         }
 
-        return trim($apiKey);
+        return $apiKey;
     }
 
     private function extractTedXml(string $xml): ?string

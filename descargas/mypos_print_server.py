@@ -494,14 +494,16 @@ def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
         center(f"TOTAL {money(data.get('total'))}", bold_font, 28)
         y += 8
 
-        barcode_img = timbre_image(data)
-        if barcode_img is None:
-            ted_safe = resolve_ted(data).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
-            codes = pdf417_encode(ted_safe, columns=8, security_level=5, encoding="iso-8859-1")
-            barcode_img = pdf417_render(codes, scale=3, ratio=3, padding=12).convert("RGB")
-        if barcode_img.width > 540:
-            ratio = 540 / barcode_img.width
-            barcode_img = barcode_img.resize((540, max(1, int(barcode_img.height * ratio))))
+        # PDF417 local con 8 columnas (modulo legible). NO se usa el PNG del admin
+        # (aspectratio=2, demasiado denso) ni se encoge por debajo del minimo del SII.
+        ted_safe = resolve_ted(data).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
+        codes = pdf417_encode(ted_safe, columns=8, security_level=5, encoding="iso-8859-1")
+        barcode_img = pdf417_render(codes, scale=3, ratio=3, padding=12).convert("RGB")
+        # Limitar al ancho util del canvas sin bajar del minimo de modulo del SII.
+        max_bc = width - 2 * margin
+        if barcode_img.width > max_bc:
+            ratio = max_bc / barcode_img.width
+            barcode_img = barcode_img.resize((max_bc, max(1, int(barcode_img.height * ratio))))
         canvas.paste(barcode_img, ((width - barcode_img.width) // 2, y))
         y += barcode_img.height + 10
         center("Timbre Electronico SII", bold_font)
@@ -622,11 +624,14 @@ def append_pdf417(ticket: bytearray, ted: str, columns: int = 8, raster_width: i
 
         ted_safe = ted.encode("iso-8859-1", errors="replace").decode("iso-8859-1")
         # SII exige ECC nivel 5. Las columnas se eligen segun el ancho del papel
-        # (8 en 80mm, menos en 56mm) para que el timbre quepa sin encoger los modulos.
-        # scale=2 (~0.25 mm/modulo a 203 dpi), ratio=3 (alto de fila = 3x el ancho del
-        # modulo) y padding=10 (zona de silencio, imprescindible para el lector del SII).
+        # (8 col en 80mm y 58mm) para que el timbre quepa en <=90 filas. ratio=3 (alto
+        # de fila = 3x el ancho del modulo) y padding=10 (zona de silencio, imprescindible
+        # para el lector del SII). La escala se ajusta para que el render quede cerca del
+        # ancho objetivo del papel y el redimensionado raster sea minimo (menos distorsion).
         codes = pdf417_encode(ted_safe, columns=columns, security_level=5, encoding="iso-8859-1")
-        img = pdf417_render(codes, scale=2, ratio=3, padding=10)
+        modules_wide = (columns + 4) * 17 + 1
+        scale = max(2, round(raster_width / modules_wide))
+        img = pdf417_render(codes, scale=scale, ratio=3, padding=10)
         ticket.extend(CMD_CENTER)
         ticket.extend(image_to_escpos_raster(img, max_width=raster_width))
         ticket.extend(b"\n")
@@ -852,7 +857,9 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
     # Ancho del papel: 56mm => 32 caracteres; 80mm (o por defecto) => 48.
     ancho_mm = int(number(data.get("ancho"), 80))
     if ancho_mm <= 58:
-        width, pdf_cols, raster_w = 32, 5, 376
+        # 8 columnas: es el minimo que cabe en <=90 filas para un TED de ~760 B con
+        # ECC 5. Con 5 columnas el PDF417 supera 90 filas y la libreria falla.
+        width, pdf_cols, raster_w = 32, 8, 376
     else:
         width, pdf_cols, raster_w = 48, 8, 576
 
@@ -890,15 +897,12 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
         ticket.extend(line("Track ID", text(data.get("track_id")), width))
 
     ticket.extend(format_ticket_body(data, width))
-    # Timbre: preferir la imagen del admin (TCPDF, la que el SII reconoce); si no
-    # viene, rasterizar el PDF417 propio como respaldo.
-    tpng = timbre_image(data)
-    if tpng is not None:
-        ticket.extend(CMD_CENTER)
-        ticket.extend(image_to_escpos_raster(tpng, max_width=raster_w))
-        ticket.extend(b"\n")
-    else:
-        append_pdf417(ticket, resolve_ted(data), columns=pdf_cols, raster_width=raster_w)
+    # Timbre PDF417 rasterizado localmente con columnas dimensionadas al ancho del
+    # papel (8 col -> modulo ~0.35mm en 80mm; en 58mm ~0.23mm, el maximo posible).
+    # NO se usa el PNG del admin (timbre_png_b64): viene con aspectratio=2 (~345
+    # modulos) y al ajustarse al ancho termico el modulo cae a ~0.2mm, ilegible para
+    # el lector del SII. El render local respeta el minimo de modulo por formato.
+    append_pdf417(ticket, resolve_ted(data), columns=pdf_cols, raster_width=raster_w)
     ticket.extend(CMD_CENTER)
     ticket.extend(CMD_BOLD_ON)
     ticket.extend(enc("Timbre Electronico SII\n"))

@@ -269,6 +269,29 @@ try {
 }
 
 // â”€â”€â”€ Definir constantes de empresa desde la BD (o valores neutros) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Validacion de la clave compartida admin<->web (SaaS servidor-a-servidor). Solo se
+// exige si la empresa YA tiene admin_api_key provisionada en BD: asi no rompe
+// instalaciones en transicion ni peticiones desde sesion admin. La clave la
+// autogestiona el web backend (la genera y persiste en la misma columna dte_configuracion).
+if (empty($_SESSION['admin_id']) && $requestedEmpresaId !== null && $requestedEmpresaId > 0 && !empty($apiKey)) {
+    try {
+        $pdoKey = \App\Core\Database::getInstance();
+        $stKey = $pdoKey->prepare('SELECT admin_api_key FROM dte_configuracion WHERE empresa_id = ? LIMIT 1');
+        $stKey->execute([$requestedEmpresaId]);
+        $expectedKey = $stKey->fetchColumn();
+        if (is_string($expectedKey) && trim($expectedKey) !== '' && !hash_equals(trim($expectedKey), (string)$apiKey)) {
+            if (PHP_SAPI !== 'cli' && !headers_sent()) {
+                http_response_code(401);
+                header('Content-Type: application/json; charset=UTF-8');
+            }
+            echo json_encode(['ok' => false, 'error' => 'API key invalida para la empresa.']);
+            exit;
+        }
+    } catch (\Throwable $eKey) {
+        // Columna admin_api_key inexistente (migracion 065 sin aplicar): no bloquear.
+    }
+}
+
 // NUNCA se definen valores hardcodeados de empresa: todo viene de sii_empresa.
 if ($globalContext) {
     $emp = $globalContext->getEmpresa();

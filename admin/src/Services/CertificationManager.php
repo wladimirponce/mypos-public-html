@@ -1990,6 +1990,22 @@ class CertificationManager
             throw new Exception('Complete el Paso 7 generando las muestras PDF antes de pasar a produccion.');
         }
 
+        // Prerequisitos de datos: sin ACTECO/giro el SII rechaza al emitir. Bloquear
+        // aqui (no al vender) para que el paso a produccion quede consistente.
+        $empData = $this->context->getEmpresa();
+        $faltantes = [];
+        $actecoArr = json_decode((string)($empData['acteco'] ?? '[]'), true);
+        if (!is_array($actecoArr) || (int)($actecoArr[0] ?? 0) <= 0) {
+            $faltantes[] = 'ACTECO (codigo de actividad economica SII)';
+        }
+        if (trim((string)($empData['giro'] ?? '')) === '') {
+            $faltantes[] = 'giro';
+        }
+        if ($faltantes !== []) {
+            throw new Exception('Complete en la ficha de la empresa (MyPOS > Configuracion SII): '
+                . implode(', ', $faltantes) . ' antes de pasar a produccion.');
+        }
+
         $numeroResolucion = trim($numeroResolucion) !== '' ? trim($numeroResolucion) : '80';
         $fechaResolucion = preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaResolucion) ? $fechaResolucion : '2014-08-22';
 
@@ -2024,6 +2040,26 @@ class CertificationManager
                      VALUES (?, 'REAL', 'PRODUCCION', ?, 1)"
                 )->execute([$empresaId, $endpoint]);
                 $messages[] = 'dte_configuracion creado en REAL/PRODUCCION.';
+            }
+
+            // API key compartida admin<->web: autogenerar si falta. Elimina la edicion
+            // manual de .env; el web backend lee/envia esta misma clave y el admin la
+            // valida (misma BD). Best-effort: si la columna no existe (migracion 065 sin
+            // aplicar) no se interrumpe la promocion.
+            try {
+                $stmt = $db->prepare('SELECT admin_api_key FROM dte_configuracion WHERE empresa_id = ? LIMIT 1');
+                $stmt->execute([$empresaId]);
+                $existingKey = $stmt->fetchColumn();
+                if (!is_string($existingKey) || trim($existingKey) === '') {
+                    $newKey = bin2hex(random_bytes(24));
+                    $db->prepare('UPDATE dte_configuracion SET admin_api_key = ? WHERE empresa_id = ?')
+                        ->execute([$newKey, $empresaId]);
+                    $messages[] = 'API key del facturador generada automaticamente (sin .env).';
+                } else {
+                    $messages[] = 'API key del facturador ya estaba provisionada.';
+                }
+            } catch (\Throwable $e) {
+                $warnings[] = 'No se pudo provisionar la API key automatica (aplique la migracion 065): ' . $e->getMessage();
             }
 
             $stmt = $db->prepare('SELECT metadata_json FROM empresa_configuracion WHERE empresa_id = ? LIMIT 1');

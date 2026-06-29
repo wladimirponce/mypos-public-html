@@ -66,6 +66,41 @@ final class DteIntegrationRepository
         $statement->execute($data);
     }
 
+    /**
+     * Clave API compartida admin<->web (columna dedicada, no expuesta al frontend).
+     * Devuelve null si no esta provisionada todavia.
+     */
+    public function adminApiKey(int $empresaId): ?string
+    {
+        try {
+            $statement = $this->connection->prepare(
+                'SELECT admin_api_key FROM dte_configuracion WHERE empresa_id = :empresa_id LIMIT 1'
+            );
+            $statement->execute(['empresa_id' => $empresaId]);
+            $value = $statement->fetchColumn();
+        } catch (\Throwable $e) {
+            // Columna inexistente (migracion 065 sin aplicar): se cae al fallback .env.
+            return null;
+        }
+
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
+    /**
+     * Persiste la clave compartida sin tocar el resto de la configuracion. Crea la
+     * fila minima si la empresa aun no tiene dte_configuracion.
+     */
+    public function setAdminApiKey(int $empresaId, string $key): void
+    {
+        $statement = $this->connection->prepare(
+            'INSERT INTO dte_configuracion (empresa_id, admin_api_key)
+             VALUES (:empresa_id, :key)
+             ON DUPLICATE KEY UPDATE admin_api_key = VALUES(admin_api_key),
+                                     updated_at = CURRENT_TIMESTAMP'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'key' => $key]);
+    }
+
     public function findDocument(int $empresaId, int $documentId): ?array
     {
         $statement = $this->connection->prepare(

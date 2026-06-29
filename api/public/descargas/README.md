@@ -73,6 +73,30 @@ start_mypos_print_server.bat
 
 Tambien acepta `pdf_base64` en lugar de `pdf_url`.
 
+## Timbre PDF417 (boleta electronica) — tamano de modulo
+
+El timbre se rasteriza **localmente** con `pdf417gen` (no se usa el PNG del facturador,
+que viene con `aspectratio=2` ~345 modulos y queda ilegible al ancho termico). El numero
+de columnas se elige por el ancho del papel para que cada modulo mida **>= 0.25 mm**, que
+es el minimo que la app del SII puede leer desde papel:
+
+| Formato | `ancho` | Columnas | mm/modulo |
+|---------|---------|----------|-----------|
+| 80 mm | 80 | 8 | ~0.35 (holgado) |
+| 58 mm | 56 | 8 | ~0.25 (maximo fisico para un TED de ~760 B) |
+
+Notas:
+- **Minimo 8 columnas.** Con menos, el TED (~760 B, ECC 5) supera 90 filas y `pdf417gen` falla.
+- La escala del render se calcula para llenar el ancho objetivo sin distorsion
+  (`scale = round(raster_width / modulos)`).
+- La N y demas no-ASCII van en byte mode ISO-8859-1 (`0xD1`); sobreviven el PDF417 intactas.
+- **Escanear desde papel**, no desde pantalla (la pantalla corrompe el barcode por moire).
+- Requiere el paquete `pdf417` (`pdf417gen`) instalado; sin el, cae a un timbre ESC/POS
+  nativo que la mayoria de lectores no resuelve.
+
+Para hoja **carta** el barcode lo genera el facturador (`MuestraPdfGenerator`), no el print
+server; ver `admin/doc/spec_boletas_oneshot/02_firma_y_ted.md` seccion 5.
+
 ## Troubleshooting
 
 - **Error "Impresora no encontrada"**: Verificar nombre de impresora en Panel de Control
