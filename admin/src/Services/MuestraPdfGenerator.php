@@ -387,11 +387,12 @@ class MuestraPdfGenerator
 
         // Timbre PDF417 — SII mínimo 2×5cm (sin máximo explícito), módulo ≥0.26mm.
         // Página carta real (215.9×279.4mm) → sin escala al imprimir → módulo llega intacto.
-        // aspectratio=1.0 fuerza ≤17 cols de datos para TED típico → mm≥0.26mm.
-        // Con aspectratio=2 (default) el TED real (~1145 cw) empujaba a 21 cols → mm=0.25mm
-        // exacto, que con la página incorrecta (215×330) se convertía en 0.212mm → ilegible.
+        // aspectratio=2 mantiene forma estándar PDF417 (ancho > alto). Floor 0.26mm
+        // garantiza margen sobre el mínimo SII; si num_cols>346 tedW pasa de 90mm pero
+        // cabe en carta (~175mm útiles). Con aspectratio=1.0 el barcode queda cuadrado
+        // y los scanners (incluida app SII) no lo detectan correctamente.
         require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
-        $bc    = new \TCPDF2DBarcode($ted, 'PDF417,1.0,5');
+        $bc    = new \TCPDF2DBarcode($ted, 'PDF417,2,5');
         $bcArr = $bc->getBarcodeArray();
         $cols  = (int) ($bcArr['num_cols'] ?? 0);
         $rows  = (int) ($bcArr['num_rows'] ?? 0);
