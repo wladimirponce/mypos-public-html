@@ -385,21 +385,21 @@ class MuestraPdfGenerator
             $y += 30;
         }
 
-        // Timbre PDF417 — SII mínimo 2×5cm, máximo 4×9cm, módulo ≥0.25mm.
-        // Fórmula: módulo = min(0.26mm, 90mm/cols), nunca < 0.25mm.
-        // Con página carta real (215.9×279.4mm) no hay escala al imprimir → 0.26mm
-        // llega al papel intacto y el scanner del SII lo lee. Con la página incorrecta
-        // (215×330mm) el printer escalaba 84.7%, dejando el módulo en 0.22mm < mínimo.
+        // Timbre PDF417 — SII mínimo 2×5cm (sin máximo explícito), módulo ≥0.26mm.
+        // Página carta real (215.9×279.4mm) → sin escala al imprimir → módulo llega intacto.
+        // aspectratio=1.0 fuerza ≤17 cols de datos para TED típico → mm≥0.26mm.
+        // Con aspectratio=2 (default) el TED real (~1145 cw) empujaba a 21 cols → mm=0.25mm
+        // exacto, que con la página incorrecta (215×330) se convertía en 0.212mm → ilegible.
         require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
-        $bc    = new \TCPDF2DBarcode($ted, 'PDF417');
-        $bcArr = $bc->getBarcodeArray();            // no requiere GD
+        $bc    = new \TCPDF2DBarcode($ted, 'PDF417,1.0,5');
+        $bcArr = $bc->getBarcodeArray();
         $cols  = (int) ($bcArr['num_cols'] ?? 0);
         $rows  = (int) ($bcArr['num_rows'] ?? 0);
         $tedW = 86.0; $tedH = 42.0;
         if ($cols > 0 && $rows > 0) {
-            $mm   = max(0.25, min(0.26, 90.0 / $cols)); // 0.26mm objetivo ≤ 90mm ancho
+            $mm   = max(0.26, min(0.30, 90.0 / $cols)); // 0.26–0.30mm, nunca < mínimo SII
             $tedW = $cols * $mm;
-            $tedH = $rows * $mm;                     // proporción exacta del símbolo
+            $tedH = $rows * $mm;
         }
         // Cap de Y para que el timbre + leyenda quepan en carta (279.4mm - 20mm márgenes = 259mm útiles).
         $tedY = max(0.0, min($y + 2, 249.0 - $tedH));
