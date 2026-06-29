@@ -67,7 +67,7 @@ if (isset($_GET['switch_empresa'])) {
 
 // —— Módulo activo ——
 $module = $_GET['module'] ?? 'empresas';
-$allowed = ['clientes_mypos','emision','consultas','historial','libros','empresas','config','certificacion','cafs','pos_urgencia','dispositivos','whatsapp',];
+$allowed = ['clientes_mypos','emision','consultas','historial','libros','rcof_auditoria','empresas','config','certificacion','cafs','pos_urgencia','dispositivos','whatsapp','ventas_reset',];
 if (!in_array($module, $allowed)) $module = 'empresas';
 
 // —— Intentar conexión DB (opcional, no bloquea) ——
@@ -118,8 +118,10 @@ $titles = [
     'consultas'     => ['Consultas SII', 'Verificar estados de documentos'],
     'historial'     => ['Historial DTE', 'Documentos emitidos'],
     'libros'        => ['Libros & RCOF', 'Reportes tributarios'],
+    'rcof_auditoria'=> ['Auditoria RCOF', 'Estado diario multiempresa'],
     'certificacion' => ['Certificación SII', 'Pool de pruebas (Solo No-Prod)'],
     'whatsapp'      => ['WhatsApp Business', 'Asignación de números por empresa'],
+    'ventas_reset'  => ['Resetear Ventas', 'Eliminar ventas de prueba sin tocar folios'],
 ];
 
 $pageTitle = $titles[$module][0] ?? 'Dashboard';
@@ -273,10 +275,17 @@ $pageSubtitle = $titles[$module][1] ?? '';
             <a href="dashboard.php?module=libros" class="dash-nav-item <?= $module === 'libros' ? 'active' : '' ?>">
                 <i class="bi bi-journal-text"></i> Libros & RCOF
             </a>
+            <a href="dashboard.php?module=rcof_auditoria" class="dash-nav-item <?= $module === 'rcof_auditoria' ? 'active' : '' ?>">
+                <i class="bi bi-clipboard2-check"></i> Auditoria RCOF
+            </a>
 
             <div class="dash-nav-section">4. Zona de Certificación</div>
             <a href="dashboard.php?module=certificacion" class="dash-nav-item <?= $module === 'certificacion' ? 'active' : '' ?>">
                 <i class="bi bi-shield-check"></i> Certificación SII
+            </a>
+            <a href="dashboard.php?module=ventas_reset" class="dash-nav-item <?= $module === 'ventas_reset' ? 'active' : '' ?>"
+               style="color:#f87171;">
+                <i class="bi bi-trash3"></i> Resetear Ventas
             </a>
         </nav>
 
@@ -332,7 +341,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <div class="dash-content">
             <?php
             $moduleFile = __DIR__ . "/modules/{$module}.php";
-            $globalModules = ['clientes_mypos', 'empresas', 'whatsapp'];
+            $globalModules = ['clientes_mypos', 'empresas', 'whatsapp', 'rcof_auditoria'];
             if (!$globalContext && !in_array($module, $globalModules, true)) {
                 echo '<div class="d-alert warning"><i class="bi bi-building-exclamation"></i> Seleccione una empresa para acceder a este modulo.</div>';
             } elseif (file_exists($moduleFile)) {

@@ -2,7 +2,7 @@
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 error_reporting(E_ALL);
-if (session_status() === PHP_SESSION_NONE) {
+if (PHP_SAPI !== 'cli' && session_status() === PHP_SESSION_NONE) {
     // Cookie de sesión endurecida (HttpOnly + SameSite=Strict, Secure en HTTPS).
     session_set_cookie_params([
         'lifetime' => 0,
@@ -324,7 +324,10 @@ if ($globalContext) {
     define('UNIDAD_SII',   '');
 }
 
-if (!$globalContext && PHP_SAPI !== 'cli' && !defined('DTE_API_BOOTSTRAP_ONLY')) {
+$globalAdminActions = ['rcof_audit', 'rcof_submit_all'];
+$isGlobalAdminAction = in_array((string)($_GET['action'] ?? $_POST['action'] ?? ''), $globalAdminActions, true)
+    && !empty($_SESSION['admin_id']);
+if (!$globalContext && PHP_SAPI !== 'cli' && !defined('DTE_API_BOOTSTRAP_ONLY') && !$isGlobalAdminAction) {
     $emptyAction = (string)($_GET['action'] ?? $_POST['action'] ?? '');
     $emptyResponses = [
         'history'      => ['ok' => true, 'entries' => [], 'history' => []],
@@ -339,7 +342,7 @@ if (!$globalContext && PHP_SAPI !== 'cli' && !defined('DTE_API_BOOTSTRAP_ONLY'))
 }
 
 // Redirigir a login si peticiÃ³n HTTP sin contexto y sin modo BOOTSTRAP_ONLY
-if (!$globalContext && PHP_SAPI !== 'cli' && !defined('DTE_API_BOOTSTRAP_ONLY')) {
+if (!$globalContext && PHP_SAPI !== 'cli' && !defined('DTE_API_BOOTSTRAP_ONLY') && !$isGlobalAdminAction) {
     header('Location: login.php');
     exit;
 }
@@ -349,6 +352,17 @@ $noCompanyDir = __DIR__ . '/var/no-company/';
 $actualTmpDir = $globalContext ? $globalContext->getTmpPath() : ($noCompanyDir . 'tmp/');
 $actualCafDir = $globalContext ? dirname($globalContext->getCafPath(0)) . '/' : ($noCompanyDir . 'caf/');
 $actualCertPfx = $globalContext ? $globalContext->getCertPath() : ($noCompanyDir . 'cert/firma.pfx');
+
+function setDteRuntimeContext(int $empresaId): \App\Core\Context {
+    global $globalContext, $actualTmpDir, $actualCafDir, $actualCertPfx;
+
+    $globalContext = new \App\Core\Context($empresaId);
+    $actualTmpDir = $globalContext->getTmpPath();
+    $actualCafDir = dirname($globalContext->getCafPath(0)) . '/';
+    $actualCertPfx = $globalContext->getCertPath();
+
+    return $globalContext;
+}
 
 function listStoredFiles(): array {
     global $actualTmpDir;
@@ -937,6 +951,17 @@ if ($action) {
             $fecha = $data['fecha'] ?? ($_GET['fecha'] ?? null);
             $force = !empty($data['force']) || !empty($_GET['force']);
             echo json_encode(submitDailyRCOF($fecha, $force));
+            break;
+        case 'rcof_submit_all':
+            $fecha = $data['fecha'] ?? ($_GET['fecha'] ?? null);
+            $force = !empty($data['force']) || !empty($_GET['force']);
+            $dryRun = !empty($data['dry_run']) || !empty($_GET['dry_run']);
+            $empresaId = isset($data['empresa_id']) ? (int)$data['empresa_id'] : (isset($_GET['empresa_id']) ? (int)$_GET['empresa_id'] : null);
+            echo json_encode(runRcofMultiTenant($fecha, $force, $empresaId ?: null, $dryRun));
+            break;
+        case 'rcof_audit':
+            $fecha = $data['fecha'] ?? ($_GET['fecha'] ?? null);
+            echo json_encode(getRcofAuditStatus($fecha));
             break;
         case 'rcof_log':
             echo json_encode(['ok' => true, 'log' => loadRCOFRegistry()]);
@@ -3702,6 +3727,8 @@ XML;
 // RCOF (Resumen de Consumo de Folios para Boletas)
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function generateRCOF(array $data): array {
+    global $globalContext;
+
     $fechaEmision = $data['fecha'] ?? date('Y-m-d');
     $resumenes    = $data['resumenes'] ?? []; // Ej: [['tipo' => 39, 'neto' => 1000, 'iva' => 190, 'total' => 1190, 'emitidos' => 5, 'anulados' => 0, 'utilizados' => 5, 'rango_desde' => 1, 'rango_hasta' => 5]]
     $secuencia    = (int)($data['secuencia'] ?? 1);
@@ -3710,11 +3737,12 @@ function generateRCOF(array $data): array {
 
     $GLOBALS['SII_CERT_TIPO'] = 39;
     [$cert, $privKey] = loadCertificate(39);
-    
-    $rutE = RUT_EMISOR;
+
+    $emp = $globalContext ? $globalContext->getEmpresa() : [];
+    $rutE = $globalContext ? $globalContext->getRut() : RUT_EMISOR;
     $rutEnvia = getRutCertificadoSeguro($cert);
-    $fchR = FCH_RESOL;
-    $nroR = NRO_RESOL;
+    $fchR = (string)($emp['fecha_resolucion'] ?? $emp['fch_resol'] ?? FCH_RESOL);
+    $nroR = (int)($emp['numero_resolucion'] ?? $emp['nro_resol'] ?? NRO_RESOL);
     $idRcof = "RCOF_" . time();
     $fechaTimestamp = date('Y-m-d\TH:i:s');
 
@@ -5482,6 +5510,318 @@ function submitDailyRCOF(?string $fecha = null, bool $force = false): array {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // LIBROS DE COMPRAS Y VENTAS (IECV)
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function ensureRcofAuditTable(): void {
+    $db = \App\Core\Database::getInstance();
+    $db->exec("
+        CREATE TABLE IF NOT EXISTS dte_rcof_auditoria (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            run_id VARCHAR(40) NOT NULL,
+            fecha DATE NOT NULL,
+            empresa_id INT NOT NULL,
+            rut VARCHAR(20) NOT NULL DEFAULT '',
+            razon_social VARCHAR(255) NOT NULL DEFAULT '',
+            ambiente VARCHAR(20) NOT NULL DEFAULT '',
+            estado VARCHAR(20) NOT NULL,
+            secuencia INT NULL,
+            track_id VARCHAR(80) NULL,
+            via VARCHAR(30) NULL,
+            mensaje TEXT NULL,
+            error TEXT NULL,
+            resumen_json LONGTEXT NULL,
+            tracking_json LONGTEXT NULL,
+            started_at DATETIME NOT NULL,
+            finished_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_rcof_audit_fecha_empresa (fecha, empresa_id),
+            KEY idx_rcof_audit_run (run_id),
+            KEY idx_rcof_audit_estado (estado)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    ");
+}
+
+function rcofTenantCandidates(?int $empresaId = null): array {
+    $db = \App\Core\Database::getInstance();
+    $where = 'WHERE e.activo = 1';
+    $params = [];
+    if ($empresaId !== null && $empresaId > 0) {
+        $where .= ' AND e.id = ?';
+        $params[] = $empresaId;
+    }
+
+    $sql = "
+        SELECT
+            e.id,
+            e.rut,
+            e.razon_social,
+            e.activo,
+            COALESCE(dc.ambiente, e.ambiente_default, '') AS ambiente,
+            COALESCE(dc.modo, '') AS modo,
+            COALESCE(dc.activo, 0) AS dte_activo
+        FROM empresas e
+        LEFT JOIN dte_configuracion dc ON dc.empresa_id = e.id
+        $where
+        ORDER BY e.razon_social
+    ";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+}
+
+function rcofTenantIsReportable(array $empresa): bool {
+    $ambiente = strtoupper((string)($empresa['ambiente'] ?? ''));
+    $modo = strtoupper((string)($empresa['modo'] ?? ''));
+    $activo = (int)($empresa['dte_activo'] ?? 0);
+    return $activo === 1 && $modo === 'REAL' && $ambiente === 'PRODUCCION';
+}
+
+function rcofTrackingSnapshot(string $fecha): array {
+    global $actualTmpDir;
+
+    $tmpDir = rtrim($actualTmpDir, '/\\') . DIRECTORY_SEPARATOR;
+    $trackingPath = $tmpDir . 'tracking.json';
+    $tracking = is_file($trackingPath) ? (json_decode((string)file_get_contents($trackingPath), true) ?: []) : [];
+    $rcofLog = loadRCOFRegistry();
+    $dteFiles = 0;
+
+    foreach ([39, 41, 61] as $tipo) {
+        foreach (glob($tmpDir . "dte_T{$tipo}F*.xml") ?: [] as $file) {
+            $xml = @file_get_contents($file);
+            if ($xml !== false && preg_match('/<FchEmis>' . preg_quote($fecha, '/') . '<\/FchEmis>/', $xml)) {
+                $dteFiles++;
+            }
+        }
+    }
+
+    return [
+        'tmp_dir' => $tmpDir,
+        'tracking_path' => $trackingPath,
+        'tracking_exists' => is_file($trackingPath),
+        'tracking_entries' => is_array($tracking) ? count($tracking) : 0,
+        'rcof_log_path' => rcofRegistryPath(),
+        'rcof_log_exists' => is_file(rcofRegistryPath()),
+        'rcof_log_fecha' => $rcofLog[$fecha] ?? null,
+        'dte_files_fecha' => $dteFiles,
+    ];
+}
+
+function rcofAuditJson($value): string {
+    $json = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    return $json === false ? 'null' : $json;
+}
+
+function saveRcofAuditEntry(array $entry): void {
+    ensureRcofAuditTable();
+    $db = \App\Core\Database::getInstance();
+    $stmt = $db->prepare("
+        INSERT INTO dte_rcof_auditoria
+            (run_id, fecha, empresa_id, rut, razon_social, ambiente, estado, secuencia, track_id, via,
+             mensaje, error, resumen_json, tracking_json, started_at, finished_at)
+        VALUES
+            (:run_id, :fecha, :empresa_id, :rut, :razon_social, :ambiente, :estado, :secuencia, :track_id, :via,
+             :mensaje, :error, :resumen_json, :tracking_json, :started_at, :finished_at)
+    ");
+    $stmt->execute([
+        ':run_id' => (string)$entry['run_id'],
+        ':fecha' => (string)$entry['fecha'],
+        ':empresa_id' => (int)$entry['empresa_id'],
+        ':rut' => (string)($entry['rut'] ?? ''),
+        ':razon_social' => (string)($entry['razon_social'] ?? ''),
+        ':ambiente' => (string)($entry['ambiente'] ?? ''),
+        ':estado' => (string)$entry['estado'],
+        ':secuencia' => isset($entry['secuencia']) ? (int)$entry['secuencia'] : null,
+        ':track_id' => $entry['track_id'] ?? null,
+        ':via' => $entry['via'] ?? null,
+        ':mensaje' => $entry['mensaje'] ?? null,
+        ':error' => $entry['error'] ?? null,
+        ':resumen_json' => rcofAuditJson($entry['resumen'] ?? null),
+        ':tracking_json' => rcofAuditJson($entry['tracking'] ?? null),
+        ':started_at' => (string)$entry['started_at'],
+        ':finished_at' => (string)$entry['finished_at'],
+    ]);
+}
+
+function runRcofMultiTenant(?string $fecha = null, bool $force = false, ?int $empresaId = null, bool $dryRun = false): array {
+    $fecha = $fecha ?: date('Y-m-d', strtotime('-1 day'));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha)) {
+        return ['ok' => false, 'error' => 'Fecha RCOF invalida. Use YYYY-MM-DD.'];
+    }
+
+    ensureRcofAuditTable();
+    $runId = date('YmdHis') . '-' . bin2hex(random_bytes(3));
+    $results = [];
+    $okCount = 0;
+    $errorCount = 0;
+    $skippedCount = 0;
+
+    foreach (rcofTenantCandidates($empresaId) as $empresa) {
+        $started = date('Y-m-d H:i:s');
+        $ambiente = strtoupper((string)($empresa['ambiente'] ?? ''));
+        $base = [
+            'run_id' => $runId,
+            'fecha' => $fecha,
+            'empresa_id' => (int)$empresa['id'],
+            'rut' => (string)($empresa['rut'] ?? ''),
+            'razon_social' => (string)($empresa['razon_social'] ?? ''),
+            'ambiente' => $ambiente,
+            'started_at' => $started,
+        ];
+
+        if (!rcofTenantIsReportable($empresa)) {
+            $entry = $base + [
+                'estado' => 'NO_APLICA',
+                'mensaje' => 'Empresa omitida: RCOF automatico aplica solo a DTE activo en modo REAL y ambiente PRODUCCION.',
+                'tracking' => [
+                    'modo' => $empresa['modo'] ?? '',
+                    'dte_activo' => (int)($empresa['dte_activo'] ?? 0),
+                    'ambiente' => $ambiente,
+                ],
+                'finished_at' => date('Y-m-d H:i:s'),
+            ];
+            saveRcofAuditEntry($entry);
+            $results[] = $entry;
+            $skippedCount++;
+            continue;
+        }
+
+        try {
+            setDteRuntimeContext((int)$empresa['id']);
+            $before = rcofTrackingSnapshot($fecha);
+
+            if ($dryRun) {
+                $resumenes = aplicarFoliosAnuladosARCOF(listBoletasDelDia($fecha), $fecha);
+                $after = rcofTrackingSnapshot($fecha);
+                $entry = $base + [
+                    'estado' => 'DRY_RUN',
+                    'mensaje' => 'Simulacion OK: se escanearon boletas y respaldos sin enviar al SII.',
+                    'resumen' => $resumenes,
+                    'tracking' => ['before' => $before, 'after' => $after],
+                    'finished_at' => date('Y-m-d H:i:s'),
+                ];
+                saveRcofAuditEntry($entry);
+                $results[] = $entry;
+                $okCount++;
+                continue;
+            }
+
+            $res = submitDailyRCOF($fecha, $force);
+            $after = rcofTrackingSnapshot($fecha);
+            $estado = !empty($res['skipped']) ? 'YA_ENVIADO' : (!empty($res['ok']) ? 'OK' : 'ERROR');
+            if ($estado === 'ERROR') {
+                $errorCount++;
+            } else {
+                $okCount++;
+            }
+
+            $entry = $base + [
+                'estado' => $estado,
+                'secuencia' => $res['secuencia'] ?? ($res['previo']['secuencia'] ?? null),
+                'track_id' => $res['trackId'] ?? ($res['previo']['trackId'] ?? null),
+                'via' => $res['via'] ?? ($res['previo']['via'] ?? null),
+                'mensaje' => $res['mensaje'] ?? null,
+                'error' => $res['error'] ?? null,
+                'resumen' => $res['resumen'] ?? ($res['previo']['resumen'] ?? null),
+                'tracking' => ['before' => $before, 'after' => $after, 'result' => $res],
+                'finished_at' => date('Y-m-d H:i:s'),
+            ];
+            saveRcofAuditEntry($entry);
+            $results[] = $entry;
+        } catch (\Throwable $e) {
+            $errorCount++;
+            $entry = $base + [
+                'estado' => 'ERROR',
+                'error' => $e->getMessage(),
+                'tracking' => [
+                    'exception_file' => $e->getFile(),
+                    'exception_line' => $e->getLine(),
+                ],
+                'finished_at' => date('Y-m-d H:i:s'),
+            ];
+            try {
+                saveRcofAuditEntry($entry);
+            } catch (\Throwable $auditError) {
+                $entry['audit_error'] = $auditError->getMessage();
+            }
+            $results[] = $entry;
+        }
+    }
+
+    return [
+        'ok' => $errorCount === 0,
+        'run_id' => $runId,
+        'fecha' => $fecha,
+        'dry_run' => $dryRun,
+        'total' => count($results),
+        'ok_count' => $okCount,
+        'error_count' => $errorCount,
+        'skipped_count' => $skippedCount,
+        'results' => $results,
+    ];
+}
+
+function getRcofAuditStatus(?string $fecha = null): array {
+    $fecha = $fecha ?: date('Y-m-d', strtotime('-1 day'));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha)) {
+        return ['ok' => false, 'error' => 'Fecha RCOF invalida. Use YYYY-MM-DD.'];
+    }
+
+    ensureRcofAuditTable();
+    $db = \App\Core\Database::getInstance();
+    $stmt = $db->prepare("
+        SELECT a.*
+        FROM dte_rcof_auditoria a
+        INNER JOIN (
+            SELECT empresa_id, MAX(id) AS id
+            FROM dte_rcof_auditoria
+            WHERE fecha = ?
+            GROUP BY empresa_id
+        ) last_a ON last_a.id = a.id
+    ");
+    $stmt->execute([$fecha]);
+    $auditByEmpresa = [];
+    foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $row) {
+        $auditByEmpresa[(int)$row['empresa_id']] = $row;
+    }
+
+    $rows = [];
+    foreach (rcofTenantCandidates() as $empresa) {
+        $id = (int)$empresa['id'];
+        $ambiente = strtoupper((string)($empresa['ambiente'] ?? ''));
+        $reportable = rcofTenantIsReportable($empresa);
+        $audit = $auditByEmpresa[$id] ?? null;
+        $estado = $audit['estado'] ?? ($reportable ? 'PENDIENTE' : 'NO_APLICA');
+        $rows[] = [
+            'empresa_id' => $id,
+            'rut' => $empresa['rut'] ?? '',
+            'razon_social' => $empresa['razon_social'] ?? '',
+            'ambiente' => $ambiente,
+            'modo' => $empresa['modo'] ?? '',
+            'dte_activo' => (int)($empresa['dte_activo'] ?? 0),
+            'reportable' => $reportable,
+            'estado' => $estado,
+            'run_id' => $audit['run_id'] ?? null,
+            'secuencia' => isset($audit['secuencia']) ? (int)$audit['secuencia'] : null,
+            'track_id' => $audit['track_id'] ?? null,
+            'via' => $audit['via'] ?? null,
+            'mensaje' => $audit['mensaje'] ?? null,
+            'error' => $audit['error'] ?? null,
+            'resumen' => !empty($audit['resumen_json']) ? json_decode((string)$audit['resumen_json'], true) : null,
+            'tracking' => !empty($audit['tracking_json']) ? json_decode((string)$audit['tracking_json'], true) : null,
+            'started_at' => $audit['started_at'] ?? null,
+            'finished_at' => $audit['finished_at'] ?? null,
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'fecha' => $fecha,
+        'total' => count($rows),
+        'pendientes' => count(array_filter($rows, fn($r) => $r['estado'] === 'PENDIENTE')),
+        'errores' => count(array_filter($rows, fn($r) => $r['estado'] === 'ERROR')),
+        'rows' => $rows,
+    ];
+}
+
 function generateLibro(array $data): array {
     $tipoLibro = strtoupper($data['tipoLibro'] ?? 'VENTA'); // VENTA, COMPRA, BOLETA, GUIA
     if ($tipoLibro === 'GUIA' || $tipoLibro === 'GUIAS') {

@@ -1,1 +1,0 @@
-import{aM as a,aT as s}from"./index-Ckc24yTV.js";import{n as i,c as t}from"./compraService-BAnIiMLj.js";function d(r=""){const e=a(o=>o.empresaActiva);return s({queryKey:["proveedores",e==null?void 0:e.empresa_id,r],queryFn:async()=>i(await t.providers((e==null?void 0:e.empresa_id)??0,r)),enabled:!!(e!=null&&e.empresa_id),staleTime:6e4})}export{d as u};
