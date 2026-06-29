@@ -498,7 +498,9 @@ def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
         # y produce un barcode de ~65x70mm, aceptable en el PDF de 80mm de ancho.
         # scale=3 daba 0.375mm pero el barcode era tan grande que ocupaba todo el PDF.
         ted_safe = resolve_ted(data).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
-        codes = pdf417_encode(ted_safe, columns=8, security_level=5, encoding="iso-8859-1")
+        # 12 cols, scale=2, ratio=3: barcode ~71x47mm (1.5:1 mas ancho que alto),
+        # modulo 0.25mm @203dpi, ratio_fila/modulo=3:1 (minimo estandar PDF417).
+        codes = pdf417_encode(ted_safe, columns=12, security_level=5, encoding="iso-8859-1")
         barcode_img = pdf417_render(codes, scale=2, ratio=3, padding=6).convert("RGB")
         max_bc = width - 2 * margin
         if barcode_img.width > max_bc:
@@ -623,11 +625,11 @@ def append_pdf417(ticket: bytearray, ted: str, columns: int = 8, raster_width: i
         from pdf417 import render_image as pdf417_render
 
         ted_safe = ted.encode("iso-8859-1", errors="replace").decode("iso-8859-1")
-        # SII exige ECC nivel 5. Las columnas se eligen segun el ancho del papel
-        # (8 col en 80mm y 58mm) para que el timbre quepa en <=90 filas. ratio=3 (alto
-        # de fila = 3x el ancho del modulo) y padding=10 (zona de silencio, imprescindible
-        # para el lector del SII). La escala se ajusta para que el render quede cerca del
-        # ancho objetivo del papel y el redimensionado raster sea minimo (menos distorsion).
+        # SII exige ECC nivel 5. Columnas segun ancho del papel:
+        # - 80mm: 12 cols -> barcode ~71x47mm (1.5:1 mas ancho que alto),
+        #   modulo 0.25mm @203dpi, ratio_fila/modulo=3:1 (minimo estandar PDF417).
+        # - 58mm: 8 cols -> minimo que cabe en <=90 filas para TED ~760B con ECC5.
+        # padding=10 (zona de silencio imprescindible para el lector del SII).
         codes = pdf417_encode(ted_safe, columns=columns, security_level=5, encoding="iso-8859-1")
         modules_wide = (columns + 4) * 17 + 1
         scale = max(2, round(raster_width / modules_wide))
@@ -861,7 +863,8 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
         # ECC 5. Con 5 columnas el PDF417 supera 90 filas y la libreria falla.
         width, pdf_cols, raster_w = 32, 8, 376
     else:
-        width, pdf_cols, raster_w = 48, 8, 576
+        # 12 columnas en 80mm: barcode 1.5:1 mas ancho que alto, modulo 0.25mm, ratio 3:1.
+        width, pdf_cols, raster_w = 48, 12, 576
 
     ticket = bytearray()
     ticket.extend(CMD_INIT)
@@ -897,11 +900,11 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
         ticket.extend(line("Track ID", text(data.get("track_id")), width))
 
     ticket.extend(format_ticket_body(data, width))
-    # Timbre PDF417 rasterizado localmente con columnas dimensionadas al ancho del
-    # papel (8 col -> modulo ~0.35mm en 80mm; en 58mm ~0.23mm, el maximo posible).
-    # NO se usa el PNG del admin (timbre_png_b64): viene con aspectratio=2 (~345
-    # modulos) y al ajustarse al ancho termico el modulo cae a ~0.2mm, ilegible para
-    # el lector del SII. El render local respeta el minimo de modulo por formato.
+    # Timbre PDF417 generado localmente (cada plataforma genera con sus parametros):
+    # 80mm: 12 cols, scale=2, ratio=3 -> ~71x47mm (1.5:1 mas ancho), mod 0.25mm.
+    # 58mm: 8 cols, scale=2, ratio=3  -> mod ~0.22mm (bajo min SII; hardware limit).
+    # El PNG del servidor (timbre_png_b64) no se usa: viene en proporcion carta y
+    # al ajustarse al ancho termico el modulo cae a <0.20mm, ilegible para el SII.
     append_pdf417(ticket, resolve_ted(data), columns=pdf_cols, raster_width=raster_w)
     ticket.extend(CMD_CENTER)
     ticket.extend(CMD_BOLD_ON)
