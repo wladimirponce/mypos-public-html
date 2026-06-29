@@ -498,10 +498,10 @@ def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
         # y produce un barcode de ~65x70mm, aceptable en el PDF de 80mm de ancho.
         # scale=3 daba 0.375mm pero el barcode era tan grande que ocupaba todo el PDF.
         ted_safe = resolve_ted(data).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
-        # 12 cols, scale=2, ratio=3: barcode ~71x47mm (1.5:1 mas ancho que alto),
-        # modulo 0.25mm @203dpi, ratio_fila/modulo=3:1 (minimo estandar PDF417).
+        # 12 cols, scale=2, ratio=1.5: alto reducido 50% respecto a ratio=3.
+        # modulo 0.25mm @203dpi. TED largo (~1000B+) con ratio=3 resultaba 2x alto.
         codes = pdf417_encode(ted_safe, columns=12, security_level=5, encoding="iso-8859-1")
-        barcode_img = pdf417_render(codes, scale=2, ratio=3, padding=6).convert("RGB")
+        barcode_img = pdf417_render(codes, scale=2, ratio=1.5, padding=6).convert("RGB")
         max_bc = width - 2 * margin
         if barcode_img.width > max_bc:
             ratio = max_bc / barcode_img.width
@@ -633,7 +633,7 @@ def append_pdf417(ticket: bytearray, ted: str, columns: int = 8, raster_width: i
         codes = pdf417_encode(ted_safe, columns=columns, security_level=5, encoding="iso-8859-1")
         modules_wide = (columns + 4) * 17 + 1
         scale = max(2, round(raster_width / modules_wide))
-        img = pdf417_render(codes, scale=scale, ratio=3, padding=10)
+        img = pdf417_render(codes, scale=scale, ratio=1.5, padding=10)
         ticket.extend(CMD_CENTER)
         ticket.extend(image_to_escpos_raster(img, max_width=raster_width))
         ticket.extend(b"\n")
