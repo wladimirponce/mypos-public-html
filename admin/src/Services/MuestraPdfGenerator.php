@@ -414,7 +414,7 @@ class MuestraPdfGenerator
         }
         if (!$pngOk) {
             // Vector con w/h en la misma proporción del símbolo (no deforma).
-            $pdf->write2DBarcode($ted, 'PDF417', 20, $tedY, $tedW, $tedH, [
+            $pdf->write2DBarcode($ted, 'PDF417,2,5', 20, $tedY, $tedW, $tedH, [
                 'border' => false, 'padding' => 0,
                 'fgcolor' => [0, 0, 0], 'bgcolor' => false,
             ], 'N');
@@ -563,18 +563,17 @@ class MuestraPdfGenerator
         $this->totalTermico($pdf, $cw, 'TOTAL', '$' . self::n($mntTot));
         $pdf->Ln(2.5);
 
-        // ── Timbre PDF417 (8 columnas: módulo legible en ticket angosto; aspecto
-        // preservado, no estirado). aspectratio=0.5 → ~8 col (como el render del
-        // print server). El default (aspectratio=2, ~16 col) dejaba el módulo en
-        // ~0.21mm al ancho térmico, bajo el mínimo del SII; con 8 col queda ~0.33mm
-        // en 80mm. El símbolo es más alto, lo que en un ticket de rollo no estorba. ──
+        // ── Timbre PDF417 térmico: aspectratio=1.0 → barcode cuadrado (~72×72mm en 80mm),
+        // módulo 0.260mm. Es el máximo ratio alcanzable en 80mm con módulo ≥ 0.25mm (SII):
+        // cualquier ratio mayor baja el módulo a <0.25mm. aspectratio=0.5 producía 72×116mm
+        // (el doble de alto que ancho, excesivo en el ticket). ──
         $tedY = $pdf->GetY();
         $tw = min($cw, $width === 58.0 ? 52.0 : 72.0);
         $tx = $mg + ($cw - $tw) / 2;
-        $th = $tw * 1.6;
+        $th = $tw * 1.0;
         if (function_exists('imagecreate')) {
             require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
-            $bc = new \TCPDF2DBarcode($ted, 'PDF417,0.5,5');
+            $bc = new \TCPDF2DBarcode($ted, 'PDF417,1.0,5');
             $png = $bc->getBarcodePngData(3, 3, [0, 0, 0]);
             if ($png !== false && $png !== '') {
                 $png = self::padBarcodePng($png, 16, 16);
