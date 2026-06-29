@@ -50,7 +50,7 @@ class MuestraPdfGenerator
         3 => 'Despacho por cuenta del emisor a otras instalaciones',
     ];
 
-    private const FORMATO_HOJA_SII = [215, 330];
+    private const FORMATO_HOJA_SII = [215.9, 279.4]; // carta estándar (Letter)
 
     /** Tipos que requieren ejemplar CEDIBLE además del tributario */
     public const TIPOS_CEDIBLE = [33, 34, 43, 46, 52];
@@ -385,24 +385,24 @@ class MuestraPdfGenerator
             $y += 30;
         }
 
-        // Timbre PDF417 — módulo objetivo 0.35mm (SII mínimo 0.25mm).
-        // 0.26mm era demasiado justo: con toner/inkjet el módulo real cae por debajo
-        // del mínimo y el scanner del SII falla. 0.35mm da margen suficiente.
-        // El símbolo usa la proporción exacta de TCPDF para no deformar el barcode.
+        // Timbre PDF417 — SII mínimo 2×5cm, máximo 4×9cm, módulo ≥0.25mm.
+        // Fórmula: módulo = min(0.26mm, 90mm/cols), nunca < 0.25mm.
+        // Con página carta real (215.9×279.4mm) no hay escala al imprimir → 0.26mm
+        // llega al papel intacto y el scanner del SII lo lee. Con la página incorrecta
+        // (215×330mm) el printer escalaba 84.7%, dejando el módulo en 0.22mm < mínimo.
         require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
         $bc    = new \TCPDF2DBarcode($ted, 'PDF417');
         $bcArr = $bc->getBarcodeArray();            // no requiere GD
         $cols  = (int) ($bcArr['num_cols'] ?? 0);
         $rows  = (int) ($bcArr['num_rows'] ?? 0);
-        $tedW = 121.0; $tedH = 60.0;               // defaults para ~350 cols
+        $tedW = 86.0; $tedH = 42.0;
         if ($cols > 0 && $rows > 0) {
-            $mm   = min(0.35, 150.0 / $cols);       // 0.35mm objetivo, tope 15cm
-            $mm   = max($mm, 0.25);                 // nunca bajo mínimo SII
+            $mm   = max(0.25, min(0.26, 90.0 / $cols)); // 0.26mm objetivo ≤ 90mm ancho
             $tedW = $cols * $mm;
             $tedH = $rows * $mm;                     // proporción exacta del símbolo
         }
-        // Cap de Y para que el timbre + leyenda quepan en la única página (carta).
-        $tedY = max(0.0, min($y + 2, 270.0 - $tedH - 16.0));
+        // Cap de Y para que el timbre + leyenda quepan en carta (279.4mm - 20mm márgenes = 259mm útiles).
+        $tedY = max(0.0, min($y + 2, 249.0 - $tedH));
         $pngOk = false;
         if (function_exists('imagecreate')) {
             $png = $bc->getBarcodePngData(4, 4, [0, 0, 0]); // alta densidad de píxeles
