@@ -494,12 +494,12 @@ def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
         center(f"TOTAL {money(data.get('total'))}", bold_font, 28)
         y += 8
 
-        # PDF417 local con 8 columnas (modulo legible). NO se usa el PNG del admin
-        # (aspectratio=2, demasiado denso) ni se encoge por debajo del minimo del SII.
+        # PDF417 local con 8 columnas. scale=2 da 0.25mm/modulo @203dpi (minimo SII)
+        # y produce un barcode de ~65x70mm, aceptable en el PDF de 80mm de ancho.
+        # scale=3 daba 0.375mm pero el barcode era tan grande que ocupaba todo el PDF.
         ted_safe = resolve_ted(data).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
         codes = pdf417_encode(ted_safe, columns=8, security_level=5, encoding="iso-8859-1")
-        barcode_img = pdf417_render(codes, scale=3, ratio=3, padding=12).convert("RGB")
-        # Limitar al ancho util del canvas sin bajar del minimo de modulo del SII.
+        barcode_img = pdf417_render(codes, scale=2, ratio=3, padding=6).convert("RGB")
         max_bc = width - 2 * margin
         if barcode_img.width > max_bc:
             ratio = max_bc / barcode_img.width
