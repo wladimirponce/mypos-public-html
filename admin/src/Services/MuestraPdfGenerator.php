@@ -385,19 +385,19 @@ class MuestraPdfGenerator
             $y += 30;
         }
 
-        // Timbre PDF417 — mínimo 2x5 cm (máx 4x9), a ≥2 cm del borde izquierdo.
-        // Se dimensiona PRESERVANDO la proporción del símbolo para que cada módulo
-        // mida ~0.26mm (sobre el mínimo SII de 0.25mm). El cuadro fijo anterior
-        // (60x22) dejaba el módulo en ~0.17mm y además estiraba el símbolo: el lector
-        // del SII no lo resolvía. El blanco de la página actúa como zona de silencio.
+        // Timbre PDF417 — módulo objetivo 0.35mm (SII mínimo 0.25mm).
+        // 0.26mm era demasiado justo: con toner/inkjet el módulo real cae por debajo
+        // del mínimo y el scanner del SII falla. 0.35mm da margen suficiente.
+        // El símbolo usa la proporción exacta de TCPDF para no deformar el barcode.
         require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
         $bc    = new \TCPDF2DBarcode($ted, 'PDF417');
         $bcArr = $bc->getBarcodeArray();            // no requiere GD
         $cols  = (int) ($bcArr['num_cols'] ?? 0);
         $rows  = (int) ($bcArr['num_rows'] ?? 0);
-        $tedW = 86.0; $tedH = 42.0;
+        $tedW = 121.0; $tedH = 60.0;               // defaults para ~350 cols
         if ($cols > 0 && $rows > 0) {
-            $mm   = min(0.26, 90.0 / $cols);        // tope 9cm (máximo SII)
+            $mm   = min(0.35, 150.0 / $cols);       // 0.35mm objetivo, tope 15cm
+            $mm   = max($mm, 0.25);                 // nunca bajo mínimo SII
             $tedW = $cols * $mm;
             $tedH = $rows * $mm;                     // proporción exacta del símbolo
         }
