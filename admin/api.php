@@ -5555,7 +5555,7 @@ function rcofTenantCandidates(?int $empresaId = null): array {
             e.rut,
             e.razon_social,
             e.activo,
-            COALESCE(dc.ambiente, e.ambiente_default, '') AS ambiente,
+            COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente,
             COALESCE(dc.modo, '') AS modo,
             COALESCE(dc.activo, 0) AS dte_activo
         FROM empresas e

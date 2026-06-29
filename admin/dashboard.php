@@ -341,7 +341,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <div class="dash-content">
             <?php
             $moduleFile = __DIR__ . "/modules/{$module}.php";
-            $globalModules = ['clientes_mypos', 'empresas', 'whatsapp', 'rcof_auditoria'];
+            $globalModules = ['clientes_mypos', 'empresas', 'whatsapp', 'rcof_auditoria', 'ventas_reset'];
             if (!$globalContext && !in_array($module, $globalModules, true)) {
                 echo '<div class="d-alert warning"><i class="bi bi-building-exclamation"></i> Seleccione una empresa para acceder a este modulo.</div>';
             } elseif (file_exists($moduleFile)) {
