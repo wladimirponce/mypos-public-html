@@ -1,0 +1,14 @@
+# admin/fb/.htaccess
+# Solo index.php es accesible directamente. El resto son clases internas.
+
+Options -Indexes
+
+<FilesMatch "^(?!index\.php$).*\.php$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# Redirigir todo a index.php si no es un archivo existente
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ index.php [L,QSA]

@@ -1,0 +1,25 @@
+# Defensa en profundidad para el panel admin.
+# Bloquea el acceso web directo a archivos sensibles que viven junto al código.
+# (Los puntos de entrada legítimos son api.php, login.php, dashboard.php, etc.)
+
+# 1) Archivos por extensión sensible (.env, certificados, claves, logs, BD local).
+<FilesMatch "(?i)\.(env|pfx|p12|pem|key|crt|conf|cnf|log|sqlite|sqlite3|bak)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# 2) Cualquier archivo oculto (dotfiles: .env, .git, .htpasswd, ...).
+<FilesMatch "^\.">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
