@@ -563,24 +563,31 @@ class MuestraPdfGenerator
         $this->totalTermico($pdf, $cw, 'TOTAL', '$' . self::n($mntTot));
         $pdf->Ln(2.5);
 
-        // ── Timbre PDF417 térmico: aspectratio=1.0 → barcode cuadrado (~72×72mm en 80mm),
-        // módulo 0.260mm. Es el máximo ratio alcanzable en 80mm con módulo ≥ 0.25mm (SII):
-        // cualquier ratio mayor baja el módulo a <0.25mm. aspectratio=0.5 producía 72×116mm
-        // (el doble de alto que ancho, excesivo en el ticket). ──
+        // ── Timbre PDF417 termico.
+        // 80mm: aspectratio=1.5 genera una matriz mas ancha que alta. Con modulo
+        // >=0.25mm queda aprox. 73.5 x 52mm, legible y dentro del ancho util.
+        // 58mm no puede cumplir modulo >=0.25mm por ancho fisico; se ajusta al
+        // ancho disponible y conserva la proporcion para no volver al timbre alto.
         $tedY = $pdf->GetY();
-        $tw = min($cw, $width === 58.0 ? 52.0 : 72.0);
-        $tx = $mg + ($cw - $tw) / 2;
-        $th = $tw * 1.0;
+        $tw = min($cw, $width === 58.0 ? 52.0 : 74.0);
+        $th = $width === 58.0 ? 38.0 : 52.0;
         if (function_exists('imagecreate')) {
             require_once __DIR__ . '/../../lib/tcpdf/tcpdf_barcodes_2d.php';
-            $bc = new \TCPDF2DBarcode($ted, 'PDF417,1.0,5');
+            $bc = new \TCPDF2DBarcode($ted, 'PDF417,1.5,5');
+            $bcArr = $bc->getBarcodeArray();
+            $cols = (int) ($bcArr['num_cols'] ?? 0);
+            $rows = (int) ($bcArr['num_rows'] ?? 0);
+            if ($cols > 0 && $rows > 0) {
+                $moduleMm = min(0.30, $tw / $cols);
+                if ($width !== 58.0) {
+                    $moduleMm = max(0.25, $moduleMm);
+                }
+                $tw = min($cw, $cols * $moduleMm);
+                $th = $rows * $moduleMm;
+            }
+            $tx = $mg + ($cw - $tw) / 2;
             $png = $bc->getBarcodePngData(3, 3, [0, 0, 0]);
             if ($png !== false && $png !== '') {
-                $png = self::padBarcodePng($png, 16, 16);
-                $dim = @getimagesizefromstring($png);
-                if (is_array($dim) && (int) $dim[0] > 0) {
-                    $th = $tw * (int) $dim[1] / (int) $dim[0];
-                }
                 $pdf->Image('@' . $png, $tx, $tedY, $tw, $th, 'PNG');
             }
         }
