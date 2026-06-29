@@ -1,19 +1,20 @@
 <!doctype html>
-<html lang="es">
+<html lang="es-CL">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0ea5e9" />
+    <meta name="theme-color" content="#0f766e" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>MyPOS.cl | El cerebro inteligente de tu negocio: POS, DTE SII e IA</title>
-    <meta name="description" content="Administra ventas, boletas, facturas, caja, stock, reportes y documentos tributarios desde una sola plataforma. Copiloto IA incluido. Desde $19.990 + IVA/mes." />
+
+    <title>MyPOS.cl | POS inteligente para minimarkets, farmacias y comercios</title>
+    <meta name="description" content="MyPOS es el POS inteligente para comercios chilenos. Vende, emite boletas y facturas, controla caja, stock, compras, usuarios, sucursales y reportes con IA integrada. Planes desde $19.990 + IVA/mes, sin permanencia." />
     <link rel="canonical" href="https://www.mypos.cl/" />
     <meta name="robots" content="index, follow" />
-    
+
     <!-- Open Graph -->
-    <meta property="og:title" content="MyPOS.cl | El cerebro inteligente de tu negocio" />
-    <meta property="og:description" content="Boletas, facturas, caja, stock y Copiloto IA para tu negocio. Planes desde $19.990 + IVA." />
+    <meta property="og:title" content="MyPOS.cl | POS inteligente para comercios chilenos" />
+    <meta property="og:description" content="Vende más, controla mejor y decide con datos. POS, DTE, caja, stock, compras, reportes e IA para minimarkets, farmacias, botillerías y comercios." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://www.mypos.cl/" />
     <meta property="og:image" content="https://www.mypos.cl/img/dashboard-mockup.png" />
@@ -22,8 +23,8 @@
 
     <!-- Twitter Cards -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="MyPOS.cl | El cerebro inteligente de tu negocio" />
-    <meta name="twitter:description" content="Boletas, facturas, caja, stock y Copiloto IA para tu negocio. Planes desde $19.990 + IVA." />
+    <meta name="twitter:title" content="MyPOS.cl | POS inteligente para comercios chilenos" />
+    <meta name="twitter:description" content="Vende, emite documentos, controla caja y stock, y usa IA para tomar mejores decisiones. Desde $19.990 + IVA/mes." />
     <meta name="twitter:image" content="https://www.mypos.cl/img/dashboard-mockup.png" />
 
     <!-- Structured Data -->
@@ -34,14 +35,19 @@
       "name": "MyPOS",
       "applicationCategory": "BusinessApplication",
       "operatingSystem": "Web, Android",
-      "description": "Software de punto de venta y gestión para comercios en Chile, con ventas, DTE SII, boletas, facturas, stock, compras con IA, reportes y perfiles especializados por rubro.",
+      "description": "Software POS inteligente para comercios en Chile. Permite vender, emitir boletas y facturas, controlar caja, stock, compras, clientes, proveedores, usuarios, sucursales, reportes y usar IA aplicada al comercio real.",
       "url": "https://www.mypos.cl/",
       "image": "https://www.mypos.cl/img/dashboard-mockup.png",
       "inLanguage": "es-CL",
+      "audience": {
+        "@type": "BusinessAudience",
+        "audienceType": "Minimarkets, farmacias, botillerías, almacenes y comercios locales"
+      },
       "offers": {
         "@type": "Offer",
         "priceCurrency": "CLP",
-        "price": "19990"
+        "price": "19990",
+        "description": "Planes desde $19.990 + IVA al mes, sin permanencia."
       },
       "publisher": {
         "@type": "Organization",
@@ -52,8 +58,12 @@
     }
     </script>
 
-    <!-- CSS crítico en línea del splash: se aplica al instante, sin esperar al bundle. -->
+    <!-- CSS crítico del splash y landing SEO/fallback. -->
     <style>
+      :root{--ink:#0f172a;--muted:#475569;--soft:#e2e8f0;--brand:#0f766e;--brand2:#0ea5e9;--dark:#0b1220;--bg:#f8fafc;--card:#ffffff;--ok:#16a34a}
+      *{box-sizing:border-box}
+      body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif}
+      a{color:inherit}
       #mypos-splash{position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 100%);color:#fff;font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif}
       #mypos-splash .ms-logo{font-size:2.6rem;font-weight:800;letter-spacing:-.02em;line-height:1}
       #mypos-splash .ms-logo span{opacity:.82}
@@ -61,9 +71,45 @@
       #mypos-splash .ms-tag{font-size:.85rem;opacity:.8;letter-spacing:.02em}
       @keyframes ms-rot{to{transform:rotate(360deg)}}
       @media (prefers-reduced-motion:reduce){#mypos-splash .ms-spin{animation:none}}
+
+      .page{line-height:1.6;color:var(--ink)}
+      .wrap{max-width:1160px;margin:0 auto;padding:0 22px}
+      .topbar{position:sticky;top:0;z-index:20;background:rgba(248,250,252,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--soft)}
+      .nav{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 0}
+      .logo{font-weight:900;font-size:1.2rem;letter-spacing:-.03em;text-decoration:none}
+      .logo span{color:var(--brand2)}
+      .links{display:flex;align-items:center;gap:18px;font-size:.94rem;color:var(--muted)}
+      .links a{text-decoration:none}
+      .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:999px;padding:12px 18px;font-weight:800;text-decoration:none;border:1px solid transparent;line-height:1.1}
+      .btn-primary{background:var(--brand);color:#fff;box-shadow:0 10px 25px rgba(15,118,110,.22)}
+      .btn-secondary{background:#fff;color:var(--ink);border-color:var(--soft)}
+      .btn-link{font-weight:700;text-decoration:none;color:var(--muted)}
+      .hero{padding:70px 0 42px;background:radial-gradient(circle at top right,rgba(14,165,233,.16),transparent 34%),linear-gradient(180deg,#fff,#f8fafc)}
+      .hero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:36px;align-items:center}
+      .eyebrow{display:inline-flex;align-items:center;gap:8px;border:1px solid #bae6fd;background:#f0f9ff;color:#0369a1;border-radius:999px;padding:7px 12px;font-weight:800;font-size:.88rem;margin-bottom:18px}
+      h1{font-size:clamp(2.2rem,5vw,4.4rem);line-height:1.02;letter-spacing:-.06em;margin:0 0 18px}
+      h2{font-size:clamp(1.7rem,3vw,2.5rem);line-height:1.12;letter-spacing:-.04em;margin:0 0 14px}
+      h3{font-size:1.08rem;margin:0 0 8px;letter-spacing:-.02em}
+      p{margin:0 0 14px}
+      .lead{font-size:1.18rem;color:var(--muted);max-width:720px}
+      .pain-line{font-size:1.08rem;font-weight:900;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:16px;padding:12px 14px;margin:18px 0;display:inline-block}
+      .price{font-size:1rem;font-weight:900;color:var(--dark);margin:8px 0 22px}
+      .cta-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+      .trust-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px;color:var(--muted);font-size:.92rem}
+      .pill{border:1px solid var(--soft);background:#fff;border-radius:999px;padding:7px 11px}
+      .mockup{background:linear-gradient(145deg,#0f172a,#164e63);border-radius:28px;padding:18px;box-shadow:0 28px 70px rgba(15,23,42,.25);color:#e0f2fe}
+      .mock-top{display:flex;gap:8px;margin-bottom:14px}.dot{width:10px;height:10px;background:rgba(255,255,255,.35);border-radius:50%}
+      .dash{display:grid;grid-template-columns:1fr 1fr;gap:12px}.panel{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);border-radius:18px;padding:14px}.panel strong{display:block;color:#fff;font-size:1.45rem}.panel small{color:#bae6fd}.wide{grid-column:1/-1}.bar{height:9px;background:rgba(255,255,255,.17);border-radius:99px;overflow:hidden;margin-top:10px}.bar span{display:block;height:100%;background:#67e8f9;border-radius:99px}.chat{margin-top:12px;background:#ecfeff;color:#134e4a;border-radius:16px;padding:12px;font-weight:700;font-size:.9rem}
+      section{padding:56px 0}.section-head{max-width:760px;margin-bottom:24px}.section-head p{color:var(--muted);font-size:1.05rem}
+      .grid{display:grid;gap:16px}.grid-3{grid-template-columns:repeat(3,1fr)}.grid-4{grid-template-columns:repeat(4,1fr)}.grid-2{grid-template-columns:repeat(2,1fr)}
+      .card{background:var(--card);border:1px solid var(--soft);border-radius:22px;padding:20px;box-shadow:0 12px 30px rgba(15,23,42,.04)}
+      .card p,.faq p{color:var(--muted)}.icon{font-size:1.5rem;margin-bottom:8px}.pain-card{border-color:#fecaca;background:#fffafa}.benefit-card{min-height:170px}
+      .ai{background:linear-gradient(180deg,#0b1220,#0f172a);color:#fff}.ai .section-head p,.ai .card p{color:#cbd5e1}.ai .card{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.13);color:#fff}.questions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.question{background:#ecfeff;color:#134e4a;border-radius:999px;padding:10px 13px;font-weight:800;font-size:.92rem}
+      .plans{background:#fff}.plan{position:relative;display:flex;flex-direction:column}.badge{position:absolute;top:-13px;right:16px;background:#fde68a;color:#78350f;border-radius:999px;padding:5px 10px;font-weight:900;font-size:.78rem}.plan .name{font-weight:900;font-size:1.25rem}.plan .amount{font-size:1.8rem;font-weight:950;letter-spacing:-.04em;margin:8px 0}.plan ul{padding-left:18px;color:var(--muted);margin:8px 0 18px}.plan .btn{margin-top:auto}
+      .trust{background:#f1f5f9}.faq details{background:#fff;border:1px solid var(--soft);border-radius:16px;padding:16px}.faq summary{font-weight:900;cursor:pointer}.final-cta{text-align:center;background:linear-gradient(135deg,#0f766e,#0ea5e9);color:#fff}.final-cta p{color:#e0f2fe;max-width:720px;margin:0 auto 22px}.final-cta .btn-secondary{color:var(--ink)}
+      footer{background:#0b1220;color:#cbd5e1;padding:32px 0}.footer-grid{display:grid;grid-template-columns:1.4fr .8fr .8fr;gap:20px}.footer-grid a{display:block;color:#e2e8f0;text-decoration:none;margin:6px 0}.small{font-size:.9rem;color:#94a3b8}
+      @media (max-width:900px){.hero-grid,.grid-3,.grid-4,.grid-2,.footer-grid{grid-template-columns:1fr}.links a:not(.btn){display:none}.hero{padding-top:44px}.dash{grid-template-columns:1fr}.wide{grid-column:auto}}
     </style>
-    <!-- Sin JavaScript no hay React que quite el splash: lo ocultamos para
-         dejar a la vista el contenido SEO estático que está debajo. -->
     <noscript><style>#mypos-splash{display:none!important}</style></noscript>
     <script type="module" crossorigin src="/assets/index-bYX4V_yX.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/react-vendor-DE9CMQDZ.js">
@@ -71,50 +117,245 @@
   </head>
   <body>
     <div id="root">
-      <!-- Splash con marca: se ve al instante y evita el "flash" de texto sin estilo.
-           React reemplaza todo el contenido de #root al montar, por lo que desaparece solo. -->
       <div id="mypos-splash" role="status" aria-label="Cargando MyPOS">
         <div class="ms-logo">My<span>POS</span></div>
         <div class="ms-spin"></div>
         <div class="ms-tag">Cargando tu sistema…</div>
       </div>
-      <!-- Contenido SEO estático: visible para rastreadores sin JS. React lo reemplaza al cargar. -->
-      <main style="max-width:960px;margin:0 auto;padding:24px;font-family:system-ui,Arial,sans-serif;color:#0f172a;line-height:1.6">
-        <header>
-          <h1>MyPOS.cl — El cerebro inteligente de tu negocio</h1>
-          <p><strong>Vende más, controla mejor, decide con datos.</strong> MyPOS integra ventas, caja, stock, reportes y documentos tributarios (boletas y facturas) desde una sola plataforma. Además, cuenta con un Copiloto de Inteligencia Artificial que te dice qué comprar, qué vender y dónde estás perdiendo plata. Planes desde $19.990 + IVA al mes, sin permanencia.</p>
-          <p>
-            <a href="/register?plan=mypos-start">Comenzar ahora</a> ·
-            <a href="/login">Iniciar sesión</a> ·
-            <a href="https://wa.me/56949139266?text=Hola,%20quiero%20información%20sobre%20MyPOS">Hablar por WhatsApp</a>
-          </p>
+
+      <!-- Contenido SEO/fallback: React reemplaza #root al montar. -->
+      <main class="page">
+        <div class="topbar">
+          <div class="wrap nav" aria-label="Navegación principal">
+            <a class="logo" href="https://www.mypos.cl/">My<span>POS</span>.cl</a>
+            <nav class="links">
+              <a href="#beneficios">Beneficios</a>
+              <a href="#ia">IA</a>
+              <a href="#planes">Planes</a>
+              <a href="#contacto">Contacto</a>
+              <a class="btn-link" href="/login">Ingresar</a>
+              <a class="btn btn-primary" href="https://wa.me/56949139266?text=Hola,%20quiero%20información%20sobre%20MyPOS">Hablar por WhatsApp</a>
+            </nav>
+          </div>
+        </div>
+
+        <header class="hero">
+          <div class="wrap hero-grid">
+            <div>
+              <div class="eyebrow">POS + DTE + Stock + IA para comercios chilenos</div>
+              <h1>El POS inteligente para controlar tu minimarket, farmacia, botillería o comercio</h1>
+              <p class="lead">Vende, emite boletas y facturas, controla caja, stock, compras, usuarios y reportes desde una sola plataforma simple, chilena y con IA integrada.</p>
+              <p class="pain-line">Deja de perder plata por desorden en caja, stock y compras.</p>
+              <p class="price">Planes desde $19.990 + IVA al mes · Sin permanencia</p>
+              <div class="cta-row">
+                <a class="btn btn-primary" href="https://wa.me/56949139266?text=Hola,%20quiero%20información%20sobre%20MyPOS">Hablar por WhatsApp</a>
+                <a class="btn btn-secondary" href="#planes">Ver planes</a>
+                <a class="btn-link" href="/login">Ingresar al sistema</a>
+              </div>
+              <div class="trust-row">
+                <span class="pill">Hecho en Chile</span>
+                <span class="pill">Soporte por WhatsApp</span>
+                <span class="pill">DTE SII</span>
+                <span class="pill">Web y multisucursal</span>
+              </div>
+            </div>
+            <aside class="mockup" aria-label="Vista referencial de MyPOS">
+              <div class="mock-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+              <div class="dash">
+                <div class="panel"><small>Ventas de hoy</small><strong>$428.900</strong><div class="bar"><span style="width:76%"></span></div></div>
+                <div class="panel"><small>Caja</small><strong>Cuadrada</strong><div class="bar"><span style="width:92%"></span></div></div>
+                <div class="panel"><small>Stock crítico</small><strong>18</strong><small>productos por reponer</small></div>
+                <div class="panel"><small>Producto top</small><strong>Bebidas</strong><small>alta rotación</small></div>
+                <div class="panel wide"><small>Copiloto IA</small><div class="chat">“Según tus ventas, conviene reponer bebidas, pan y snacks antes del fin de semana.”</div></div>
+              </div>
+            </aside>
+          </div>
         </header>
 
-        <section>
-          <h2>Todo tu negocio en una sola plataforma</h2>
-          <p>Venta rápida en POS, control de caja diaria, stock e inventario, DTE SII (boletas, facturas, notas de crédito y guías de despacho), usuarios y sucursales, y reportes de operación.</p>
+        <section id="dolor">
+          <div class="wrap">
+            <div class="section-head">
+              <h2>Tu negocio puede vender bien y aun así perder plata</h2>
+              <p>Caja descuadrada, stock desordenado, compras sin control, productos que se acaban, ventas sin reportes y documentos tributarios separados en distintos sistemas. MyPOS ordena todo eso en una sola cuenta.</p>
+            </div>
+            <div class="grid grid-4">
+              <div class="card pain-card">No sabes exactamente cuánto ganaste hoy.</div>
+              <div class="card pain-card">La caja no siempre cuadra.</div>
+              <div class="card pain-card">El stock no refleja la realidad.</div>
+              <div class="card pain-card">Compras tarde o compras de más.</div>
+              <div class="card pain-card">Se acaban productos importantes.</div>
+              <div class="card pain-card">No sabes qué productos dejan más margen.</div>
+              <div class="card pain-card">Pierdes tiempo emitiendo documentos.</div>
+              <div class="card pain-card">No tienes reportes simples para decidir.</div>
+            </div>
+          </div>
         </section>
 
-        <section>
-          <h2>Inteligencia Artificial Aplicada</h2>
-          <p>Un copiloto que conoce tu negocio. Pregúntale cuánto vendiste hoy, qué productos tienen stock crítico, qué comprar mañana o cuánto IVA debes este mes. Además, sube facturas de compra y la IA detecta productos y cantidades automáticamente.</p>
-          <p>Potenciado por Anthropic Claude, Google Gemini y OpenAI ChatGPT.</p>
+        <section id="beneficios">
+          <div class="wrap">
+            <div class="section-head">
+              <h2>Todo tu punto de venta en una sola plataforma</h2>
+              <p>MyPOS reúne ventas, documentos tributarios, caja, stock, compras, clientes, proveedores, usuarios, sucursales y reportes en un solo sistema fácil de usar.</p>
+            </div>
+            <div class="grid grid-3">
+              <article class="card benefit-card"><div class="icon">🛒</div><h3>Vende rápido</h3><p>Atiende clientes con un POS simple, emite boletas, facturas, guías y notas de crédito desde una sola pantalla.</p></article>
+              <article class="card benefit-card"><div class="icon">💵</div><h3>Controla caja</h3><p>Abre, cierra y revisa caja por turno, usuario y sucursal. Registra ingresos, retiros y diferencias.</p></article>
+              <article class="card benefit-card"><div class="icon">📦</div><h3>Ordena tu stock</h3><p>Administra productos, códigos de barra, compras, proveedores, inventario y movimientos de stock.</p></article>
+              <article class="card benefit-card"><div class="icon">📊</div><h3>Mira tus números</h3><p>Revisa ventas, productos más vendidos, movimientos, reportes y resultados por sucursal.</p></article>
+              <article class="card benefit-card"><div class="icon">🏪</div><h3>Administra sucursales</h3><p>Controla locales, cajas, usuarios, roles y permisos desde una sola cuenta.</p></article>
+              <article class="card benefit-card"><div class="icon">🤖</div><h3>Decide con IA</h3><p>Usa un copiloto inteligente para entender ventas, stock, compras y oportunidades de mejora.</p></article>
+            </div>
+          </div>
         </section>
 
-        <section>
-          <h2>Planes claros. Sin letra chica.</h2>
-          <ul>
-            <li>Start — $19.990 + IVA / mes (1 local)</li>
-            <li>Pro — $25.990 + IVA / mes (2 locales)</li>
-            <li>Cadena — $29.990 + IVA / mes (3 locales)</li>
-            <li>Escala — desde $39.990 + IVA / mes (4+ locales)</li>
-          </ul>
-          <p>Usuarios ilimitados según condiciones del plan. Sin permanencia.</p>
-          <p>Puesta en marcha guiada disponible desde $350.000.</p>
+        <section id="ia" class="ai">
+          <div class="wrap">
+            <div class="section-head">
+              <h2>IA aplicada al comercio real</h2>
+              <p>MyPOS incorpora un copiloto de IA para ayudarte a entender tu negocio sin revisar reportes complejos. Pregunta en lenguaje simple y recibe respuestas útiles para vender mejor, comprar mejor y controlar mejor.</p>
+            </div>
+            <div class="questions" aria-label="Ejemplos de preguntas para el copiloto IA">
+              <span class="question">¿Cuánto vendí hoy?</span>
+              <span class="question">¿Qué productos están bajos de stock?</span>
+              <span class="question">¿Qué debería comprar mañana?</span>
+              <span class="question">¿Qué productos se venden más?</span>
+              <span class="question">¿Dónde estoy perdiendo plata?</span>
+              <span class="question">¿Cuánto vendió cada sucursal?</span>
+              <span class="question">¿Qué productos tienen baja rotación?</span>
+            </div>
+            <div class="grid grid-2" style="margin-top:22px">
+              <article class="card"><h3>Ingreso de compras más rápido</h3><p>Sube una factura de compra en PDF o imagen y MyPOS te ayuda a reconocer productos, cantidades y costos para acelerar el ingreso al stock.</p></article>
+              <article class="card"><h3>IA con revisión del usuario</h3><p>La IA ayuda, sugiere y acelera, dejando siempre la revisión final al usuario. Así ganas velocidad sin perder control.</p></article>
+            </div>
+          </div>
+        </section>
+
+        <section id="rubros">
+          <div class="wrap">
+            <div class="section-head">
+              <h2>Diseñado para comercios chilenos</h2>
+              <p>MyPOS se adapta a distintos negocios que necesitan vender, emitir documentos, controlar stock y entender sus números sin sistemas complicados.</p>
+            </div>
+            <div class="grid grid-4">
+              <article class="card"><h3>Minimarkets</h3><p>Controla productos de alta rotación, caja diaria, compras, stock crítico y ventas por horario.</p></article>
+              <article class="card"><h3>Farmacias</h3><p>Administra ventas, documentos tributarios, proveedores, stock por sucursal y reportes de operación.</p></article>
+              <article class="card"><h3>Botillerías</h3><p>Vende rápido, controla inventario, usuarios, turnos, caja y horarios de mayor movimiento.</p></article>
+              <article class="card"><h3>Almacenes y comercio local</h3><p>Ordena ventas, documentos, compras y stock con un sistema simple y accesible.</p></article>
+            </div>
+          </div>
+        </section>
+
+        <section id="planes" class="plans">
+          <div class="wrap">
+            <div class="section-head">
+              <h2>Planes simples para crecer sin que el precio se dispare</h2>
+              <p>No cobramos por cada usuario. El plan se define principalmente por cantidad de locales.</p>
+            </div>
+            <div class="grid grid-4">
+              <article class="card plan">
+                <div class="name">MyPOS Start</div>
+                <div class="amount">$19.990</div>
+                <p><strong>+ IVA / mes</strong></p>
+                <p>Para 1 local que quiere ordenar ventas, caja, documentos y stock.</p>
+                <ul><li>1 local</li><li>POS completo</li><li>Boletas y facturas</li><li>Caja diaria</li><li>Stock, compras y reportes</li></ul>
+                <a class="btn btn-secondary" href="/register?plan=mypos-start">Comenzar con Start</a>
+              </article>
+              <article class="card plan">
+                <div class="badge">Más elegido</div>
+                <div class="name">MyPOS Pro</div>
+                <div class="amount">$25.990</div>
+                <p><strong>+ IVA / mes</strong></p>
+                <p>Para negocios con 2 locales que necesitan control por sucursal.</p>
+                <ul><li>2 locales</li><li>Todo lo de Start</li><li>Usuarios y roles</li><li>Reportes comparativos</li><li>Gestión centralizada</li></ul>
+                <a class="btn btn-primary" href="https://wa.me/56949139266?text=Hola,%20quiero%20el%20plan%20MyPOS%20Pro">Quiero este plan</a>
+              </article>
+              <article class="card plan">
+                <div class="name">MyPOS Cadena</div>
+                <div class="amount">$29.990</div>
+                <p><strong>+ IVA / mes</strong></p>
+                <p>Para negocios con 3 locales que quieren crecer sin cambiar de sistema.</p>
+                <ul><li>3 locales</li><li>Todo lo de Pro</li><li>Administración multisucursal</li><li>Reportes por local</li><li>Control centralizado</li></ul>
+                <a class="btn btn-secondary" href="https://wa.me/56949139266?text=Hola,%20quiero%20el%20plan%20MyPOS%20Cadena">Activar Cadena</a>
+              </article>
+              <article class="card plan">
+                <div class="name">MyPOS Escala</div>
+                <div class="amount">Desde $39.990</div>
+                <p><strong>+ IVA / mes</strong></p>
+                <p>Para 4 o más locales que necesitan una solución escalable.</p>
+                <ul><li>4 o más locales</li><li>Configuración según operación</li><li>Soporte y puesta en marcha</li><li>Opciones de adaptación</li><li>Escalabilidad por negocio</li></ul>
+                <a class="btn btn-secondary" href="https://wa.me/56949139266?text=Hola,%20quiero%20cotizar%20MyPOS%20Escala">Cotizar por WhatsApp</a>
+              </article>
+            </div>
+            <p class="small" style="margin-top:16px">Activación estándar para planes simples. Puesta en marcha guiada, migración, configuración avanzada o capacitación desde $350.000 según necesidad del negocio.</p>
+          </div>
+        </section>
+
+        <section id="confianza" class="trust">
+          <div class="wrap">
+            <div class="section-head">
+              <h2>Un sistema chileno, creado para negocios reales</h2>
+              <p>MyPOS está pensado para comercios que necesitan vender, emitir documentos, controlar stock y entender sus números sin depender de sistemas difíciles o costosos.</p>
+            </div>
+            <div class="grid grid-4">
+              <div class="card">Hecho en Chile</div>
+              <div class="card">Soporte por WhatsApp</div>
+              <div class="card">Compatible con documentos tributarios electrónicos</div>
+              <div class="card">Sin permanencia</div>
+              <div class="card">Sistema web</div>
+              <div class="card">Multiusuario</div>
+              <div class="card">Multisucursal</div>
+              <div class="card">Pensado para comercios reales</div>
+            </div>
+          </div>
+        </section>
+
+        <section id="faq" class="faq">
+          <div class="wrap">
+            <div class="section-head"><h2>Preguntas frecuentes</h2></div>
+            <div class="grid grid-2">
+              <details open><summary>¿MyPOS emite boletas y facturas?</summary><p>Sí. MyPOS está pensado para operar con documentos tributarios electrónicos como boletas, facturas, notas de crédito y guías de despacho.</p></details>
+              <details><summary>¿Necesito instalar algo?</summary><p>No necesariamente. MyPOS funciona como plataforma web, accesible desde computador o dispositivo compatible.</p></details>
+              <details><summary>¿Sirve para más de un local?</summary><p>Sí. MyPOS permite administrar locales, cajas, usuarios y reportes por sucursal según el plan contratado.</p></details>
+              <details><summary>¿Puedo controlar stock?</summary><p>Sí. Puedes controlar productos, compras, proveedores, stock por local y movimientos de inventario.</p></details>
+              <details><summary>¿La IA reemplaza al dueño?</summary><p>No. La IA ayuda a analizar información, sugerir compras y detectar oportunidades, pero la decisión final siempre la toma el usuario.</p></details>
+              <details><summary>¿Cuánto cuesta partir?</summary><p>Los planes comienzan desde $19.990 + IVA al mes, sin permanencia. Servicios de puesta en marcha avanzada pueden tener costo adicional según necesidad.</p></details>
+            </div>
+          </div>
+        </section>
+
+        <section id="contacto" class="final-cta">
+          <div class="wrap">
+            <h2>Empieza a ordenar tu negocio con MyPOS</h2>
+            <p>Vende, emite documentos, controla caja y stock, y usa IA para tomar mejores decisiones desde una sola plataforma.</p>
+            <div class="cta-row" style="justify-content:center">
+              <a class="btn btn-secondary" href="https://wa.me/56949139266?text=Hola,%20quiero%20información%20sobre%20MyPOS">Hablar por WhatsApp</a>
+              <a class="btn btn-secondary" href="#planes">Ver planes</a>
+              <a class="btn btn-secondary" href="/register?plan=mypos-start">Crear cuenta</a>
+            </div>
+          </div>
         </section>
 
         <footer>
-          <p>MyPOS — Hecho en Chile. Atención Lun-Sáb 9:00-20:00. Emisor Autorizado DTE (Res. 80). Sitio: <a href="https://www.mypos.cl/">www.mypos.cl</a></p>
+          <div class="wrap footer-grid">
+            <div>
+              <div class="logo" style="color:#fff">My<span>POS</span>.cl</div>
+              <p class="small">POS inteligente para comercios chilenos. Vende, controla stock, emite documentos y toma mejores decisiones con IA.</p>
+              <p class="small">© MyPOS.cl. Todos los derechos reservados.</p>
+            </div>
+            <div>
+              <strong>Secciones</strong>
+              <a href="#beneficios">Beneficios</a>
+              <a href="#ia">IA</a>
+              <a href="#planes">Planes</a>
+              <a href="#contacto">Contacto</a>
+            </div>
+            <div>
+              <strong>Contacto</strong>
+              <a href="https://wa.me/56949139266?text=Hola,%20quiero%20información%20sobre%20MyPOS">WhatsApp +56 9 4913 9266</a>
+              <a href="https://www.mypos.cl/">www.mypos.cl</a>
+              <a href="/login">Ingresar al sistema</a>
+            </div>
+          </div>
         </footer>
       </main>
     </div>
