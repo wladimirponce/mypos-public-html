@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.1.8"
+VERSION = "1.2.0"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
@@ -1243,6 +1243,43 @@ def balanza_rcth():
 # ─── Fin DIGI Bridge ──────────────────────────────────────────────────────────
 
 
+def _auto_update() -> None:
+    """Descarga la version remota y se actualiza si la version es distinta.
+    Se salta si MYPOS_NO_AUTOUPDATE=1 o si el servidor no es alcanzable (timeout 8s).
+    Al actualizar lanza el nuevo proceso y termina el actual (INICIAR_*.bat lo reinicia).
+    """
+    if os.environ.get("MYPOS_NO_AUTOUPDATE") == "1":
+        return
+    update_url = "https://mypos.cl/descargas/mypos_print_server.py"
+    try:
+        req = urllib.request.Request(update_url, headers={"User-Agent": f"MyPOS-PrintServer/{VERSION}"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            remote_src = resp.read().decode("utf-8", errors="replace")
+
+        import re as _re
+        m = _re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', remote_src, _re.MULTILINE)
+        if not m:
+            return
+        remote_ver = m.group(1)
+        if remote_ver == VERSION:
+            return
+
+        my_path = os.path.abspath(__file__)
+        print(f"[AUTO-UPDATE] {VERSION} → {remote_ver}  actualizando {my_path} ...")
+        with open(my_path, "w", encoding="utf-8") as fh:
+            fh.write(remote_src)
+        print("[AUTO-UPDATE] Archivo reemplazado. Reiniciando proceso...")
+
+        import subprocess, sys
+        subprocess.Popen([sys.executable, my_path])
+        sys.exit(0)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"[AUTO-UPDATE] No disponible (no critico): {exc}")
+
+
 if __name__ == "__main__":
+    _auto_update()
     print(f"MyPOS Print Server {VERSION} listening on http://{HOST}:{PORT}")
     app.run(host=HOST, port=PORT, debug=False)
