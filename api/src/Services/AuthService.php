@@ -31,6 +31,7 @@ final class AuthService
         $email = trim(strtolower($data['email'] ?? ''));
         $password = trim($data['password'] ?? '');
         $planId = PlanCatalog::normalize((string) ($data['plan_id'] ?? 'mypos-start'));
+        $requiresEmailVerification = $this->requiresEmailVerification();
 
         // Validaciones básicas
         if ($rutEmpresa === '' || $razonSocial === '' || $nombreUsuario === '' || $email === '' || $password === '') {
@@ -126,18 +127,37 @@ final class AuthService
                 'plan_id' => $planId,
             ]);
 
+            if (!$requiresEmailVerification) {
+                $this->repository->verifyUserEmail($userId);
+            }
+
             $connection->commit();
 
             // Enviar correo de verificación
-            $mailService = new MailService();
-            $mailService->enviarCorreoVerificacion($email, $nombreUsuario, $razonSocial, $token);
-
-            return ['require_verification' => true, 'email' => $email];
-
         } catch (\Throwable $exception) {
-            $connection->rollBack();
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
             throw $exception;
         }
+
+        if ($requiresEmailVerification) {
+            try {
+                $mailService = new MailService();
+                $mailService->enviarCorreoVerificacion($email, $nombreUsuario, $razonSocial, $token);
+            } catch (\Throwable $exception) {
+                error_log('No se pudo enviar correo de verificacion: ' . $exception->getMessage());
+            }
+
+            return ['require_verification' => true, 'email' => $email];
+        }
+
+        $user = $this->repository->findUserById($userId);
+        if ($user === null) {
+            throw new HttpException('Usuario no encontrado despues del registro', 500);
+        }
+
+        return $this->issueLoginResponse($user);
     }
 
     /**
@@ -178,7 +198,7 @@ final class AuthService
             throw new HttpException('Credenciales incorrectas', 401);
         }
 
-        if (isset($user['email_verificado']) && (int) $user['email_verificado'] !== 1) {
+        if ($this->requiresEmailVerification() && isset($user['email_verificado']) && (int) $user['email_verificado'] !== 1) {
             throw new HttpException('Debes verificar tu dirección de correo electrónico antes de iniciar sesión. Te hemos enviado un correo con instrucciones.', 403, ['email_unverified' => true]);
         }
 
@@ -294,5 +314,44 @@ final class AuthService
             'nombre' => (string) $user['nombre'],
             'email' => (string) $user['email'],
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $user
+     * @return array<string, mixed>
+     */
+    private function issueLoginResponse(array $user): array
+    {
+        $now = time();
+        $token = Auth::issueToken([
+            'user_id' => (int) $user['id'],
+            'email' => (string) $user['email'],
+            'iat' => $now,
+            'exp' => $now + 28800,
+        ]);
+
+        $this->repository->updateLastLogin((int) $user['id']);
+        AuditoriaService::registrarEvento([
+            'usuario_id' => (int) $user['id'],
+            'modulo' => 'auth',
+            'accion' => 'login_exitoso',
+            'entidad' => 'usuarios',
+            'entidad_id' => (int) $user['id'],
+            'descripcion' => 'Login correcto',
+            'metadata' => ['email' => (string) $user['email']],
+        ]);
+
+        return [
+            'token' => $token,
+            'user' => $this->publicUser($user),
+            'empresas' => $this->repository->empresasByUserId((int) $user['id']),
+        ];
+    }
+
+    private function requiresEmailVerification(): bool
+    {
+        $raw = $_ENV['REQUIRE_EMAIL_VERIFICATION'] ?? getenv('REQUIRE_EMAIL_VERIFICATION') ?: '0';
+
+        return filter_var($raw, FILTER_VALIDATE_BOOLEAN);
     }
 }
