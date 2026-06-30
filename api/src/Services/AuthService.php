@@ -304,6 +304,43 @@ final class AuthService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function resendVerificationEmail(string $email): array
+    {
+        $email = trim(strtolower($email));
+
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new HttpException('Ingresa un email valido para reenviar la verificacion.', 422, [
+                'email' => ['Email invalido'],
+            ]);
+        }
+
+        $user = $this->repository->findUserByEmail($email);
+        if ($user === null || (int) ($user['email_verificado'] ?? 0) === 1 || (int) ($user['activo'] ?? 0) !== 1) {
+            return ['sent' => true];
+        }
+
+        $token = trim((string) ($user['email_verification_token'] ?? ''));
+        if ($token === '') {
+            $token = bin2hex(random_bytes(16));
+            $this->repository->setUserVerificationToken((int) $user['id'], $token);
+        }
+
+        $empresas = $this->repository->empresasByUserId((int) $user['id']);
+        $razonSocial = (string) ($empresas[0]['razon_social'] ?? $empresas[0]['nombre_fantasia'] ?? 'tu empresa');
+
+        (new MailService())->enviarCorreoVerificacion(
+            $email,
+            (string) ($user['nombre'] ?? 'Usuario MyPOS'),
+            $razonSocial,
+            $token
+        );
+
+        return ['sent' => true];
+    }
+
+    /**
      * @param array<string, mixed> $user
      * @return array<string, mixed>
      */

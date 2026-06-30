@@ -83,6 +83,17 @@ final class AuthController
         }, 'Correo verificado correctamente');
     }
 
+    public function resendVerificationEmail(): void
+    {
+        $this->respond(function (): array {
+            $payload = Request::json();
+
+            return $this->service->resendVerificationEmail(
+                (string) ($payload['email'] ?? '')
+            );
+        }, 'Si la cuenta requiere verificacion, enviaremos un nuevo enlace.');
+    }
+
     private function respond(callable $callback, ?string $message = null): void
     {
         try {

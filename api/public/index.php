@@ -290,6 +290,7 @@ $router->post('/api/v1/auth/login', [$authController, 'login']);
 $router->get('/api/v1/auth/me', [$authController, 'me']);
 $router->post('/api/v1/auth/logout', [$authController, 'logout']);
 $router->post('/api/v1/auth/verify-email', [$authController, 'verifyEmail']);
+$router->post('/api/v1/auth/resend-verification', [$authController, 'resendVerificationEmail']);
 
 // Verificación pública de boletas (sin autenticación) — mypos.cl/boleta
 $publicController = new PublicController();
