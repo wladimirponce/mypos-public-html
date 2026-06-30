@@ -638,13 +638,20 @@ final class StockRepository
 
     public function locationHasMovements(int $id, int $empresaId): bool
     {
+        // Placeholders distintos: PDO con EMULATE_PREPARES=false no permite reusar
+        // el mismo placeholder con nombre (lanza SQLSTATE[HY093]).
         $statement = $this->connection->prepare(
             'SELECT 1 FROM stock_movimientos
-             WHERE (ubicacion_id = :id OR ubicacion_origen_id = :id OR ubicacion_destino_id = :id)
+             WHERE (ubicacion_id = :id_ubic OR ubicacion_origen_id = :id_origen OR ubicacion_destino_id = :id_destino)
                AND empresa_id = :empresa_id
              LIMIT 1'
         );
-        $statement->execute(['id' => $id, 'empresa_id' => $empresaId]);
+        $statement->execute([
+            'id_ubic'    => $id,
+            'id_origen'  => $id,
+            'id_destino' => $id,
+            'empresa_id' => $empresaId,
+        ]);
 
         return (bool) $statement->fetchColumn();
     }

@@ -121,10 +121,7 @@ final class CompraController
                 $detalle .= ' | SQLSTATE=' . implode(' / ', array_map('strval', $exception->errorInfo));
             }
             error_log($detalle);
-
-            // TEMPORAL (debug confirmacion de compra): exponer el detalle al cliente para
-            // diagnosticar el 500. REVERTIR a 'Error interno del servidor' tras identificar la causa.
-            Response::error($detalle, null, 500);
+            Response::error('Error interno del servidor', null, 500);
         }
     }
 

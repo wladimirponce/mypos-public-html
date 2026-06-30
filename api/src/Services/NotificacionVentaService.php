@@ -92,7 +92,7 @@ final class NotificacionVentaService
                 ec.logo_url   AS empresa_logo
              FROM ventas v
              JOIN documentos_emitidos de
-                ON de.id = :doc_id AND de.empresa_id = :empresa_id
+                ON de.id = :doc_id AND de.empresa_id = :empresa_id_doc
              LEFT JOIN clientes c
                 ON c.id = v.cliente_id AND c.empresa_id = v.empresa_id
              LEFT JOIN empresa_configuracion ec
@@ -100,10 +100,13 @@ final class NotificacionVentaService
              WHERE v.id = :venta_id AND v.empresa_id = :empresa_id
              LIMIT 1'
         );
+        // Placeholders distintos para empresa_id: PDO con EMULATE_PREPARES=false no
+        // permite reusar el mismo placeholder con nombre (lanza SQLSTATE[HY093]).
         $stmt->execute([
-            'doc_id'     => $documentoEmitidoId,
-            'empresa_id' => $empresaId,
-            'venta_id'   => $ventaId,
+            'doc_id'         => $documentoEmitidoId,
+            'empresa_id_doc' => $empresaId,
+            'empresa_id'     => $empresaId,
+            'venta_id'       => $ventaId,
         ]);
         $row = $stmt->fetch();
 
