@@ -323,10 +323,8 @@ final class VentaService
                     $response['dte_estado']        = $emision['estado'] ?? null;
                     $response['dte_emision_id']    = $emision['dte_emision_id'] ?? null;
                     $response['dte_modo']          = $emision['modo'] ?? null;
-                    if (!empty($response['dte_folio']) && !empty($printContext['rut_emisor'])) {
-                        $response['dte_verify_url'] = 'https://www.mypos.cl/boleta?rut='
-                            . rawurlencode((string) $printContext['rut_emisor'])
-                            . '&folio=' . (int) $response['dte_folio'];
+                    if (!empty($response['dte_folio'])) {
+                        $response['dte_verify_url'] = 'https://www.mypos.cl/boleta';
                     }
                     if (empty($response['dte_print_payload'])) {
                         $modoDte = strtoupper((string) ($emision['modo'] ?? ''));

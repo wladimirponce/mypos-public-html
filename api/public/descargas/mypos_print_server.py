@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
@@ -392,7 +392,7 @@ def ticket_pdf_lines(data: dict[str, Any], kind: str = "ticket") -> list[str]:
         if resol:
             lines.append(resol.center(width))
         lines.append("Verifique documento: www.sii.cl".center(width))
-        verify_url = text(data.get("verify_url"), width)
+        verify_url = text(data.get("verify_url") or "www.mypos.cl/boleta", width)
         if verify_url:
             lines.append(verify_url.center(width))
     lines.append("")
@@ -469,7 +469,7 @@ def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
         y += 10
 
         left(text(data.get("razon_social") or data.get("nombre_fantasia"), 70) or "Empresa no informada", bold_font)
-        for key, label in (("giro", "Giro"), ("direccion", "Casa Matriz"), ("comuna", "Comuna"), ("ciudad", "Ciudad")):
+        for key, label in (("giro", "Giro"), ("direccion", "Direccion"), ("comuna", "Comuna"), ("ciudad", "Ciudad")):
             value = text(data.get(key), 70)
             if value:
                 left(f"{label}: {value}")
@@ -512,7 +512,7 @@ def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
         if resol:
             center(resol)
         center("Verifique documento: www.sii.cl")
-        verify_url = text(data.get("verify_url"), 70)
+        verify_url = text(data.get("verify_url") or "www.mypos.cl/boleta", 70)
         if verify_url:
             center(verify_url)
 
@@ -902,7 +902,7 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
     ticket.extend(enc((text(data.get("razon_social") or data.get("nombre_fantasia"), width) or "Empresa no informada") + "\n"))
     ticket.extend(CMD_BOLD_OFF)
 
-    for key, label in (("giro", "Giro"), ("direccion", "Casa Matriz"), ("comuna", "Comuna"), ("ciudad", "Ciudad"), ("telefono", "Telefono"), ("sitio_web", "Web")):
+    for key, label in (("giro", "Giro"), ("direccion", "Direccion"), ("comuna", "Comuna"), ("ciudad", "Ciudad"), ("telefono", "Telefono"), ("sitio_web", "Web")):
         value = text(data.get(key), width)
         if value:
             ticket.extend(enc((f"{label}: " if label else "") + value + "\n"))
@@ -924,8 +924,7 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
     if resol:
         ticket.extend(enc(resol + "\n"))
     ticket.extend(enc("Verifique documento: www.sii.cl\n"))
-    if data.get("verify_url"):
-        ticket.extend(enc(text(data.get("verify_url"), width) + "\n"))
+    ticket.extend(enc(text(data.get("verify_url") or "www.mypos.cl/boleta", width) + "\n"))
     ticket.extend(CMD_FEED_CUT)
     return bytes(ticket)
 

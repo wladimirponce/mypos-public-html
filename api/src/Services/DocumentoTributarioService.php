@@ -97,7 +97,7 @@ final class DocumentoTributarioService
                 'folio_origen' => $folioOrigin,
                 'estado' => $status,
                 'total' => (int) $sale['total'],
-                'fecha_emision' => (new DateTimeImmutable())->format('Y-m-d H:i:s'),
+                'fecha_emision' => (new DateTimeImmutable('now', new \DateTimeZone('America/Santiago')))->format('Y-m-d H:i:s'),
                 'rut_receptor' => $receiver['rut_receptor'],
                 'razon_social_receptor' => $receiver['razon_social_receptor'],
                 'giro_receptor' => $receiver['giro_receptor'],

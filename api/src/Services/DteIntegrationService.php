@@ -328,10 +328,10 @@ final class DteIntegrationService
                 'razon_social' => $empresa['razon_social'] ?? null,
                 'nombre_fantasia' => $empresa['nombre_fantasia'] ?? null,
                 'giro' => $empresa['giro'] ?? null,
-                'direccion' => $sucursal['direccion'] ?? $empresa['direccion'] ?? null,
-                'comuna' => $sucursal['comuna'] ?? $empresa['comuna'] ?? null,
-                'ciudad' => $sucursal['ciudad'] ?? $empresa['ciudad'] ?? null,
-                'telefono' => $sucursal['telefono'] ?? $empresa['telefono_contacto'] ?? null,
+                'direccion' => $this->firstNonEmpty($sucursal['direccion'] ?? null, $empresa['direccion'] ?? null),
+                'comuna' => $this->firstNonEmpty($sucursal['comuna'] ?? null, $empresa['comuna'] ?? null),
+                'ciudad' => $this->firstNonEmpty($sucursal['ciudad'] ?? null, $empresa['ciudad'] ?? null),
+                'telefono' => $this->firstNonEmpty($sucursal['telefono'] ?? null, $empresa['telefono_contacto'] ?? null),
                 'sitio_web' => $empresa['sitio_web'] ?? null,
             ],
             'receptor' => [
@@ -983,7 +983,7 @@ final class DteIntegrationService
             'tipo' => 'boleta_electronica_dte',
             'tipo_dte' => (int) ($generate['tipo'] ?? $document['tipo_dte']),
             'folio_dte' => (int) ($generate['folio'] ?? $document['folio']),
-            'fecha_dte' => (string) $document['fecha_emision'],
+            'fecha_dte' => $this->formatPrintDate($document['fecha_emision'] ?? null),
             'track_id' => isset($send['trackId']) ? (string) $send['trackId'] : null,
             'ted_xml' => $tedXml,
             // El TED está en ISO-8859-1 (incluye el CAF con Ñ/tildes). En base64
@@ -1010,8 +1010,7 @@ final class DteIntegrationService
             'fch_resol' => $generate['fch_resol'] ?? null,
             // Link de verificación pública en MyPOS (se imprime abajo en el ticket):
             // el cliente puede ver la boleta por RUT + folio sin login.
-            'verify_url' => 'www.mypos.cl/boleta?rut=' . rawurlencode((string) ($emisor['rut'] ?? ''))
-                . '&folio=' . (int) ($generate['folio'] ?? $document['folio']),
+            'verify_url' => 'www.mypos.cl/boleta',
             'total' => (int) $document['total'],
             'neto' => (int) $document['neto'],
             'iva' => (int) $document['impuestos'],
@@ -1039,10 +1038,10 @@ final class DteIntegrationService
             'razon_social' => $empresa['razon_social'] ?? null,
             'nombre_fantasia' => $empresa['nombre_fantasia'] ?? null,
             'giro' => $empresa['giro'] ?? null,
-            'direccion' => $sucursal['direccion'] ?? $empresa['direccion'] ?? null,
-            'comuna' => $sucursal['comuna'] ?? $empresa['comuna'] ?? null,
-            'ciudad' => $sucursal['ciudad'] ?? $empresa['ciudad'] ?? null,
-            'telefono' => $sucursal['telefono'] ?? $empresa['telefono_contacto'] ?? null,
+            'direccion' => $this->firstNonEmpty($sucursal['direccion'] ?? null, $empresa['direccion'] ?? null),
+            'comuna' => $this->firstNonEmpty($sucursal['comuna'] ?? null, $empresa['comuna'] ?? null),
+            'ciudad' => $this->firstNonEmpty($sucursal['ciudad'] ?? null, $empresa['ciudad'] ?? null),
+            'telefono' => $this->firstNonEmpty($sucursal['telefono'] ?? null, $empresa['telefono_contacto'] ?? null),
             'sitio_web' => $empresa['sitio_web'] ?? null,
         ];
     }
@@ -1320,6 +1319,34 @@ final class DteIntegrationService
         }
 
         return trim((string) $value);
+    }
+
+    private function firstNonEmpty(mixed ...$values): ?string
+    {
+        foreach ($values as $value) {
+            $string = $this->nullableString($value);
+            if ($string !== null) {
+                return $string;
+            }
+        }
+
+        return null;
+    }
+
+    private function formatPrintDate(mixed $value): string
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return (new DateTimeImmutable('now', new \DateTimeZone('America/Santiago')))->format('Y-m-d H:i:s');
+        }
+
+        try {
+            return (new DateTimeImmutable($raw, new \DateTimeZone('America/Santiago')))
+                ->setTimezone(new \DateTimeZone('America/Santiago'))
+                ->format('Y-m-d H:i:s');
+        } catch (Throwable) {
+            return $raw;
+        }
     }
 
     private function looksLikeLocalPath(string $path): bool
