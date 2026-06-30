@@ -28,8 +28,9 @@ final class StockController
             $sucursalId = $this->queryInt('sucursal_id');
             $page       = max(1, $this->queryInt('page') ?: 1);
             $perPage    = max(1, min($this->queryInt('per_page') ?: 200, 500));
+            $soloGestionados = $this->queryBool('solo_gestionados');
 
-            return $this->service->listarStock($empresaId, $sucursalId, $_GET['q'] ?? null, $page, $perPage);
+            return $this->service->listarStock($empresaId, $sucursalId, $_GET['q'] ?? null, $page, $perPage, $soloGestionados);
         });
     }
 
@@ -91,8 +92,9 @@ final class StockController
             $ubicacionId = (int) $params['ubicacion_id'];
             $page        = max(1, $this->queryInt('page') ?: 1);
             $perPage     = max(1, min($this->queryInt('per_page') ?: 200, 500));
+            $soloGestionados = $this->queryBool('solo_gestionados');
 
-            return $this->service->listarStockUbicacion($empresaId, $ubicacionId, $_GET['q'] ?? null, $page, $perPage);
+            return $this->service->listarStockUbicacion($empresaId, $ubicacionId, $_GET['q'] ?? null, $page, $perPage, $soloGestionados);
         });
     }
 
@@ -172,6 +174,13 @@ final class StockController
     private function queryInt(string $key): int
     {
         return (int) ($_GET[$key] ?? 0);
+    }
+
+    private function queryBool(string $key): bool
+    {
+        $value = $_GET[$key] ?? null;
+
+        return $value === '1' || $value === 'true' || $value === 1 || $value === true;
     }
 
     private function requestEmpresaId(): int

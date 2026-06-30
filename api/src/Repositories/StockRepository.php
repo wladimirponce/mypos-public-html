@@ -264,7 +264,7 @@ final class StockRepository
         return is_array($row) ? $row : null;
     }
 
-    public function listStock(int $empresaId, int $sucursalId, ?string $q, int $limit = 200, int $offset = 0): array
+    public function listStock(int $empresaId, int $sucursalId, ?string $q, int $limit = 200, int $offset = 0, bool $soloGestionados = false): array
     {
         $sql = 'SELECT p.id AS producto_id, p.codigo, p.nombre, r.nombre AS rubro,
                        COALESCE(ss.cantidad, 0.000) AS cantidad,
@@ -279,6 +279,14 @@ final class StockRepository
                 WHERE p.empresa_id = :empresa_id
                   AND p.activo = 1
                   AND p.controla_stock = 1';
+
+        // Solo productos con stock inicializado en la sucursal (los que el cliente
+        // realmente administra), no todo el catalogo. La fila en stock_sucursal solo
+        // existe cuando hubo carga inicial, ajuste, compra o venta del producto.
+        if ($soloGestionados) {
+            $sql .= ' AND ss.id IS NOT NULL';
+        }
+
         $params = ['empresa_id' => $empresaId, 'sucursal_id' => $sucursalId];
 
         if ($q !== null && trim($q) !== '') {
@@ -306,11 +314,22 @@ final class StockRepository
         return $statement->fetchAll();
     }
 
-    public function countStock(int $empresaId, int $sucursalId, ?string $q): int
+    public function countStock(int $empresaId, int $sucursalId, ?string $q, bool $soloGestionados = false): int
     {
         $sql = 'SELECT COUNT(*) FROM productos p
                 WHERE p.empresa_id = :empresa_id AND p.activo = 1 AND p.controla_stock = 1';
         $params = ['empresa_id' => $empresaId];
+
+        // Cuenta solo lo gestionado para que la paginacion coincida con listStock().
+        if ($soloGestionados) {
+            $sql .= ' AND EXISTS (
+                        SELECT 1 FROM stock_sucursal ss
+                        WHERE ss.producto_id = p.id
+                          AND ss.empresa_id = p.empresa_id
+                          AND ss.sucursal_id = :sucursal_id
+                      )';
+            $params['sucursal_id'] = $sucursalId;
+        }
 
         if ($q !== null && trim($q) !== '') {
             $sql .= ' AND (p.nombre LIKE :q_nombre OR p.codigo LIKE :q_codigo OR p.sku LIKE :q_sku
@@ -334,7 +353,7 @@ final class StockRepository
         return (int) $statement->fetchColumn();
     }
 
-    public function listStockByLocation(int $empresaId, int $ubicacionId, ?string $q, int $limit = 200, int $offset = 0): array
+    public function listStockByLocation(int $empresaId, int $ubicacionId, ?string $q, int $limit = 200, int $offset = 0, bool $soloGestionados = false): array
     {
         $sql = 'SELECT p.id AS producto_id, p.codigo, p.nombre, r.nombre AS rubro,
                        u.id AS ubicacion_id, u.codigo AS ubicacion_codigo, u.nombre AS ubicacion_nombre,
@@ -353,6 +372,12 @@ final class StockRepository
                 WHERE p.empresa_id = :empresa_id
                   AND p.activo = 1
                   AND p.controla_stock = 1';
+
+        // Solo productos con stock inicializado en esta bodega/ubicacion.
+        if ($soloGestionados) {
+            $sql .= ' AND su.id IS NOT NULL';
+        }
+
         $params = ['empresa_id' => $empresaId, 'ubicacion_id' => $ubicacionId];
 
         if ($q !== null && trim($q) !== '') {

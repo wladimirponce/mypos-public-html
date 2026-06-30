@@ -53,7 +53,7 @@ final class StockService
         return $stock;
     }
 
-    public function listarStock(int $empresaId, int $sucursalId, ?string $q = null, int $page = 1, int $perPage = 200): array
+    public function listarStock(int $empresaId, int $sucursalId, ?string $q = null, int $page = 1, int $perPage = 200, bool $soloGestionados = false): array
     {
         if ($empresaId <= 0 || $sucursalId <= 0) {
             throw new HttpException('Error de validación', 422, [
@@ -68,10 +68,10 @@ final class StockService
 
         $limit  = max(1, min($perPage, 500));
         $offset = max(0, ($page - 1) * $limit);
-        $total  = $this->repository->countStock($empresaId, $sucursalId, $q);
+        $total  = $this->repository->countStock($empresaId, $sucursalId, $q, $soloGestionados);
 
         return [
-            'stock'       => $this->repository->listStock($empresaId, $sucursalId, $q, $limit, $offset),
+            'stock'       => $this->repository->listStock($empresaId, $sucursalId, $q, $limit, $offset, $soloGestionados),
             'total'       => $total,
             'page'        => $page,
             'per_page'    => $limit,
@@ -79,7 +79,7 @@ final class StockService
         ];
     }
 
-    public function listarStockUbicacion(int $empresaId, int $ubicacionId, ?string $q = null, int $page = 1, int $perPage = 200): array
+    public function listarStockUbicacion(int $empresaId, int $ubicacionId, ?string $q = null, int $page = 1, int $perPage = 200, bool $soloGestionados = false): array
     {
         if ($empresaId <= 0 || $ubicacionId <= 0) {
             throw new HttpException('Error de validacion', 422);
@@ -93,7 +93,7 @@ final class StockService
         $offset = max(0, ($page - 1) * $limit);
 
         return [
-            'stock'    => $this->repository->listStockByLocation($empresaId, $ubicacionId, $q, $limit, $offset),
+            'stock'    => $this->repository->listStockByLocation($empresaId, $ubicacionId, $q, $limit, $offset, $soloGestionados),
             'page'     => $page,
             'per_page' => $limit,
         ];
