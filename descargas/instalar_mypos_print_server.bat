@@ -78,24 +78,41 @@ call :log "      Python listo usando: %PY_CMD%"
 REM Paso 2: Visual C++ Redistributable.
 echo.
 call :log "[2/6] Verificando Visual C++ Redistributable..."
-reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" /v Version >nul 2>&1
+call :vc_runtime_installed
 if %ERRORLEVEL% EQU 0 (
     call :log "      VC++ ya instalado."
 ) else (
     call :log "[2/6] Instalando Visual C++ Redistributable..."
+    set "VC_EXIT=0"
     if exist "%~dp0VC_redist.x64.exe" (
         call :log "      Usando instalador local..."
         start /wait "" "%~dp0VC_redist.x64.exe" /quiet /norestart
+        set "VC_EXIT=!ERRORLEVEL!"
     ) else (
         call :log "      Descargando desde Microsoft..."
         powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%VC_URL%' -OutFile '%TEMP%\vc_redist.x64.exe' -UseBasicParsing" >> "%LOG_FILE%" 2>&1
-        if %ERRORLEVEL% NEQ 0 call :fail "No se pudo descargar Visual C++ Redistributable."
-        start /wait "" "%TEMP%\vc_redist.x64.exe" /quiet /norestart
-        del "%TEMP%\vc_redist.x64.exe" >nul 2>&1
+        if !ERRORLEVEL! NEQ 0 (
+            set "VC_EXIT=DOWNLOAD_FAILED"
+        ) else (
+            start /wait "" "%TEMP%\vc_redist.x64.exe" /quiet /norestart
+            set "VC_EXIT=!ERRORLEVEL!"
+            del "%TEMP%\vc_redist.x64.exe" >nul 2>&1
+        )
     )
-    set "VC_EXIT=%ERRORLEVEL%"
-    if not "!VC_EXIT!"=="0" if not "!VC_EXIT!"=="3010" if not "!VC_EXIT!"=="1638" call :fail "Visual C++ Redistributable fallo con codigo !VC_EXIT!."
-    call :log "      VC++ instalado."
+    if "!VC_EXIT!"=="0" (
+        call :log "      VC++ instalado."
+    ) else if "!VC_EXIT!"=="3010" (
+        call :log "      VC++ instalado. Windows puede requerir reinicio."
+    ) else if "!VC_EXIT!"=="1638" (
+        call :log "      VC++ ya tenia otra version instalada."
+    ) else (
+        call :vc_runtime_installed
+        if !ERRORLEVEL! EQU 0 (
+            call :log "      VC++ parece instalado aunque el instalador devolvio codigo !VC_EXIT!."
+        ) else (
+            call :log "      ADVERTENCIA: Visual C++ Redistributable devolvio codigo !VC_EXIT!. Se continua; si pywin32 falla, instale VC++ manualmente."
+        )
+    )
 )
 
 REM Paso 3: Directorio de instalacion.
@@ -205,6 +222,13 @@ for /f "usebackq tokens=2,*" %%a in (`reg query "HKCU\Environment" /v PATH 2^>nu
 )
 set "PATH=%LOCALAPPDATA%\Programs\Python\Python311;%LOCALAPPDATA%\Programs\Python\Python311\Scripts;%PATH%"
 exit /b 0
+
+:vc_runtime_installed
+reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" /v Version >nul 2>&1
+if %ERRORLEVEL% EQU 0 exit /b 0
+reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" /v Version >nul 2>&1
+if %ERRORLEVEL% EQU 0 exit /b 0
+exit /b 1
 
 :log
 set "MSG=%~1"
