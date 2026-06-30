@@ -183,6 +183,67 @@ _CLIENT_PREFIXES = (
     "busca el rut ", "rut ",
 )
 
+# Marcadores de pregunta natural por un producto: "¿tienen X?", "¿qué tipos de
+# X hay?", "¿venden X?". Solo se evalúan al final, cuando ningún otro intent
+# coincidió, así que palabras amplias como "hay"/"tiene" son seguras aquí.
+_PRODUCT_QUESTION_MARKERS = (
+    "tipos de ", "tipo de ", "clases de ", "clase de ",
+    "variedad de ", "variedades de ", "que marcas", "que marca de ",
+    "tienen ", "tienes ", "tiene ", "tenes ", "hay ",
+    "venden ", "vende ", "vendes ", "manejan ", "trabajan con ",
+    "cuentan con ", "disponen de ", "ofrecen ", "tendran ", "tendras ",
+    "que productos", "cuales productos", "muestrame", "muestra ",
+    "lista de productos", "lista de precios",
+)
+
+# Prefijos a remover para extraer el término de producto de una pregunta natural.
+# Se combinan con _PRODUCT_PREFIXES y se ordenan de más largo a más corto para
+# que el strip tome siempre la coincidencia más específica.
+_PRODUCT_QUESTION_PREFIXES = tuple(sorted(set((
+    "que tipos de ", "que tipo de ", "que clases de ", "que clase de ",
+    "tipos de ", "tipo de ", "clases de ", "clase de ",
+    "variedades de ", "variedad de ", "que marcas de ", "que marca de ",
+    "que productos de ", "que productos ", "cuales productos ",
+    "me puedes mostrar ", "puedes mostrarme ", "muestrame los ", "muestrame las ",
+    "muestrame ", "muestra los ", "muestra las ", "muestra ",
+    "que ", "cuales ", "cuanto ",
+    "tienen disponible ", "tienen disponibles ", "tienen ", "tienes ", "tiene ",
+    "tenes ", "hay ", "venden ", "vende ", "vendes ", "manejan ",
+    "trabajan con ", "cuentan con ", "disponen de ", "ofrecen ",
+    "tendran ", "tendras ", "me das ", "dame ",
+    "lista de precios de ", "lista de ",
+)) | set(_PRODUCT_PREFIXES), key=len, reverse=True))
+
+# Sufijos a remover ("...que tiene", "...disponibles", "...en stock").
+_PRODUCT_QUESTION_SUFFIXES = (
+    " que tienen", " que tiene", " que tienes", " que hay", " que venden",
+    " tienen", " tiene", " tienes", " hay", " venden", " vende",
+    " disponibles", " disponible", " en stock", " a la venta", " para vender",
+)
+
+# Términos que tras el strip no sirven como búsqueda → mejor pasar al clasificador.
+_PRODUCT_STOPWORDS = frozenset({
+    "", "alguien", "algo", "eso", "esto", "esa", "ese", "productos", "producto",
+    "cosas", "cosa", "stock", "precio", "precios", "marcas", "marca", "tipos",
+    "tipo", "clase", "clases", "variedad", "aqui", "alla", "disponible",
+    "disponibles", "venta", "ventas",
+})
+
+# Menú de ayuda — respuesta sin IA cuando el operador pregunta qué puede hacer.
+_HELP_TEXT = (
+    "Puedo consultar en tiempo real (sin esperar IA):\n"
+    "• Ventas: 'ventas de hoy', 'cuánto vendimos ayer', 'ventas del mes'\n"
+    "• Más vendidos: 'top productos del mes', 'lo más vendido de la semana'\n"
+    "• Productos: 'precio del aceite 1L', '¿qué tipos de carne tiene?', '¿tienen coca cola?'\n"
+    "• Stock: 'stock crítico', '¿qué se está agotando?', 'stock del pan'\n"
+    "• Reposición: '¿qué me sugieres reponer?'\n"
+    "• Cajas: 'estado de las cajas', 'cierres pendientes'\n"
+    "• Compras: 'órdenes de compra pendientes'\n"
+    "• Finanzas: 'IVA del mes', '¿cuánto pago al SII?'\n"
+    "• SII: '¿cuántos folios quedan?'\n"
+    "• Clientes: 'busca al cliente Juan Pérez', 'cliente RUT 12345678-9'"
+)
+
 
 def _normalize_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value.lower())
@@ -286,9 +347,206 @@ def _is_product_search(text: str, raw: str) -> bool:
     ))
 
 
+def _is_natural_product_query(text: str) -> bool:
+    """Pregunta en lenguaje natural por un producto: '¿tienen X?', '¿hay X?'."""
+    if _contains_any(text, _PRODUCT_QUESTION_MARKERS):
+        return True
+    # Verbo al final: 'que carnes hay', 'que vinos tienen', 'que quesos venden'.
+    return any(
+        text == verb or text.endswith(" " + verb)
+        for verb in ("hay", "tienen", "tiene", "tienes", "venden", "vende")
+    )
+
+
+def _is_help_query(text: str) -> bool:
+    """El operador pregunta qué puede hacer el asistente."""
+    return _contains_any(text, (
+        "que puedes hacer", "que sabes hacer", "que podes hacer",
+        "en que me ayudas", "en que puedes ayudarme", "como me ayudas",
+        "que consultas puedo", "que puedo preguntar", "que puedo consultar",
+        "para que sirves", "opciones", "menu de ayuda", "ayuda",
+    ))
+
+
+def _extract_product_query(raw: str) -> str:
+    """
+    Extrae el término de búsqueda de una pregunta sobre productos, quitando
+    palabras-pregunta, verbos y artículos. '¿Qué tipos de carne tiene?' → 'carne'.
+    Devuelve '' si lo que queda no sirve como búsqueda (stopword).
+    """
+    cleaned = raw.strip(" ?!.,;:¿¡")
+
+    # Quita prefijos iterativamente (más largo primero).
+    changed = True
+    while changed:
+        changed = False
+        norm = _normalize_text(cleaned)
+        for prefix in _PRODUCT_QUESTION_PREFIXES:
+            if norm.startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip(" ?!.,;:¿¡")
+                changed = True
+                break
+
+    # Quita sufijos ("...que tiene", "...en stock").
+    norm = _normalize_text(cleaned)
+    for suffix in _PRODUCT_QUESTION_SUFFIXES:
+        if norm.endswith(suffix):
+            cleaned = cleaned[: len(cleaned) - len(suffix)].strip(" ?!.,;:¿¡")
+            break
+
+    if _normalize_text(cleaned) in _PRODUCT_STOPWORDS:
+        return ""
+    return cleaned
+
+
+def _periodo_a_fechas(periodo: str) -> tuple[str, str]:
+    """(fecha_desde, fecha_hasta) para un período predefinido. Default: mes a la fecha."""
+    today = date.today()
+    if periodo == "ayer":
+        d = today - timedelta(days=1)
+        return str(d), str(d)
+    if periodo == "semana":
+        return str(today - timedelta(days=today.weekday())), str(today)
+    if periodo == "mes_anterior":
+        primero = today.replace(day=1)
+        ultimo_ant = primero - timedelta(days=1)
+        return str(ultimo_ant.replace(day=1)), str(ultimo_ant)
+    if periodo == "hoy":
+        return str(today), str(today)
+    return str(today.replace(day=1)), str(today)
+
+
 async def _direct(tool_coro, thread_id: str) -> ChatResponse:
     reply = await tool_coro
     return ChatResponse(thread_id=thread_id, reply=str(reply), escalated=False)
+
+
+async def _dispatch_intent(
+    intent: str,
+    empresa_id: int,
+    thread_id: str,
+    sucursal_id: Optional[int] = None,
+    query: str = "",
+    periodo: str = "",
+) -> Optional[ChatResponse]:
+    """
+    Ejecuta la tool correspondiente a un intent ya identificado. Lo usan tanto
+    el router por reglas como el clasificador Gemini Flash, para no duplicar la
+    lógica de despacho. Devuelve None si el intent no se puede resolver aquí
+    (faltan datos, o es 'accion'/'desconocido' que maneja el agente completo).
+    """
+    if intent == "ventas":
+        from tools.ventas import ventas_periodo
+        return await _direct(ventas_periodo.ainvoke({
+            "empresa_id": empresa_id, "periodo": periodo or "hoy",
+            "sucursal_id": sucursal_id,
+        }), thread_id)
+
+    if intent == "top_productos":
+        from tools.ventas import ventas_por_producto
+        fd, ft = _periodo_a_fechas(periodo or "mes")
+        return await _direct(ventas_por_producto.ainvoke({
+            "empresa_id": empresa_id, "fecha_desde": fd, "fecha_hasta": ft,
+            "top": 10, "sucursal_id": sucursal_id,
+        }), thread_id)
+
+    if intent == "stock_critico":
+        from tools.stock import stock_critico
+        return await _direct(stock_critico.ainvoke({
+            "empresa_id": empresa_id, "sucursal_id": sucursal_id,
+        }), thread_id)
+
+    if intent == "reposicion":
+        from tools.compras import sugerencias_reposicion
+        return await _direct(sugerencias_reposicion.ainvoke({
+            "empresa_id": empresa_id, "sucursal_id": sucursal_id,
+        }), thread_id)
+
+    if intent == "cajas":
+        from tools.caja import estado_cajas
+        return await _direct(estado_cajas.ainvoke({
+            "empresa_id": empresa_id, "sucursal_id": sucursal_id,
+        }), thread_id)
+
+    if intent == "cierres":
+        from tools.cierres import cierres_pendientes
+        return await _direct(cierres_pendientes.ainvoke({
+            "empresa_id": empresa_id, "sucursal_id": sucursal_id,
+        }), thread_id)
+
+    if intent == "iva":
+        from tools.libros import resumen_iva
+        return await _direct(resumen_iva.ainvoke({"empresa_id": empresa_id}), thread_id)
+
+    if intent == "compras":
+        from tools.compras import compras_pendientes
+        return await _direct(compras_pendientes.ainvoke({
+            "empresa_id": empresa_id, "sucursal_id": sucursal_id,
+        }), thread_id)
+
+    if intent == "folios":
+        from tools.folios import estado_folios_sii
+        return await _direct(estado_folios_sii.ainvoke({"empresa_id": empresa_id}), thread_id)
+
+    if intent == "cliente":
+        if len(query.strip()) >= 3:
+            from tools.clientes import buscar_cliente
+            return await _direct(buscar_cliente.ainvoke({
+                "empresa_id": empresa_id, "query": query.strip(),
+            }), thread_id)
+        return None
+
+    if intent in ("producto", "stock_producto"):
+        if len(query.strip()) >= 2:
+            from tools.stock import buscar_producto
+            return await _direct(buscar_producto.ainvoke({
+                "empresa_id": empresa_id, "query": query.strip(),
+            }), thread_id)
+        return None
+
+    if intent == "ayuda":
+        return ChatResponse(thread_id=thread_id, reply=_HELP_TEXT, escalated=False)
+
+    # accion / desconocido → lo resuelve el agente completo (escalación)
+    return None
+
+
+def _detect_intent_rules(text: str, raw: str) -> tuple[Optional[str], str, str]:
+    """
+    Detecta el intent por reglas (sin IA). Devuelve (intent, query, periodo).
+    El orden importa: lo más específico primero; producto queda de último porque
+    sus marcadores naturales ('hay', 'tiene') son amplios y solo deben capturar
+    lo que nada más reconoció.
+    """
+    if _is_top_products_query(text):
+        return "top_productos", "", _detect_period(text)
+    if _is_sales_query(text):
+        return "ventas", "", _detect_period(text)
+    if _is_stock_critical_query(text):
+        return "stock_critico", "", ""
+    if _is_restock_query(text):
+        return "reposicion", "", ""
+    if _is_boxes_query(text):
+        return "cajas", "", ""
+    if _is_closures_query(text):
+        return "cierres", "", ""
+    if _is_iva_query(text):
+        return "iva", "", ""
+    if _is_purchase_query(text):
+        return "compras", "", ""
+    if _is_folios_query(text):
+        return "folios", "", ""
+    if _is_help_query(text):
+        return "ayuda", "", ""
+    if _is_client_query(text):
+        q = _strip_prefixes(raw, _CLIENT_PREFIXES)
+        if len(q) >= 3:
+            return "cliente", q, ""
+    if _is_product_search(text, raw) or _is_natural_product_query(text):
+        q = _extract_product_query(raw)
+        if len(q) >= 2:
+            return "producto", q, ""
+    return None, "", ""
 
 
 async def _try_direct_intent(
@@ -330,115 +588,15 @@ async def _try_direct_intent(
             escalated=False,
         )
 
-    # ── 1. Ranking de productos más vendidos ─────────────────────────────────
-    if _is_top_products_query(text):
-        from tools.ventas import ventas_por_producto
-        today = date.today()
-        periodo = _detect_period(text)
-        if periodo == "ayer":
-            fd = str(today - timedelta(days=1)); ft = fd
-        elif periodo == "semana":
-            fd = str(today - timedelta(days=today.weekday())); ft = str(today)
-        elif periodo in ("mes_anterior",):
-            primero = today.replace(day=1)
-            ultimo_ant = primero - timedelta(days=1)
-            fd = str(ultimo_ant.replace(day=1)); ft = str(ultimo_ant)
-        else:
-            fd = str(today.replace(day=1)); ft = str(today)
-        return await _direct(
-            ventas_por_producto.ainvoke({
-                "empresa_id": empresa_id, "fecha_desde": fd, "fecha_hasta": ft,
-                "top": 10, "sucursal_id": sucursal_id,
-            }),
-            thread_id,
+    # ── Detección por reglas → despacho a la tool (sin IA) ───────────────────
+    intent, query, periodo = _detect_intent_rules(text, message)
+    if intent:
+        resp = await _dispatch_intent(
+            intent, empresa_id, thread_id, sucursal_id,
+            query=query, periodo=periodo,
         )
-
-    # ── 2. Ventas por período ─────────────────────────────────────────────────
-    if _is_sales_query(text):
-        from tools.ventas import ventas_periodo
-        periodo = _detect_period(text)
-        return await _direct(
-            ventas_periodo.ainvoke({
-                "empresa_id": empresa_id, "periodo": periodo, "sucursal_id": sucursal_id,
-            }),
-            thread_id,
-        )
-
-    # ── 3. Stock crítico / productos agotándose ───────────────────────────────
-    if _is_stock_critical_query(text):
-        from tools.stock import stock_critico
-        return await _direct(
-            stock_critico.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
-            thread_id,
-        )
-
-    # ── 4. Sugerencias de reposición ─────────────────────────────────────────
-    if _is_restock_query(text):
-        from tools.compras import sugerencias_reposicion
-        return await _direct(
-            sugerencias_reposicion.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
-            thread_id,
-        )
-
-    # ── 5. Cajas ─────────────────────────────────────────────────────────────
-    if _is_boxes_query(text):
-        from tools.caja import estado_cajas
-        return await _direct(
-            estado_cajas.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
-            thread_id,
-        )
-
-    # ── 6. Cierres diarios pendientes ────────────────────────────────────────
-    if _is_closures_query(text):
-        from tools.cierres import cierres_pendientes
-        return await _direct(
-            cierres_pendientes.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
-            thread_id,
-        )
-
-    # ── 7. IVA / libros tributarios ──────────────────────────────────────────
-    if _is_iva_query(text):
-        from tools.libros import resumen_iva
-        return await _direct(
-            resumen_iva.ainvoke({"empresa_id": empresa_id}),
-            thread_id,
-        )
-
-    # ── 8. Compras pendientes ─────────────────────────────────────────────────
-    if _is_purchase_query(text) and not _is_sales_query(text):
-        from tools.compras import compras_pendientes
-        return await _direct(
-            compras_pendientes.ainvoke({"empresa_id": empresa_id, "sucursal_id": sucursal_id}),
-            thread_id,
-        )
-
-    # ── 9. Folios SII ─────────────────────────────────────────────────────────
-    if _is_folios_query(text):
-        from tools.folios import estado_folios_sii
-        return await _direct(
-            estado_folios_sii.ainvoke({"empresa_id": empresa_id}),
-            thread_id,
-        )
-
-    # ── 10. Buscar cliente ────────────────────────────────────────────────────
-    if _is_client_query(text):
-        from tools.clientes import buscar_cliente
-        query = _strip_prefixes(message, _CLIENT_PREFIXES)
-        if len(query) >= 3:
-            return await _direct(
-                buscar_cliente.ainvoke({"empresa_id": empresa_id, "query": query}),
-                thread_id,
-            )
-
-    # ── 11. Búsqueda de producto específico ───────────────────────────────────
-    if _is_product_search(text, message):
-        from tools.stock import buscar_producto
-        query = _strip_prefixes(message, _PRODUCT_PREFIXES)
-        if len(query) >= 2:
-            return await _direct(
-                buscar_producto.ainvoke({"empresa_id": empresa_id, "query": query}),
-                thread_id,
-            )
+        if resp is not None:
+            return resp
 
     return None
 
@@ -461,6 +619,69 @@ def _provider_ready() -> tuple[bool, str]:
         return False, f"{key_name} no configurado para LLM_PROVIDER={settings.llm_provider}"
 
     return True, ""
+
+
+async def _try_classifier(
+    message: str,
+    empresa_id: int,
+    thread_id: str,
+    sucursal_id: Optional[int] = None,
+) -> Optional[ChatResponse]:
+    """
+    SEGUNDA INSTANCIA: si las reglas no entendieron, usa Gemini 1.5 Flash como
+    clasificador ligero (prompt mínimo → JSON) y despacha a la misma tool.
+    Devuelve None para que caiga al agente completo cuando el intent es 'accion'
+    o 'desconocido', o cuando no se pudo clasificar.
+    """
+    if not settings.classifier_enabled or not settings.google_api_key:
+        return None
+
+    # Respeta los cooldown ya conocidos (no insistir si Gemini está sin cuota).
+    busy_seconds = _provider_busy_seconds_left()
+    if busy_seconds > 0:
+        return ChatResponse(
+            thread_id=thread_id,
+            reply=_provider_busy_message(busy_seconds),
+            escalated=False,
+        )
+    quota_seconds = _quota_seconds_left()
+    if quota_seconds > 0:
+        return ChatResponse(
+            thread_id=thread_id,
+            reply=_quota_message(quota_seconds),
+            escalated=False,
+        )
+
+    from classifier import classify
+
+    try:
+        result = await asyncio.wait_for(classify(message), timeout=12)
+    except asyncio.TimeoutError:
+        return None  # cae al agente completo
+    except Exception as exc:
+        if _is_quota_error(exc):
+            cooldown = _mark_quota_exhausted()
+            return ChatResponse(
+                thread_id=thread_id, reply=_quota_message(cooldown), escalated=False,
+            )
+        if _is_provider_busy_error(exc):
+            cooldown = _mark_provider_busy()
+            return ChatResponse(
+                thread_id=thread_id, reply=_provider_busy_message(cooldown), escalated=False,
+            )
+        return None  # error inesperado del clasificador → cae al agente completo
+
+    if not result:
+        return None
+
+    intent = result["intent"]
+    if intent in ("accion", "desconocido"):
+        return None  # acciones y casos ambiguos → agente completo (escalación)
+
+    return await _dispatch_intent(
+        intent, empresa_id, thread_id, sucursal_id,
+        query=result["query"], periodo=result["periodo"],
+    )
 
 
 app = FastAPI(title="MyPOS Agent", docs_url=None, redoc_url=None)
@@ -514,6 +735,7 @@ async def _run(
     sucursal_id: Optional[int] = None,
     operator_name: str = "",
 ) -> ChatResponse:
+    # 1ª instancia: router por reglas (sin IA, siempre funciona aunque no haya cuota)
     direct = await _try_direct_intent(
         message=message,
         empresa_id=empresa_id,
@@ -523,6 +745,17 @@ async def _run(
     if direct is not None:
         return direct
 
+    # 2ª instancia: clasificador ligero Gemini Flash → despacho directo
+    classified = await _try_classifier(
+        message=message,
+        empresa_id=empresa_id,
+        thread_id=thread_id,
+        sucursal_id=sucursal_id,
+    )
+    if classified is not None:
+        return classified
+
+    # 3ª instancia: agente completo (acciones que escalan a humano)
     ready, reason = _provider_ready()
     if not ready:
         raise HTTPException(status_code=503, detail=reason)
@@ -666,6 +899,8 @@ async def health():
         "model": settings.llm_model,
         "provider": settings.llm_provider,
         "provider_key_configured": provider_key_configured,
+        "classifier_enabled": settings.classifier_enabled and bool(settings.google_api_key),
+        "classifier_model": settings.classifier_model,
         "quota_cooldown_seconds_left": _quota_seconds_left(),
         "provider_busy_seconds_left": _provider_busy_seconds_left(),
         "llm_min_interval_seconds": settings.llm_min_interval_seconds,

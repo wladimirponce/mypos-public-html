@@ -156,6 +156,36 @@ def test_direct_intents():
     print(f"   {ok}/{len(cases)} intents detectados correctamente\n")
 
 
+def test_natural_product_queries():
+    """Productos preguntados en lenguaje natural deben resolverse SIN IA."""
+    print("7. Verificando consultas naturales de producto (router ampliado)...")
+    import sys
+    sys.path.insert(0, ".")
+    from main import _normalize_text, _detect_intent_rules
+
+    cases = [
+        ("que tipos de carne tiene?", "producto", "carne"),
+        ("tienen coca cola?", "producto", "coca cola"),
+        ("hay pan?", "producto", "pan"),
+        ("que carnes hay", "producto", "carnes"),
+        ("venden cigarros", "producto", "cigarros"),
+        ("muestrame las bebidas", "producto", "bebidas"),
+        ("que puedes hacer", "ayuda", ""),
+        ("hola buenas", None, ""),
+    ]
+
+    ok = 0
+    for phrase, exp_intent, exp_query in cases:
+        intent, query, _ = _detect_intent_rules(_normalize_text(phrase), phrase)
+        intent_ok = intent == exp_intent
+        query_ok = (not exp_query) or (query == exp_query)
+        status = "OK" if intent_ok and query_ok else "FAIL"
+        print(f"   [{status}] '{phrase}' -> intent={intent} query={query!r}")
+        if status == "OK":
+            ok += 1
+    print(f"   {ok}/{len(cases)} consultas naturales resueltas por reglas\n")
+
+
 async def main():
     print("=" * 55)
     print("  MyPOS Agent — Test Local")
@@ -165,6 +195,7 @@ async def main():
     test_state_defaults()
     test_tool_signatures()
     test_direct_intents()
+    test_natural_product_queries()
     graph = await test_graph_compiles()
     await test_conversation(graph)
 

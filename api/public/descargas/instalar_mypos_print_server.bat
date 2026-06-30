@@ -1,6 +1,16 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal EnableExtensions EnableDelayedExpansion
 title MyPOS Print Server - Instalador
+
+set "INSTALL_DIR=C:\MyPOSPrint"
+set "PYTHON_URL=https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+set "VC_URL=https://aka.ms/vs/17/release/vc_redist.x64.exe"
+set "SERVER_URL=https://mypos.cl/descargas/mypos_print_server.py"
+set "REQ_URL=https://mypos.cl/descargas/requirements.txt"
+set "LOG_FILE=%TEMP%\mypos_print_server_install.log"
+set "PY_CMD="
+
+> "%LOG_FILE%" echo [%DATE% %TIME%] Inicio instalador MyPOS Print Server
 
 echo.
 echo  ============================================================
@@ -8,149 +18,142 @@ echo   MyPOS Print Server - Instalador Automatico
 echo   Puerto 5555 ^| Python 3.11 ^| ESC/POS ^| PDF SII
 echo  ============================================================
 echo.
+echo   Log: %LOG_FILE%
+echo.
 
-:: ── Verificar administrador ──────────────────────────────────
+REM Verificar permisos de administrador.
 net session >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    echo  [!] Requiere permisos de Administrador.
-    echo      Clic derecho en este archivo y "Ejecutar como administrador".
-    echo.
-    pause
-    exit /b 1
+    call :fail "Requiere permisos de Administrador. Clic derecho y ejecutar como administrador."
 )
 
-set "INSTALL_DIR=C:\MyPOSPrint"
-set "PYTHON_URL=https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
-set "VC_URL=https://aka.ms/vs/17/release/vc_redist.x64.exe"
-set "SERVER_URL=https://mypos.cl/descargas/mypos_print_server.py"
-set "REQ_URL=https://mypos.cl/descargas/requirements.txt"
-set "PY_CMD="
-
-:: ── Paso 1: Python ───────────────────────────────────────────
-echo  [1/6] Verificando Python 3.11...
+REM Paso 1: Python.
+call :log "[1/6] Verificando Python 3.11..."
 
 py -3.11 --version >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     set "PY_CMD=py -3.11"
-    for /f "tokens=*" %%v in ('py -3.11 --version 2^>^&1') do echo       OK: %%v ya instalado.
+    for /f "tokens=*" %%v in ('py -3.11 --version 2^>^&1') do call :log "      OK: %%v ya instalado."
     goto :vc_check
 )
 
 python --version >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     for /f "tokens=*" %%v in ('python --version 2^>^&1') do (
-        echo %%v | findstr "3.11" >nul 2>&1
+        echo %%v | findstr /C:"3.11" >nul 2>&1
         if !ERRORLEVEL! EQU 0 (
             set "PY_CMD=python"
-            echo       OK: %%v ya instalado.
+            call :log "      OK: %%v ya instalado."
             goto :vc_check
         )
     )
 )
 
-:: Buscar instalador local primero (mismo directorio que este bat)
-echo  [1/6] Instalando Python 3.11.9...
+call :log "[1/6] Instalando Python 3.11.9..."
 if exist "%~dp0python-3.11.9-amd64.exe" (
-    echo       Usando instalador local...
-    "%~dp0python-3.11.9-amd64.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0
+    call :log "      Usando instalador local..."
+    start /wait "" "%~dp0python-3.11.9-amd64.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0
 ) else (
-    echo       Descargando desde python.org (puede tardar unos minutos)...
-    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12,Tls13'; Invoke-WebRequest '%PYTHON_URL%' -OutFile '%TEMP%\python-3.11.9-amd64.exe' -UseBasicParsing"
-    if not exist "%TEMP%\python-3.11.9-amd64.exe" (
-        echo  [ERROR] No se pudo descargar Python. Revise la conexion a internet.
-        pause & exit /b 1
-    )
-    "%TEMP%\python-3.11.9-amd64.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0
+    call :log "      Descargando desde python.org..."
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile '%TEMP%\python-3.11.9-amd64.exe' -UseBasicParsing" >> "%LOG_FILE%" 2>&1
+    if %ERRORLEVEL% NEQ 0 call :fail "No se pudo descargar Python. Revise la conexion a internet."
+    start /wait "" "%TEMP%\python-3.11.9-amd64.exe" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0
     del "%TEMP%\python-3.11.9-amd64.exe" >nul 2>&1
 )
 
-:: Actualizar PATH de la sesion actual
-for /f "usebackq tokens=2,*" %%a in (`reg query "HKCU\Environment" /v PATH 2^>nul`) do (
-    set "PATH=%%b;%PATH%"
+set "PY_INSTALL_EXIT=%ERRORLEVEL%"
+if not "%PY_INSTALL_EXIT%"=="0" if not "%PY_INSTALL_EXIT%"=="3010" call :fail "El instalador de Python fallo con codigo %PY_INSTALL_EXIT%."
+
+call :refresh_python_path
+py -3.11 --version >nul 2>&1
+if %ERRORLEVEL% EQU 0 set "PY_CMD=py -3.11"
+if not defined PY_CMD (
+    python --version >nul 2>&1
+    if !ERRORLEVEL! EQU 0 set "PY_CMD=python"
 )
-set "PATH=%LOCALAPPDATA%\Programs\Python\Python311;%LOCALAPPDATA%\Programs\Python\Python311\Scripts;%PATH%"
-set "PY_CMD=python"
-echo       Python 3.11.9 instalado.
+if not defined PY_CMD call :fail "Python 3.11 no quedo disponible en PATH despues de instalar."
+call :log "      Python listo usando: %PY_CMD%"
 
 :vc_check
-:: ── Paso 2: Visual C++ Redistributable ───────────────────────
+REM Paso 2: Visual C++ Redistributable.
 echo.
-echo  [2/6] Verificando Visual C++ Redistributable...
+call :log "[2/6] Verificando Visual C++ Redistributable..."
 reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64" /v Version >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
-    echo       VC++ ya instalado.
+    call :log "      VC++ ya instalado."
 ) else (
-    echo  [2/6] Instalando Visual C++ Redistributable...
+    call :log "[2/6] Instalando Visual C++ Redistributable..."
     if exist "%~dp0VC_redist.x64.exe" (
-        echo       Usando instalador local...
-        "%~dp0VC_redist.x64.exe" /quiet /norestart
+        call :log "      Usando instalador local..."
+        start /wait "" "%~dp0VC_redist.x64.exe" /quiet /norestart
     ) else (
-        echo       Descargando desde Microsoft...
-        powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12,Tls13'; Invoke-WebRequest '%VC_URL%' -OutFile '%TEMP%\vc_redist.x64.exe' -UseBasicParsing"
-        "%TEMP%\vc_redist.x64.exe" /quiet /norestart
+        call :log "      Descargando desde Microsoft..."
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%VC_URL%' -OutFile '%TEMP%\vc_redist.x64.exe' -UseBasicParsing" >> "%LOG_FILE%" 2>&1
+        if %ERRORLEVEL% NEQ 0 call :fail "No se pudo descargar Visual C++ Redistributable."
+        start /wait "" "%TEMP%\vc_redist.x64.exe" /quiet /norestart
         del "%TEMP%\vc_redist.x64.exe" >nul 2>&1
     )
-    echo       VC++ instalado.
+    set "VC_EXIT=%ERRORLEVEL%"
+    if not "!VC_EXIT!"=="0" if not "!VC_EXIT!"=="3010" if not "!VC_EXIT!"=="1638" call :fail "Visual C++ Redistributable fallo con codigo !VC_EXIT!."
+    call :log "      VC++ instalado."
 )
 
-:: ── Paso 3: Directorio instalacion ───────────────────────────
+REM Paso 3: Directorio de instalacion.
 echo.
-echo  [3/6] Creando directorio %INSTALL_DIR%...
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-echo       Listo.
+call :log "[3/6] Creando directorio %INSTALL_DIR%..."
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" >> "%LOG_FILE%" 2>&1
+if not exist "%INSTALL_DIR%" call :fail "No se pudo crear %INSTALL_DIR%."
+call :log "      Listo."
 
-:: ── Paso 4: Archivos del servidor ────────────────────────────
+REM Paso 4: Archivos del servidor.
 echo.
-echo  [4/6] Obteniendo archivos del servidor de impresion...
+call :log "[4/6] Obteniendo archivos del servidor de impresion..."
 
 if exist "%~dp0mypos_print_server.py" (
-    copy /Y "%~dp0mypos_print_server.py" "%INSTALL_DIR%\mypos_print_server.py" >nul
-    echo       mypos_print_server.py: copiado desde instalador local.
+    copy /Y "%~dp0mypos_print_server.py" "%INSTALL_DIR%\mypos_print_server.py" >> "%LOG_FILE%" 2>&1
+    if %ERRORLEVEL% NEQ 0 call :fail "No se pudo copiar mypos_print_server.py."
+    call :log "      mypos_print_server.py: copiado desde instalador local."
 ) else (
-    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12,Tls13'; Invoke-WebRequest '%SERVER_URL%' -OutFile '%INSTALL_DIR%\mypos_print_server.py' -UseBasicParsing"
-    if not exist "%INSTALL_DIR%\mypos_print_server.py" (
-        echo  [ERROR] No se pudo obtener mypos_print_server.py
-        pause & exit /b 1
-    )
-    echo       mypos_print_server.py: descargado desde mypos.cl
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%SERVER_URL%' -OutFile '%INSTALL_DIR%\mypos_print_server.py' -UseBasicParsing" >> "%LOG_FILE%" 2>&1
+    if %ERRORLEVEL% NEQ 0 call :fail "No se pudo descargar mypos_print_server.py."
+    if not exist "%INSTALL_DIR%\mypos_print_server.py" call :fail "No se pudo obtener mypos_print_server.py."
+    call :log "      mypos_print_server.py: descargado desde mypos.cl."
 )
 
 if exist "%~dp0requirements.txt" (
-    copy /Y "%~dp0requirements.txt" "%INSTALL_DIR%\requirements.txt" >nul
+    copy /Y "%~dp0requirements.txt" "%INSTALL_DIR%\requirements.txt" >> "%LOG_FILE%" 2>&1
+    if %ERRORLEVEL% NEQ 0 call :fail "No se pudo copiar requirements.txt."
 ) else (
-    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12,Tls13'; Invoke-WebRequest '%REQ_URL%' -OutFile '%INSTALL_DIR%\requirements.txt' -UseBasicParsing"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%REQ_URL%' -OutFile '%INSTALL_DIR%\requirements.txt' -UseBasicParsing" >> "%LOG_FILE%" 2>&1
+    if %ERRORLEVEL% NEQ 0 call :fail "No se pudo descargar requirements.txt."
 )
 
-if exist "%~dp0python-3.11.9-amd64.exe" copy /Y "%~dp0python-3.11.9-amd64.exe" "%INSTALL_DIR%\python-3.11.9-amd64.exe" >nul
-if exist "%~dp0VC_redist.x64.exe" copy /Y "%~dp0VC_redist.x64.exe" "%INSTALL_DIR%\VC_redist.x64.exe" >nul
-if exist "%~dp0README.md" copy /Y "%~dp0README.md" "%INSTALL_DIR%\README.md" >nul
+if exist "%~dp0python-3.11.9-amd64.exe" copy /Y "%~dp0python-3.11.9-amd64.exe" "%INSTALL_DIR%\python-3.11.9-amd64.exe" >> "%LOG_FILE%" 2>&1
+if exist "%~dp0VC_redist.x64.exe" copy /Y "%~dp0VC_redist.x64.exe" "%INSTALL_DIR%\VC_redist.x64.exe" >> "%LOG_FILE%" 2>&1
+if exist "%~dp0README.md" copy /Y "%~dp0README.md" "%INSTALL_DIR%\README.md" >> "%LOG_FILE%" 2>&1
 if exist "%~dp0SumatraPDF.exe" (
-    copy /Y "%~dp0SumatraPDF.exe" "%INSTALL_DIR%\SumatraPDF.exe" >nul
-    echo       SumatraPDF.exe: copiado desde instalador local.
+    copy /Y "%~dp0SumatraPDF.exe" "%INSTALL_DIR%\SumatraPDF.exe" >> "%LOG_FILE%" 2>&1
+    call :log "      SumatraPDF.exe: copiado desde instalador local."
 ) else (
-    echo  [ADVERTENCIA] SumatraPDF.exe no viene en el instalador. Las boletas PDF no se imprimiran en silencio.
+    call :log "      ADVERTENCIA: SumatraPDF.exe no viene en el instalador. Los PDF no se imprimiran en silencio."
 )
+if exist "%~dp0SumatraPDF-3.6.1-64-install.exe" copy /Y "%~dp0SumatraPDF-3.6.1-64-install.exe" "%INSTALL_DIR%\SumatraPDF-3.6.1-64-install.exe" >> "%LOG_FILE%" 2>&1
+if exist "%~dp0PdfFilter.dll" copy /Y "%~dp0PdfFilter.dll" "%INSTALL_DIR%\PdfFilter.dll" >> "%LOG_FILE%" 2>&1
+if exist "%~dp0PdfPreview.dll" copy /Y "%~dp0PdfPreview.dll" "%INSTALL_DIR%\PdfPreview.dll" >> "%LOG_FILE%" 2>&1
 
-if exist "%~dp0SumatraPDF-3.6.1-64-install.exe" copy /Y "%~dp0SumatraPDF-3.6.1-64-install.exe" "%INSTALL_DIR%\SumatraPDF-3.6.1-64-install.exe" >nul
-if exist "%~dp0PdfFilter.dll" copy /Y "%~dp0PdfFilter.dll" "%INSTALL_DIR%\PdfFilter.dll" >nul
-if exist "%~dp0PdfPreview.dll" copy /Y "%~dp0PdfPreview.dll" "%INSTALL_DIR%\PdfPreview.dll" >nul
-
-:: ── Paso 5: Librerias Python ─────────────────────────────────
+REM Paso 5: Librerias Python.
 echo.
-echo  [5/6] Instalando librerias Python (flask, pywin32, Pillow...)
-%PY_CMD% -m pip install --upgrade pip --quiet --no-warn-script-location
-%PY_CMD% -m pip install -r "%INSTALL_DIR%\requirements.txt" --quiet --no-warn-script-location
-if %ERRORLEVEL% NEQ 0 (
-    echo  [ERROR] Fallo la instalacion de librerias. Revise la conexion.
-    pause & exit /b 1
-)
-echo       Librerias instaladas.
+call :log "[5/6] Instalando librerias Python (flask, pywin32, Pillow, pdf417...)"
+%PY_CMD% -m pip install --upgrade pip --quiet --no-warn-script-location >> "%LOG_FILE%" 2>&1
+if %ERRORLEVEL% NEQ 0 call :fail "Fallo la actualizacion de pip. Revise %LOG_FILE%."
+%PY_CMD% -m pip install -r "%INSTALL_DIR%\requirements.txt" --quiet --no-warn-script-location >> "%LOG_FILE%" 2>&1
+if %ERRORLEVEL% NEQ 0 call :fail "Fallo la instalacion de librerias Python. Revise conexion y log."
+call :log "      Librerias instaladas."
 
-:: ── Paso 6: Acceso directo en Escritorio ─────────────────────
+REM Paso 6: Acceso directo.
 echo.
-echo  [6/6] Creando acceso directo en el Escritorio...
+call :log "[6/6] Creando acceso directo en el Escritorio..."
 
-:: Script de inicio en el directorio de instalacion
 (
     echo @echo off
     echo title MyPOS Print Server
@@ -170,26 +173,19 @@ echo  [6/6] Creando acceso directo en el Escritorio...
     echo ^)
     echo pause
 ) > "%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat"
+if %ERRORLEVEL% NEQ 0 call :fail "No se pudo crear el script de inicio."
 
-:: Acceso directo con cmd.exe explicito para que la ventana siempre sea visible
-powershell -NoProfile -Command ^
-    "$ws = New-Object -ComObject WScript.Shell; " ^
-    "$s = $ws.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\MyPOS Print Server.lnk'); " ^
-    "$s.TargetPath = [Environment]::SystemDirectory + '\cmd.exe'; " ^
-    "$s.Arguments = '/k \"%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat\"'; " ^
-    "$s.WorkingDirectory = '%INSTALL_DIR%'; " ^
-    "$s.Description = 'Servidor de impresion MyPOS - Puerto 5555'; " ^
-    "$s.Save()"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath('Desktop'); $s = $ws.CreateShortcut((Join-Path $desktop 'MyPOS Print Server.lnk')); $s.TargetPath = [Environment]::SystemDirectory + '\cmd.exe'; $s.Arguments = '/k ""%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat""'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.Description = 'Servidor de impresion MyPOS - Puerto 5555'; $s.Save()" >> "%LOG_FILE%" 2>&1
+if %ERRORLEVEL% NEQ 0 call :fail "No se pudo crear el acceso directo."
+call :log "      Acceso directo creado en el Escritorio."
 
-echo       Acceso directo creado en el Escritorio.
-
-:: ── Resultado ─────────────────────────────────────────────────
 echo.
 echo  ============================================================
 echo   INSTALACION COMPLETADA
 echo.
-echo   Directorio : %INSTALL_DIR%
-echo   Acceso directo: "MyPOS Print Server" en el Escritorio
+echo   Directorio      : %INSTALL_DIR%
+echo   Acceso directo  : "MyPOS Print Server" en el Escritorio
+echo   Log             : %LOG_FILE%
 echo.
 echo   Para iniciar el servidor de impresion:
 echo   Doble clic en "MyPOS Print Server" en el Escritorio
@@ -201,3 +197,32 @@ if /i "!STARTNOW!"=="S" (
 )
 
 endlocal
+exit /b 0
+
+:refresh_python_path
+for /f "usebackq tokens=2,*" %%a in (`reg query "HKCU\Environment" /v PATH 2^>nul`) do (
+    set "PATH=%%b;%PATH%"
+)
+set "PATH=%LOCALAPPDATA%\Programs\Python\Python311;%LOCALAPPDATA%\Programs\Python\Python311\Scripts;%PATH%"
+exit /b 0
+
+:log
+set "MSG=%~1"
+echo  %MSG%
+>> "%LOG_FILE%" echo [%DATE% %TIME%] %MSG%
+exit /b 0
+
+:fail
+set "ERR=%~1"
+echo.
+echo  [ERROR] %ERR%
+echo  [ERROR] %ERR%>> "%LOG_FILE%"
+echo.
+echo  Revise el log: %LOG_FILE%
+echo.
+pause
+goto :abort
+
+:abort
+endlocal
+exit 1

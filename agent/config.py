@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     llm_min_interval_seconds: int = Field(default=8, alias="LLM_MIN_INTERVAL_SECONDS")
     llm_quota_cooldown_seconds: int = Field(default=300, alias="LLM_QUOTA_COOLDOWN_SECONDS")
 
+    # ── Clasificador de intención (segunda instancia) ─────────────────────────
+    # Modelo chico y barato que SOLO entiende qué quiere el usuario y devuelve
+    # {intent, query, periodo} en JSON. Reusa GOOGLE_API_KEY. No usa tool-calling
+    # ni el grafo pesado, así consume muy pocos tokens y la cuota dura mucho más.
+    classifier_enabled: bool = Field(default=True, alias="CLASSIFIER_ENABLED")
+    classifier_model: str = Field(default="gemini-1.5-flash", alias="CLASSIFIER_MODEL")
+
     # ── MyPOS Web Backend (JWT Bearer) ────────────────────────────────────────
     # En producción usar 127.0.0.1 (misma máquina, evita DNS y TLS extra)
     mypos_web_url: str = Field(default="http://127.0.0.1/api", alias="MYPOS_WEB_URL")
