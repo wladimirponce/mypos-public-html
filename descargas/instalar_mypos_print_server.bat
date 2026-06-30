@@ -180,7 +180,7 @@ call :log "[6/6] Creando acceso directo en el Escritorio..."
     echo ^> "%%RUN_LOG%%" echo [%%DATE%% %%TIME%%] Iniciando MyPOS Print Server
     echo echo.
     echo echo  ==========================================
-    echo echo    MyPOS Print Server  ^|  Puerto 5555
+    echo echo    MyPOS Print Server - Puerto 5555
     echo echo    Deja esta ventana abierta mientras
     echo echo    usas el sistema de impresion.
     echo echo    Cierra con Ctrl+C para detener.
