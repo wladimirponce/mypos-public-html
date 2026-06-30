@@ -109,8 +109,22 @@ final class CompraController
         } catch (HttpException $exception) {
             Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());
         } catch (Throwable $exception) {
-            error_log($exception->getMessage());
-            Response::error('Error interno del servidor', null, 500);
+            // Log enriquecido: clase, ubicacion y (si es PDOException) el SQLSTATE/driver error.
+            $detalle = sprintf(
+                '[Compras] %s: %s @ %s:%d',
+                get_class($exception),
+                $exception->getMessage(),
+                $exception->getFile(),
+                $exception->getLine()
+            );
+            if ($exception instanceof \PDOException && is_array($exception->errorInfo ?? null)) {
+                $detalle .= ' | SQLSTATE=' . implode(' / ', array_map('strval', $exception->errorInfo));
+            }
+            error_log($detalle);
+
+            // TEMPORAL (debug confirmacion de compra): exponer el detalle al cliente para
+            // diagnosticar el 500. REVERTIR a 'Error interno del servidor' tras identificar la causa.
+            Response::error($detalle, null, 500);
         }
     }
 

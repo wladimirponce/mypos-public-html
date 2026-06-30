@@ -633,11 +633,21 @@ final class ProductoRepository
 
     public function actualizarCostoActual(int $empresaId, int $productoId, int $costoNuevo): void
     {
+        // Placeholders distintos a proposito: la conexion usa PDO::ATTR_EMULATE_PREPARES = false,
+        // y en ese modo PDO no permite reusar el mismo placeholder con nombre mas de una vez
+        // (lanza SQLSTATE[HY093]). Antes :costo aparecia 3 veces y reventaba la confirmacion
+        // de compra, dejandola en BORRADOR.
         $this->connection->prepare(
             'UPDATE productos
-             SET costo_actual = :costo, precio_costo = :costo, updated_at = CURRENT_TIMESTAMP
-             WHERE id = :id AND empresa_id = :empresa_id AND costo_actual != :costo'
-        )->execute(['costo' => $costoNuevo, 'id' => $productoId, 'empresa_id' => $empresaId]);
+             SET costo_actual = :costo, precio_costo = :costo_precio, updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id AND empresa_id = :empresa_id AND costo_actual != :costo_filtro'
+        )->execute([
+            'costo' => $costoNuevo,
+            'costo_precio' => $costoNuevo,
+            'costo_filtro' => $costoNuevo,
+            'id' => $productoId,
+            'empresa_id' => $empresaId,
+        ]);
     }
 
     public function actualizarPrecioVenta(int $empresaId, int $productoId, int $precioVenta): void
