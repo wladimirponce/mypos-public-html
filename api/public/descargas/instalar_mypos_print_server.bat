@@ -173,8 +173,11 @@ call :log "[6/6] Creando acceso directo en el Escritorio..."
 
 (
     echo @echo off
+    echo setlocal EnableExtensions
     echo title MyPOS Print Server
-    echo cd /d "%INSTALL_DIR%"
+    echo cd /d "%%~dp0"
+    echo set "RUN_LOG=%%TEMP%%\mypos_print_server_run.log"
+    echo ^> "%%RUN_LOG%%" echo [%%DATE%% %%TIME%%] Iniciando MyPOS Print Server
     echo echo.
     echo echo  ==========================================
     echo echo    MyPOS Print Server  ^|  Puerto 5555
@@ -183,16 +186,42 @@ call :log "[6/6] Creando acceso directo en el Escritorio..."
     echo echo    Cierra con Ctrl+C para detener.
     echo echo  ==========================================
     echo echo.
-    echo py -3.11 mypos_print_server.py ^|^| python mypos_print_server.py
-    echo if %%ERRORLEVEL%% NEQ 0 ^(
-    echo     echo.
-    echo     echo  [ERROR] El servidor no pudo iniciarse. Revisa el mensaje de arriba.
+    echo echo  Carpeta: %%CD%%
+    echo echo  Log: %%RUN_LOG%%
+    echo echo.
+    echo set "PY_SERVER="
+    echo py -3.11 --version ^>nul 2^>^&1
+    echo if %%ERRORLEVEL%% EQU 0 set "PY_SERVER=py -3.11"
+    echo if not defined PY_SERVER ^(
+    echo     python --version ^>nul 2^>^&1
+    echo     if %%ERRORLEVEL%% EQU 0 set "PY_SERVER=python"
     echo ^)
+    echo if not defined PY_SERVER ^(
+    echo     echo [ERROR] No se encontro Python 3.11 ni python en PATH.
+    echo     echo [%%DATE%% %%TIME%%] ERROR: Python no disponible ^>^> "%%RUN_LOG%%"
+    echo     goto :fin
+    echo ^)
+    echo echo  Usando: %%PY_SERVER%%
+    echo echo [%%DATE%% %%TIME%%] Usando %%PY_SERVER%% ^>^> "%%RUN_LOG%%"
+    echo echo.
+    echo %%PY_SERVER%% mypos_print_server.py
+    echo set "SERVER_RC=%%ERRORLEVEL%%"
+    echo echo [%%DATE%% %%TIME%%] Proceso finalizo con codigo %%SERVER_RC%% ^>^> "%%RUN_LOG%%"
+    echo if not "%%SERVER_RC%%"=="0" ^(
+    echo     echo.
+    echo     echo  [ERROR] El servidor se cerro con codigo %%SERVER_RC%%.
+    echo     echo  Revisa el mensaje anterior y el log:
+    echo     echo  %%RUN_LOG%%
+    echo ^)
+    echo :fin
+    echo echo.
+    echo echo  Ventana de diagnostico. Presiona una tecla para cerrar.
     echo pause
+    echo endlocal
 ) > "%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat"
 if %ERRORLEVEL% NEQ 0 call :fail "No se pudo crear el script de inicio."
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath('Desktop'); $s = $ws.CreateShortcut((Join-Path $desktop 'MyPOS Print Server.lnk')); $s.TargetPath = [Environment]::SystemDirectory + '\cmd.exe'; $s.Arguments = '/k ""%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat""'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.Description = 'Servidor de impresion MyPOS - Puerto 5555'; $s.Save()" >> "%LOG_FILE%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [Environment]::GetFolderPath('Desktop'); $s = $ws.CreateShortcut((Join-Path $desktop 'MyPOS Print Server.lnk')); $s.TargetPath = [Environment]::SystemDirectory + '\cmd.exe'; $s.Arguments = '/k call ""%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat""'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.Description = 'Servidor de impresion MyPOS - Puerto 5555'; $s.Save()" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 call :fail "No se pudo crear el acceso directo."
 call :log "      Acceso directo creado en el Escritorio."
 
@@ -210,7 +239,7 @@ echo  ============================================================
 echo.
 set /p "STARTNOW= Iniciar el servidor ahora mismo? [S/N]: "
 if /i "!STARTNOW!"=="S" (
-    start cmd /k "%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat"
+    start "MyPOS Print Server" cmd /k call "%INSTALL_DIR%\INICIAR_MYPOS_PRINT_SERVER.bat"
 )
 
 endlocal
