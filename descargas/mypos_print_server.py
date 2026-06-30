@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
@@ -182,7 +182,7 @@ def default_printer() -> str:
         return explicit
 
     printers = list_printers()
-    preferred = (
+    thermal_preferred = (
         "TM-T20",
         "TM-T88",
         "TM-M",
@@ -198,17 +198,16 @@ def default_printer() -> str:
         "GP-",
         "GPRINTER",
         "USB",
-        *PDF_PRINTER_TOKENS,
     )
     for name in printers:
         upper = name.upper()
-        if any(token in upper for token in preferred):
+        if not is_pdf_printer(name) and any(token in upper for token in thermal_preferred):
             return name
 
     if win32print is not None:
         try:
             default = text(win32print.GetDefaultPrinter())
-            if default:
+            if default and not is_pdf_printer(default):
                 return default
         except Exception:
             pass
