@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
@@ -654,6 +654,20 @@ def append_pdf417(ticket: bytearray, ted: str, columns: int = 8, raster_width: i
         ticket.extend(enc("*** TIMBRE NO DISPONIBLE ***\n"))
 
 
+def append_dte_timbre(ticket: bytearray, data: dict[str, Any], columns: int = 8, raster_width: int = 560) -> None:
+    img = timbre_image(data)
+    if img is not None:
+        try:
+            ticket.extend(CMD_CENTER)
+            ticket.extend(image_to_escpos_raster(img, max_width=raster_width))
+            ticket.extend(b"\n")
+            return
+        except Exception as exc:
+            print(f"[TIMBRE] png escpos fallback: {exc}")
+
+    append_pdf417(ticket, resolve_ted(data), columns=columns, raster_width=raster_width)
+
+
 def barcode_to_escpos(code: str, max_width: int = 400) -> bytes:
     """Genera imagen de código de barras ESC/POS raster. EAN-13 si 12-13 dígitos, Code128 en otro caso."""
     if Image is None:
@@ -899,12 +913,9 @@ def format_boleta_electronica_dte(data: dict[str, Any]) -> bytes:
         ticket.extend(line("Track ID", text(data.get("track_id")), width))
 
     ticket.extend(format_ticket_body(data, width))
-    # Timbre PDF417 generado localmente (cada plataforma genera con sus parametros):
-    # 80mm: 12 cols, scale=2, ratio=3 -> ~71x47mm (1.5:1 mas ancho), mod 0.25mm.
-    # 58mm: 8 cols, scale=2, ratio=3  -> mod ~0.22mm (bajo min SII; hardware limit).
-    # El PNG del servidor (timbre_png_b64) no se usa: viene en proporcion carta y
-    # al ajustarse al ancho termico el modulo cae a <0.20mm, ilegible para el SII.
-    append_pdf417(ticket, resolve_ted(data), columns=pdf_cols, raster_width=raster_w)
+    # Prefiere el timbre PNG generado por admin/TCPDF; es el mismo que usa el PDF
+    # oficial. Si no viene o el cliente no puede rasterizarlo, genera PDF417 local.
+    append_dte_timbre(ticket, data, columns=pdf_cols, raster_width=raster_w)
     ticket.extend(CMD_CENTER)
     ticket.extend(CMD_BOLD_ON)
     ticket.extend(enc("Timbre Electronico SII\n"))
