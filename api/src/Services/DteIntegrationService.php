@@ -836,6 +836,33 @@ final class DteIntegrationService
         return ['provisioned' => !empty($response['ok']), 'response' => $response];
     }
 
+    /**
+     * Provisiona el certificado digital (.pfx + clave) en el facturador admin si la
+     * empresa ya esta en produccion. Espejo de provisionarCafSiListo(): best-effort,
+     * solo cuando modo=REAL y hay endpoint. El admin firma los DTE con este cert por
+     * RUT, asi que sin provisionarlo la migracion no podria emitir en produccion.
+     */
+    public function provisionarCertSiListo(int $empresaId, string $pfxBytes, string $password): array
+    {
+        if ($empresaId <= 0 || $pfxBytes === '') {
+            return ['provisioned' => false, 'reason' => 'sin_certificado'];
+        }
+        $config = $this->configuracion($empresaId);
+        if (($config['modo'] ?? '') !== 'REAL' || trim((string) ($config['endpoint_http'] ?? '')) === '') {
+            return ['provisioned' => false, 'reason' => 'facturador_no_listo'];
+        }
+
+        $endpoint = (string) $config['endpoint_http'];
+        $apiKey = $this->adminApiKey($config, $empresaId);
+        $response = $this->adminRequest($endpoint, 'provisionar_credenciales', [
+            'empresa_id' => $empresaId,
+            'pfx_base64' => base64_encode($pfxBytes),
+            'pfx_password' => $password,
+        ], $apiKey);
+
+        return ['provisioned' => !empty($response['ok']), 'response' => $response];
+    }
+
     private function adminRequest(string $endpoint, string $action, array $payload, string $apiKey): array
     {
         if (!function_exists('curl_init')) {

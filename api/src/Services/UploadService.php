@@ -242,6 +242,17 @@ final class UploadService
             'size_bytes' => $stored['size_bytes'],
         ]);
 
+        // Auto-provisionar el certificado en el facturador (admin) si la empresa ya
+        // esta en produccion. Mismo patron best-effort que el CAF (FolioService): si
+        // falla, el cert igual quedo guardado web-side. Cierra el caso "migracion
+        // directo a produccion" sin un paso manual extra.
+        try {
+            $pfxParaAdmin = $certificate['normalized_content'] ?? $pfxContent;
+            (new \Mypos\Services\DteIntegrationService())->provisionarCertSiListo($empresaId, (string) $pfxParaAdmin, $password);
+        } catch (\Throwable $provEx) {
+            error_log('[UploadService] Auto-provision certificado no critica fallo: ' . $provEx->getMessage());
+        }
+
         return [
             'archivo_id' => $archivoId,
             'ruta_relativa' => $stored['ruta_relativa'],

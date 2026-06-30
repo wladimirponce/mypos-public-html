@@ -114,10 +114,12 @@ final class AuthService
                 'activo' => 1
             ]);
 
-            // 6. Activar 14 días de prueba gratis (Free Trial - MultiSucursal)
+            // 6. Activar primer mes gratis (Free Trial). Aplica al plan elegido en el
+            //    registro; del segundo mes en adelante se paga la cuota del plan (pago
+            //    manual vía Flow/PayPal, validado por SubscriptionMiddleware al vencer).
             $statement = $connection->prepare(
                 'INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado)
-                 VALUES (:empresa_id, :plan_id, NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY), "activa")'
+                 VALUES (:empresa_id, :plan_id, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), "activa")'
             );
             $statement->execute([
                 'empresa_id' => $empresaId,
