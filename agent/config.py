@@ -50,6 +50,7 @@ class Settings(BaseSettings):
 
     # ── Persistencia ─────────────────────────────────────────────────────────
     db_path: str = Field(default="persistence/agent.db", alias="AGENT_DB")
+    unanswered_log_path: str = Field(default="tmp/agent_unanswered.txt", alias="AGENT_UNANSWERED_LOG")
 
     model_config = {"env_file": ".env", "populate_by_name": True, "extra": "ignore"}
 

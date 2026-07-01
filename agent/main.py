@@ -11,7 +11,8 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+import os
 import time
 import unicodedata
 import uuid
@@ -85,6 +86,72 @@ def _is_provider_busy_error(exc: Exception) -> bool:
 
 def _grok_ready() -> bool:
     return bool(settings.grok_api_key) and settings.llm_provider != "grok"
+
+
+def _safe_log_text(value: object, limit: int = 4000) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(text) > limit:
+        return text[:limit] + "\n...[truncado]"
+    return text
+
+
+def _is_unanswered_reply(reply: str) -> bool:
+    text = _normalize_text(reply)
+    markers = (
+        "regulando consultas avanzadas",
+        "regulando las consultas",
+        "alta demanda",
+        "no pude responder",
+        "no pudo responder",
+        "no pude completar",
+        "no se pudo completar",
+        "no se pudo inicializar",
+        "no esta disponible",
+        "no respondio",
+        "tardo demasiado",
+        "necesita revisar su configuracion",
+        "proveedor ia",
+        "error interno del agente",
+        "llm_provider no soportado",
+        "no configurado para llm_provider",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _append_unanswered_log(
+    message: str,
+    reply: str,
+    thread_id: str,
+    empresa_id: int,
+    sucursal_id: Optional[int],
+    operator_name: str,
+) -> None:
+    path = settings.unanswered_log_path
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.dirname(__file__), path)
+    try:
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+
+        entry = (
+            "=== CONSULTA NO RESUELTA ===\n"
+            f"fecha={datetime.now().isoformat(timespec='seconds')}\n"
+            f"thread_id={_safe_log_text(thread_id, 200)}\n"
+            f"empresa_id={empresa_id}\n"
+            f"sucursal_id={sucursal_id or ''}\n"
+            f"operador={_safe_log_text(operator_name, 200)}\n"
+            "consulta:\n"
+            f"{_safe_log_text(message)}\n"
+            "respuesta:\n"
+            f"{_safe_log_text(reply)}\n"
+            "=== FIN ===\n\n"
+        )
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(entry)
+    except Exception:
+        # El registro de aprendizaje no debe romper el chat operativo.
+        return
 
 
 async def _reserve_llm_slot() -> Optional[ChatResponse]:
@@ -301,8 +368,13 @@ def _is_sales_query(text: str) -> bool:
 
 
 def _is_top_products_query(text: str) -> bool:
-    return _contains_any(text, ("mas vendido", "mas vendidos", "top producto", "top productos",
-                                "mejor vendido", "mejores vendidos", "ranking producto"))
+    return _contains_any(text, (
+        "mas vendido", "mas vendidos", "top producto", "top productos",
+        "mejor vendido", "mejores vendidos", "ranking producto",
+        "producto mas vendido", "productos mas vendidos",
+        "se vendio mas", "vendio mas", "se vende mas", "vende mas",
+        "producto se vendio", "producto que mas se vendio",
+    ))
 
 
 def _is_boxes_query(text: str) -> bool:
@@ -903,13 +975,46 @@ async def _run(
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, _: None = Security(_require_secret)):
     thread_id = req.thread_id or f"web-{req.empresa_id}-{uuid.uuid4().hex[:8]}"
-    return await _run(
-        message=req.message,
-        empresa_id=req.empresa_id,
-        thread_id=thread_id,
-        sucursal_id=req.sucursal_id,
-        operator_name=req.operator_name,
-    )
+    try:
+        response = await _run(
+            message=req.message,
+            empresa_id=req.empresa_id,
+            thread_id=thread_id,
+            sucursal_id=req.sucursal_id,
+            operator_name=req.operator_name,
+        )
+    except HTTPException as exc:
+        detail = str(exc.detail or exc.status_code)
+        _append_unanswered_log(
+            req.message,
+            detail,
+            thread_id,
+            req.empresa_id,
+            req.sucursal_id,
+            req.operator_name,
+        )
+        raise
+    except Exception as exc:
+        _append_unanswered_log(
+            req.message,
+            f"{exc.__class__.__name__}: {exc}",
+            thread_id,
+            req.empresa_id,
+            req.sucursal_id,
+            req.operator_name,
+        )
+        raise
+
+    if _is_unanswered_reply(response.reply):
+        _append_unanswered_log(
+            req.message,
+            response.reply,
+            response.thread_id,
+            req.empresa_id,
+            req.sucursal_id,
+            req.operator_name,
+        )
+    return response
 
 
 @app.get("/escalaciones")

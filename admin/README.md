@@ -38,6 +38,7 @@ admin/
 │   ├── emision.php         ← Cola de emisión y reenvíos al SII
 │   ├── historial.php       ← DTEs emitidos con estado SII
 │   ├── libros.php          ← Libro de boletas y guías
+│   ├── agente_consultas.php← Consultas IA no resueltas
 │   ├── saas.php            ← Suscripción y feature toggles por empresa (SaaS)
 │   ├── usuarios.php        ← Usuarios del dashboard
 │   ├── consultas.php       ← Consultas manuales al SII

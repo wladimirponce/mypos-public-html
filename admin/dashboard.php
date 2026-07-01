@@ -67,7 +67,7 @@ if (isset($_GET['switch_empresa'])) {
 
 // —— Módulo activo ——
 $module = $_GET['module'] ?? 'empresas';
-$allowed = ['clientes_mypos','emision','consultas','historial','libros','rcof_auditoria','empresas','config','certificacion','cafs','pos_urgencia','dispositivos','whatsapp','ventas_reset',];
+$allowed = ['clientes_mypos','emision','consultas','historial','libros','rcof_auditoria','agente_consultas','empresas','config','certificacion','cafs','pos_urgencia','dispositivos','whatsapp','ventas_reset',];
 if (!in_array($module, $allowed)) $module = 'empresas';
 
 // —— Intentar conexión DB (opcional, no bloquea) ——
@@ -119,6 +119,7 @@ $titles = [
     'historial'     => ['Historial DTE', 'Documentos emitidos'],
     'libros'        => ['Libros & RCOF', 'Reportes tributarios'],
     'rcof_auditoria'=> ['Auditoria RCOF', 'Estado diario multiempresa'],
+    'agente_consultas' => ['Consultas IA', 'Preguntas no resueltas por el asistente'],
     'certificacion' => ['Certificación SII', 'Pool de pruebas (Solo No-Prod)'],
     'whatsapp'      => ['WhatsApp Business', 'Asignación de números por empresa'],
     'ventas_reset'  => ['Resetear Ventas', 'Eliminar ventas de prueba sin tocar folios'],
@@ -278,6 +279,9 @@ $pageSubtitle = $titles[$module][1] ?? '';
             <a href="dashboard.php?module=rcof_auditoria" class="dash-nav-item <?= $module === 'rcof_auditoria' ? 'active' : '' ?>">
                 <i class="bi bi-clipboard2-check"></i> Auditoria RCOF
             </a>
+            <a href="dashboard.php?module=agente_consultas" class="dash-nav-item <?= $module === 'agente_consultas' ? 'active' : '' ?>">
+                <i class="bi bi-chat-left-text"></i> Consultas IA
+            </a>
 
             <div class="dash-nav-section">4. Zona de Certificación</div>
             <a href="dashboard.php?module=certificacion" class="dash-nav-item <?= $module === 'certificacion' ? 'active' : '' ?>">
@@ -341,7 +345,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <div class="dash-content">
             <?php
             $moduleFile = __DIR__ . "/modules/{$module}.php";
-            $globalModules = ['clientes_mypos', 'empresas', 'whatsapp', 'rcof_auditoria', 'ventas_reset'];
+            $globalModules = ['clientes_mypos', 'empresas', 'whatsapp', 'rcof_auditoria', 'agente_consultas', 'ventas_reset'];
             if (!$globalContext && !in_array($module, $globalModules, true)) {
                 echo '<div class="d-alert warning"><i class="bi bi-building-exclamation"></i> Seleccione una empresa para acceder a este modulo.</div>';
             } elseif (file_exists($moduleFile)) {
