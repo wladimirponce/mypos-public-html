@@ -123,7 +123,7 @@ def _tool_for_intent(intent: str) -> str:
 
 def _default_params_for_intent(intent: str, periodo: str, query: str) -> dict:
     if intent == "top_productos":
-        return {"periodo_default": periodo or "hoy", "top": 10}
+        return {"periodo_default": periodo or "mes", "top": 10}
     if intent == "ventas":
         return {"periodo_default": periodo or "hoy"}
     if intent in ("producto", "stock_producto", "cliente"):
@@ -461,6 +461,8 @@ def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
 
 def _detect_period(text: str) -> str:
     """Detecta el período de ventas a partir del texto normalizado."""
+    if "hoy" in text:
+        return "hoy"
     if "ayer" in text:
         return "ayer"
     if "semana" in text:
@@ -470,6 +472,21 @@ def _detect_period(text: str) -> str:
     if "mes" in text or "este mes" in text or "mensual" in text:
         return "mes"
     return "hoy"
+
+
+def _detect_explicit_period(text: str) -> str:
+    """Detecta periodo solo si el usuario lo pidio expresamente."""
+    if "hoy" in text:
+        return "hoy"
+    if "ayer" in text:
+        return "ayer"
+    if "semana" in text:
+        return "semana"
+    if "mes anterior" in text or "mes pasado" in text or "ultimo mes" in text:
+        return "mes_anterior"
+    if "mes" in text or "este mes" in text or "mensual" in text:
+        return "mes"
+    return ""
 
 
 def _is_sales_query(text: str) -> bool:
@@ -721,7 +738,7 @@ def _detect_intent_rules(text: str, raw: str) -> tuple[Optional[str], str, str]:
     lo que nada más reconoció.
     """
     if _is_top_products_query(text):
-        return "top_productos", "", _detect_period(text)
+        return "top_productos", "", _detect_explicit_period(text)
     if _is_sales_query(text):
         return "ventas", "", _detect_period(text)
     if _is_stock_critical_query(text):
