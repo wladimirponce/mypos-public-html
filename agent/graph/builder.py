@@ -123,7 +123,35 @@ def _route(state: AgentState) -> str:
 
 # ─── Build ────────────────────────────────────────────────────────────────────
 
-async def build_graph():
+def _model_kwargs(llm_provider: str, llm_model: str) -> dict:
+    provider_keys = {
+        "anthropic": ("ANTHROPIC_API_KEY", settings.anthropic_api_key),
+        "openai": ("OPENAI_API_KEY", settings.openai_api_key),
+        "google_genai": ("GOOGLE_API_KEY", settings.google_api_key),
+        "grok": ("GROK_API_KEY", settings.grok_api_key),
+    }
+
+    model_provider = "openai" if llm_provider == "grok" else llm_provider
+    model_kwargs = {
+        "model": llm_model,
+        "model_provider": model_provider,
+        "timeout": 25,
+        "max_retries": 1,
+    }
+
+    if llm_provider in provider_keys:
+        env_key, api_key = provider_keys[llm_provider]
+        if api_key:
+            os.environ.setdefault(env_key, api_key)
+            model_kwargs["api_key"] = api_key
+
+    if llm_provider == "grok":
+        model_kwargs["base_url"] = settings.grok_api_base
+
+    return model_kwargs
+
+
+async def build_graph(llm_provider: str | None = None, llm_model: str | None = None):
     """Compila el grafo con checkpointer SQLite. Llamar una vez al arranque."""
     import aiosqlite
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -131,26 +159,12 @@ async def build_graph():
     # init_chat_model acepta cualquier proveedor LangChain.
     # La API key la lee automáticamente de la variable de entorno estándar
     # (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY…).
-    provider_keys = {
-        "anthropic": ("ANTHROPIC_API_KEY", settings.anthropic_api_key),
-        "openai": ("OPENAI_API_KEY", settings.openai_api_key),
-        "google_genai": ("GOOGLE_API_KEY", settings.google_api_key),
-    }
-
-    model_kwargs = {
-        "model": settings.llm_model,
-        "model_provider": settings.llm_provider,
-        "timeout": 25,
-        "max_retries": 1,
-    }
-
-    if settings.llm_provider in provider_keys:
-        env_key, api_key = provider_keys[settings.llm_provider]
-        if api_key:
-            os.environ.setdefault(env_key, api_key)
-            model_kwargs["api_key"] = api_key
-
-    model = init_chat_model(**model_kwargs).bind_tools(ALL_TOOLS)
+    model = init_chat_model(
+        **_model_kwargs(
+            llm_provider or settings.llm_provider,
+            llm_model or settings.llm_model,
+        )
+    ).bind_tools(ALL_TOOLS)
 
     workflow = StateGraph(AgentState)
     workflow.add_node("assistant", _make_assistant(model))

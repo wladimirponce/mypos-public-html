@@ -55,6 +55,7 @@ def _health_app(environ, start_response):
         "anthropic": bool(_env_value(values, "ANTHROPIC_API_KEY")),
         "openai": bool(_env_value(values, "OPENAI_API_KEY")),
         "google_genai": bool(_env_value(values, "GOOGLE_API_KEY")),
+        "grok": bool(_env_value(values, "GROK_API_KEY")),
         "ollama": True,
     }.get(provider, False)
 

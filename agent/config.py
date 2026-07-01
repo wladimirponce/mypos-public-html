@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
+    grok_api_key: str = Field(default="", alias="GROK_API_KEY")
+    grok_api_base: str = Field(default="https://api.x.ai/v1", alias="GROK_API_BASE")
+    grok_model: str = Field(default="grok-2-latest", alias="GROK_MODEL")
     llm_min_interval_seconds: int = Field(default=8, alias="LLM_MIN_INTERVAL_SECONDS")
     llm_quota_cooldown_seconds: int = Field(default=300, alias="LLM_QUOTA_COOLDOWN_SECONDS")
 

@@ -61,6 +61,47 @@ $writeLog = function(string $line) use ($logFile, $tsLog): void {
     file_put_contents($logFile, "[$tsLog] $line\n", FILE_APPEND);
 };
 
+$formatCronRows = function(array $res, string $estado): string {
+    $rows = array_values(array_filter($res['results'] ?? [], function($row) use ($estado) {
+        return strtoupper((string)($row['estado'] ?? '')) === $estado;
+    }));
+
+    if (!$rows) {
+        return '';
+    }
+
+    $lines = [];
+    foreach ($rows as $row) {
+        $tracking = is_array($row['tracking'] ?? null) ? $row['tracking'] : [];
+        $empresa = trim((string)($row['razon_social'] ?? ''));
+        $rut = trim((string)($row['rut'] ?? ''));
+        $id = (int)($row['empresa_id'] ?? 0);
+        $modo = (string)($tracking['modo'] ?? ($row['modo'] ?? ''));
+        $dteActivo = array_key_exists('dte_activo', $tracking) ? (string)$tracking['dte_activo'] : (string)($row['dte_activo'] ?? '');
+        $ambiente = (string)($tracking['ambiente'] ?? ($row['ambiente'] ?? ''));
+        $detalle = (string)($row['error'] ?? $row['mensaje'] ?? '');
+
+        $line = "- empresa_id=$id";
+        if ($empresa !== '') {
+            $line .= " | $empresa";
+        }
+        if ($rut !== '') {
+            $line .= " | RUT $rut";
+        }
+        if ($modo !== '' || $dteActivo !== '' || $ambiente !== '') {
+            $line .= " | modo=" . ($modo !== '' ? $modo : '-')
+                . " | dte_activo=" . ($dteActivo !== '' ? $dteActivo : '-')
+                . " | ambiente=" . ($ambiente !== '' ? $ambiente : '-');
+        }
+        if ($detalle !== '') {
+            $line .= " | $detalle";
+        }
+        $lines[] = $line;
+    }
+
+    return implode("\n", $lines) . "\n";
+};
+
 $writeLog(
     "=== Inicio RCOF cron multiempresa | fecha=$fecha | force=" . ($force ? 'yes' : 'no')
     . " | dry_run=" . ($dryRun ? 'yes' : 'no')
@@ -73,11 +114,20 @@ try {
 
     if (empty($res['ok'])) {
         echo "FALLO RCOF multiempresa $fecha: {$res['error_count']} error(es), {$res['ok_count']} OK, {$res['skipped_count']} omitida(s). Run {$res['run_id']}.\n";
+        if (!empty($res['skipped_count'])) {
+            echo "Empresas omitidas:\n" . $formatCronRows($res, 'NO_APLICA');
+        }
+        if (!empty($res['error_count'])) {
+            echo "Empresas con error:\n" . $formatCronRows($res, 'ERROR');
+        }
         $writeLog("FALLO: run_id=" . ($res['run_id'] ?? '') . " errores=" . ($res['error_count'] ?? 0));
         exit(1);
     }
 
     echo "OK: RCOF multiempresa $fecha completado. {$res['ok_count']} OK, {$res['skipped_count']} omitida(s), {$res['error_count']} error(es). Run {$res['run_id']}.\n";
+    if (!empty($res['skipped_count'])) {
+        echo "Empresas omitidas:\n" . $formatCronRows($res, 'NO_APLICA');
+    }
     exit(0);
 } catch (Throwable $e) {
     $writeLog("EXCEPCION: " . $e->getMessage() . " @ " . $e->getFile() . ":" . $e->getLine());

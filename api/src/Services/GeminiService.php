@@ -292,11 +292,11 @@ PROMPT;
     private function geminiErrorMessage(int $status): string
     {
         return match ($status) {
-            400 => 'Gemini rechazo el formato o tamano de las imagenes enviadas.',
-            401, 403 => 'Gemini rechazo las credenciales o permisos configurados.',
-            404 => 'El modelo Gemini configurado no existe o no esta disponible.',
-            429 => 'Gemini alcanzo temporalmente su limite de solicitudes o cuota.',
-            default => 'Gemini no esta disponible temporalmente.',
+            400 => 'El proveedor IA rechazo el formato o tamano de las imagenes enviadas.',
+            401, 403 => 'El proveedor IA rechazo las credenciales o permisos configurados.',
+            404 => 'El modelo IA configurado no existe o no esta disponible.',
+            429 => 'El proveedor IA esta regulando solicitudes temporalmente.',
+            default => 'El proveedor IA no esta disponible temporalmente.',
         };
     }
 }

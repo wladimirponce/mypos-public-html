@@ -177,7 +177,7 @@ final class AgentService
             || str_contains($text, '429')
             || str_contains($text, 'rate limit')
         ) {
-            return 'La IA alcanzo su limite temporal. Espera unos minutos o usa una consulta directa como ventas de hoy, cajas, stock o producto.';
+            return 'El asistente esta regulando consultas avanzadas por alta demanda. Mientras tanto puedo responder consultas directas como ventas de hoy, cajas, stock o producto.';
         }
 
         if (

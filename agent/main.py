@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from config import settings
 
 _graph = None
+_fallback_graph = None
 _SECRET_HEADER = APIKeyHeader(name="X-Agent-Secret", auto_error=False)
 _RUN_TIMEOUT_SECONDS = 35
 _last_llm_call_at = 0.0
@@ -45,10 +46,9 @@ def _provider_busy_seconds_left() -> int:
 def _quota_message(seconds: int) -> str:
     minutes = max(1, (seconds + 59) // 60)
     return (
-        "Gemini alcanzo su cuota temporal. "
-        f"Voy a evitar nuevas llamadas IA por aproximadamente {minutes} min. "
-        "Mientras tanto puedo responder consultas directas como: ventas de hoy, "
-        "producto por codigo/nombre, stock y cajas."
+        "El asistente esta regulando consultas avanzadas por alta demanda. "
+        f"Durante aproximadamente {minutes} min priorizare respuestas directas: "
+        "ventas de hoy, producto por codigo/nombre, stock y cajas."
     )
 
 
@@ -81,6 +81,10 @@ def _is_provider_busy_error(exc: Exception) -> bool:
         or "overloaded" in text
         or "temporarily unavailable" in text
     )
+
+
+def _grok_ready() -> bool:
+    return bool(settings.grok_api_key) and settings.llm_provider != "grok"
 
 
 async def _reserve_llm_slot() -> Optional[ChatResponse]:
@@ -159,6 +163,20 @@ async def _get_graph():
 
     _graph = await build_graph()
     return _graph
+
+
+async def _get_fallback_graph():
+    global _fallback_graph
+    if _fallback_graph is not None:
+        return _fallback_graph
+
+    from graph.builder import build_graph
+
+    _fallback_graph = await build_graph(
+        llm_provider="grok",
+        llm_model=settings.grok_model,
+    )
+    return _fallback_graph
 
 
 import re as _re
@@ -606,6 +624,7 @@ def _provider_ready() -> tuple[bool, str]:
         "anthropic": ("ANTHROPIC_API_KEY", settings.anthropic_api_key),
         "openai": ("OPENAI_API_KEY", settings.openai_api_key),
         "google_genai": ("GOOGLE_API_KEY", settings.google_api_key),
+        "grok": ("GROK_API_KEY", settings.grok_api_key),
     }
 
     if settings.llm_provider == "ollama":
@@ -633,7 +652,7 @@ async def _try_classifier(
     Devuelve None para que caiga al agente completo cuando el intent es 'accion'
     o 'desconocido', o cuando no se pudo clasificar.
     """
-    if not settings.classifier_enabled or not settings.google_api_key:
+    if not settings.classifier_enabled or not (settings.google_api_key or settings.grok_api_key):
         return None
 
     # Respeta los cooldown ya conocidos (no insistir si Gemini está sin cuota).
@@ -645,7 +664,7 @@ async def _try_classifier(
             escalated=False,
         )
     quota_seconds = _quota_seconds_left()
-    if quota_seconds > 0:
+    if quota_seconds > 0 and not _grok_ready():
         return ChatResponse(
             thread_id=thread_id,
             reply=_quota_message(quota_seconds),
@@ -728,6 +747,63 @@ class EscalationReply(BaseModel):
     comentario: str = ""
 
 
+async def _invoke_graph(
+    graph_getter,
+    message: str,
+    empresa_id: int,
+    thread_id: str,
+    sucursal_id: Optional[int],
+    operator_name: str,
+) -> ChatResponse:
+    try:
+        graph = await asyncio.wait_for(graph_getter(), timeout=10)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="No se pudo inicializar el proveedor IA en 10 segundos",
+        ) from exc
+
+    config = {"configurable": {"thread_id": thread_id}}
+    state = {
+        "messages": [{"role": "user", "content": message}],
+        "empresa_id": empresa_id,
+        "sucursal_id": sucursal_id,
+        "operator_name": operator_name,
+        "channel": "web",
+        "escalated": False,
+        "escalation_reason": "",
+    }
+
+    try:
+        result = await asyncio.wait_for(
+            graph.ainvoke(state, config=config),
+            timeout=_RUN_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail=f"El proveedor IA no respondio en {_RUN_TIMEOUT_SECONDS} segundos",
+        ) from exc
+
+    snapshot = await graph.aget_state(config)
+    if "escalate" in (snapshot.next or []):
+        last = result["messages"][-1]
+        reason = ""
+        for tool_call in getattr(last, "tool_calls", []):
+            if tool_call["name"] == "solicitar_aprobacion_humana":
+                reason = tool_call["args"].get("motivo", "")
+                break
+
+        return ChatResponse(
+            thread_id=thread_id,
+            reply=f"Esta accion requiere aprobacion de un supervisor: {reason}",
+            escalated=True,
+        )
+
+    last = result["messages"][-1]
+    return ChatResponse(thread_id=thread_id, reply=getattr(last, "content", "") or "")
+
+
 async def _run(
     message: str,
     empresa_id: int,
@@ -756,8 +832,27 @@ async def _run(
         return classified
 
     # 3ª instancia: agente completo (acciones que escalan a humano)
+    if _quota_seconds_left() > 0 and _grok_ready():
+        return await _invoke_graph(
+            _get_fallback_graph,
+            message,
+            empresa_id,
+            thread_id,
+            sucursal_id,
+            operator_name,
+        )
+
     ready, reason = _provider_ready()
     if not ready:
+        if _grok_ready():
+            return await _invoke_graph(
+                _get_fallback_graph,
+                message,
+                empresa_id,
+                thread_id,
+                sucursal_id,
+                operator_name,
+            )
         raise HTTPException(status_code=503, detail=reason)
 
     quota_response = await _reserve_llm_slot()
@@ -766,35 +861,28 @@ async def _run(
         return quota_response
 
     try:
-        graph = await asyncio.wait_for(_get_graph(), timeout=10)
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail="No se pudo inicializar el proveedor IA en 10 segundos",
-        ) from exc
-    config = {"configurable": {"thread_id": thread_id}}
-
-    state = {
-        "messages": [{"role": "user", "content": message}],
-        "empresa_id": empresa_id,
-        "sucursal_id": sucursal_id,
-        "operator_name": operator_name,
-        "channel": "web",
-        "escalated": False,
-        "escalation_reason": "",
-    }
-
-    try:
-        result = await asyncio.wait_for(
-            graph.ainvoke(state, config=config),
-            timeout=_RUN_TIMEOUT_SECONDS,
+        return await _invoke_graph(
+            _get_graph,
+            message,
+            empresa_id,
+            thread_id,
+            sucursal_id,
+            operator_name,
         )
-    except asyncio.TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail=f"El proveedor IA no respondio en {_RUN_TIMEOUT_SECONDS} segundos",
-        ) from exc
     except Exception as exc:
+        if _is_quota_error(exc) and _grok_ready():
+            try:
+                return await _invoke_graph(
+                    _get_fallback_graph,
+                    message,
+                    empresa_id,
+                    thread_id,
+                    sucursal_id,
+                    operator_name,
+                )
+            except Exception as fallback_exc:
+                exc = fallback_exc
+
         if _is_quota_error(exc):
             cooldown = _mark_quota_exhausted()
             return ChatResponse(
@@ -810,24 +898,6 @@ async def _run(
                 escalated=False,
             )
         raise
-
-    snapshot = await graph.aget_state(config)
-    if "escalate" in (snapshot.next or []):
-        last = result["messages"][-1]
-        reason = ""
-        for tool_call in getattr(last, "tool_calls", []):
-            if tool_call["name"] == "solicitar_aprobacion_humana":
-                reason = tool_call["args"].get("motivo", "")
-                break
-
-        return ChatResponse(
-            thread_id=thread_id,
-            reply=f"Esta accion requiere aprobacion de un supervisor: {reason}",
-            escalated=True,
-        )
-
-    last = result["messages"][-1]
-    return ChatResponse(thread_id=thread_id, reply=getattr(last, "content", "") or "")
 
 
 @app.post("/chat", response_model=ChatResponse)

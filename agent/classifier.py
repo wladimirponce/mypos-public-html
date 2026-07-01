@@ -20,7 +20,7 @@ from typing import Optional
 
 from config import settings
 
-_model = None
+_models = {}
 
 # Vocabulario de intenciones — debe coincidir con main._dispatch_intent()
 VALID_INTENTS = {
@@ -57,19 +57,43 @@ Reglas:
 - Responde SOLO el JSON, nada más."""
 
 
-def _get_model():
+def _is_quota_error(exc: Exception) -> bool:
+    text = f"{exc.__class__.__name__}: {exc}".lower()
+    return (
+        "resource_exhausted" in text
+        or "429" in text
+        or "quota" in text
+        or "rate limit" in text
+    )
+
+
+def _get_model(provider: str = "google_genai"):
     """Instancia perezosa del modelo clasificador (cacheada)."""
-    global _model
-    if _model is not None:
-        return _model
+    if provider in _models:
+        return _models[provider]
 
     from langchain.chat_models import init_chat_model
+
+    if provider == "grok":
+        api_key = settings.grok_api_key
+        if api_key:
+            os.environ.setdefault("GROK_API_KEY", api_key)
+        _models[provider] = init_chat_model(
+            settings.grok_model,
+            model_provider="openai",
+            temperature=0,
+            timeout=10,
+            max_retries=0,
+            api_key=api_key or None,
+            base_url=settings.grok_api_base,
+        )
+        return _models[provider]
 
     api_key = settings.google_api_key
     if api_key:
         os.environ.setdefault("GOOGLE_API_KEY", api_key)
 
-    _model = init_chat_model(
+    _models[provider] = init_chat_model(
         settings.classifier_model,
         model_provider="google_genai",
         temperature=0,
@@ -77,7 +101,29 @@ def _get_model():
         max_retries=0,
         api_key=api_key or None,
     )
-    return _model
+    return _models[provider]
+
+
+async def _classify_with_model(message: str, provider: str) -> Optional[dict]:
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    model = _get_model(provider)
+    resp = await model.ainvoke(
+        [SystemMessage(content=_SYSTEM), HumanMessage(content=message.strip())]
+    )
+    data = _extract_json(_content_to_text(getattr(resp, "content", "")))
+    if not data:
+        return None
+
+    intent = str(data.get("intent") or "").strip()
+    if intent not in VALID_INTENTS:
+        return None
+
+    return {
+        "intent": intent,
+        "query": str(data.get("query") or "").strip(),
+        "periodo": str(data.get("periodo") or "").strip(),
+    }
 
 
 def _content_to_text(content) -> str:
@@ -117,22 +163,9 @@ async def classify(message: str) -> Optional[dict]:
     pudo interpretar. Puede propagar excepciones de cuota/disponibilidad de
     Gemini; main.py las traduce a un mensaje amable y activa el cooldown.
     """
-    from langchain_core.messages import SystemMessage, HumanMessage
-
-    model = _get_model()
-    resp = await model.ainvoke(
-        [SystemMessage(content=_SYSTEM), HumanMessage(content=message.strip())]
-    )
-    data = _extract_json(_content_to_text(getattr(resp, "content", "")))
-    if not data:
-        return None
-
-    intent = str(data.get("intent") or "").strip()
-    if intent not in VALID_INTENTS:
-        return None
-
-    return {
-        "intent": intent,
-        "query": str(data.get("query") or "").strip(),
-        "periodo": str(data.get("periodo") or "").strip(),
-    }
+    try:
+        return await _classify_with_model(message, "google_genai")
+    except Exception as exc:
+        if settings.grok_api_key and _is_quota_error(exc):
+            return await _classify_with_model(message, "grok")
+        raise
