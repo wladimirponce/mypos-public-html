@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timedelta
+import json
 import os
 import time
 import unicodedata
@@ -95,6 +96,114 @@ def _safe_log_text(value: object, limit: int = 4000) -> str:
     return text
 
 
+def _unanswered_log_path() -> str:
+    path = settings.unanswered_log_path
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.dirname(__file__), path)
+    return path
+
+
+def _tool_for_intent(intent: str) -> str:
+    return {
+        "ventas": "ventas_periodo",
+        "top_productos": "ventas_por_producto",
+        "stock_critico": "stock_critico",
+        "reposicion": "sugerencias_reposicion",
+        "cajas": "estado_cajas",
+        "cierres": "cierres_pendientes",
+        "iva": "resumen_iva",
+        "compras": "compras_pendientes",
+        "folios": "estado_folios_sii",
+        "cliente": "buscar_cliente",
+        "producto": "buscar_producto",
+        "stock_producto": "buscar_producto",
+        "ayuda": "ayuda",
+    }.get(intent, "")
+
+
+def _default_params_for_intent(intent: str, periodo: str, query: str) -> dict:
+    if intent == "top_productos":
+        return {"periodo_default": periodo or "hoy", "top": 10}
+    if intent == "ventas":
+        return {"periodo_default": periodo or "hoy"}
+    if intent in ("producto", "stock_producto", "cliente"):
+        return {"query": query}
+    return {}
+
+
+def _build_unanswered_proposal(message: str, reply: str) -> dict:
+    text = _normalize_text(message)
+    intent, query, periodo = _detect_intent_rules(text, message)
+    tool = _tool_for_intent(intent or "")
+    resoluble = bool(intent and tool)
+
+    return {
+        "titulo": "Propuesta para resolver consulta no contestada",
+        "resoluble": resoluble,
+        "tipo": "skill_json",
+        "accion_sugerida": "crear_skill" if resoluble else "clasificar_con_ia",
+        "intent_sugerido": intent or "",
+        "tool_sugerida": tool,
+        "confianza": "alta" if resoluble else "pendiente",
+        "patterns_sugeridos": [_safe_log_text(message, 300)],
+        "params_sugeridos": _default_params_for_intent(intent or "", periodo, query),
+        "respuesta_fallback": _safe_log_text(reply, 800),
+        "notas": (
+            "Puede aprobarse y crearse como skill segura porque usa una herramienta existente."
+            if resoluble
+            else "Requiere clasificacion humana o IA antes de crear una skill."
+        ),
+    }
+
+
+def _load_unanswered_entries(path: str) -> list:
+    if not os.path.isfile(path):
+        return []
+    raw = ""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = fh.read().strip()
+        if raw == "":
+            return []
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return [data]
+    except Exception:
+        if raw:
+            now = datetime.now().isoformat(timespec="seconds")
+            return [{
+                "id": "legacy_" + uuid.uuid4().hex,
+                "created_at": now,
+                "updated_at": now,
+                "status": "pendiente",
+                "source": "legacy_txt",
+                "consulta": "Contenido legacy importado desde texto libre",
+                "respuesta": _safe_log_text(raw),
+                "propuesta": {
+                    "titulo": "Migrar registro legacy",
+                    "resoluble": False,
+                    "tipo": "legacy_txt",
+                    "accion_sugerida": "revisar_manual",
+                    "intent_sugerido": "",
+                    "tool_sugerida": "",
+                    "confianza": "pendiente",
+                    "patterns_sugeridos": [],
+                    "params_sugeridos": {},
+                    "notas": "Este registro venia del formato TXT anterior.",
+                },
+            }]
+        return []
+    return []
+
+
+def _write_unanswered_entries(path: str, entries: list) -> None:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(entries, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+
+
 def _is_unanswered_reply(reply: str) -> bool:
     text = _normalize_text(reply)
     markers = (
@@ -126,29 +235,30 @@ def _append_unanswered_log(
     sucursal_id: Optional[int],
     operator_name: str,
 ) -> None:
-    path = settings.unanswered_log_path
-    if not os.path.isabs(path):
-        path = os.path.join(os.path.dirname(__file__), path)
+    path = _unanswered_log_path()
     try:
         directory = os.path.dirname(path)
         if directory:
             os.makedirs(directory, exist_ok=True)
 
-        entry = (
-            "=== CONSULTA NO RESUELTA ===\n"
-            f"fecha={datetime.now().isoformat(timespec='seconds')}\n"
-            f"thread_id={_safe_log_text(thread_id, 200)}\n"
-            f"empresa_id={empresa_id}\n"
-            f"sucursal_id={sucursal_id or ''}\n"
-            f"operador={_safe_log_text(operator_name, 200)}\n"
-            "consulta:\n"
-            f"{_safe_log_text(message)}\n"
-            "respuesta:\n"
-            f"{_safe_log_text(reply)}\n"
-            "=== FIN ===\n\n"
-        )
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(entry)
+        now = datetime.now().isoformat(timespec="seconds")
+        entry = {
+            "id": uuid.uuid4().hex,
+            "created_at": now,
+            "updated_at": now,
+            "status": "pendiente",
+            "source": "agent",
+            "thread_id": _safe_log_text(thread_id, 200),
+            "empresa_id": empresa_id,
+            "sucursal_id": sucursal_id,
+            "operador": _safe_log_text(operator_name, 200),
+            "consulta": _safe_log_text(message),
+            "respuesta": _safe_log_text(reply),
+            "propuesta": _build_unanswered_proposal(message, reply),
+        }
+        entries = _load_unanswered_entries(path)
+        entries.append(entry)
+        _write_unanswered_entries(path, entries)
     except Exception:
         # El registro de aprendizaje no debe romper el chat operativo.
         return
@@ -374,6 +484,8 @@ def _is_top_products_query(text: str) -> bool:
         "producto mas vendido", "productos mas vendidos",
         "se vendio mas", "vendio mas", "se vende mas", "vende mas",
         "producto se vendio", "producto que mas se vendio",
+        "producto que mas estamos vendiendo", "que mas estamos vendiendo",
+        "producto que mas vendemos", "que mas vendemos",
     ))
 
 
@@ -775,6 +887,28 @@ async def _try_classifier(
     )
 
 
+async def _try_approved_skill(
+    message: str,
+    empresa_id: int,
+    thread_id: str,
+    sucursal_id: Optional[int] = None,
+) -> Optional[ChatResponse]:
+    from skill_engine import match_skill
+
+    result = match_skill(message)
+    if not result:
+        return None
+
+    return await _dispatch_intent(
+        result["intent"],
+        empresa_id,
+        thread_id,
+        sucursal_id,
+        query=result.get("query", ""),
+        periodo=result.get("periodo", ""),
+    )
+
+
 app = FastAPI(title="MyPOS Agent", docs_url=None, redoc_url=None)
 
 app.add_middleware(
@@ -892,6 +1026,15 @@ async def _run(
     )
     if direct is not None:
         return direct
+
+    skill = await _try_approved_skill(
+        message=message,
+        empresa_id=empresa_id,
+        thread_id=thread_id,
+        sucursal_id=sucursal_id,
+    )
+    if skill is not None:
+        return skill
 
     # 2ª instancia: clasificador ligero Gemini Flash → despacho directo
     classified = await _try_classifier(
