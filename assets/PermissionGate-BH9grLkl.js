@@ -1,1 +1,0 @@
-import{aG as o,ar as s}from"./index-DhU0-Jsp.js";function h({permission:n,anyOf:r,fallback:t=null,children:a}){const i=o(e=>e.hasPermission),m=o(e=>e.hasAnyPermission);return(n?i(n):r?m(r):!0)?s.jsx(s.Fragment,{children:a}):s.jsx(s.Fragment,{children:t})}export{h as P};
