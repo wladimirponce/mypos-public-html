@@ -461,6 +461,8 @@ def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
 
 def _detect_period(text: str) -> str:
     """Detecta el período de ventas a partir del texto normalizado."""
+    if _contains_any(text, ("hasta hoy", "a la fecha", "al dia de hoy", "lo que va del mes")):
+        return "mes"
     if "hoy" in text:
         return "hoy"
     if "ayer" in text:
@@ -476,6 +478,10 @@ def _detect_period(text: str) -> str:
 
 def _detect_explicit_period(text: str) -> str:
     """Detecta periodo solo si el usuario lo pidio expresamente."""
+    if _contains_any(text, ("lo que va del mes",)):
+        return "mes"
+    if _contains_any(text, ("hasta hoy", "a la fecha", "al dia de hoy")):
+        return "ultimos_30"
     if "hoy" in text:
         return "hoy"
     if "ayer" in text:
@@ -621,6 +627,8 @@ def _extract_product_query(raw: str) -> str:
 def _periodo_a_fechas(periodo: str) -> tuple[str, str]:
     """(fecha_desde, fecha_hasta) para un período predefinido. Default: mes a la fecha."""
     today = date.today()
+    if periodo in ("ultimos_30", "hasta_hoy"):
+        return str(today - timedelta(days=29)), str(today)
     if periodo == "ayer":
         d = today - timedelta(days=1)
         return str(d), str(d)

@@ -15,6 +15,28 @@ from langchain_core.tools import tool
 from tools.mypos_client import web_get
 
 
+def _first_value(item: dict, *keys: str, default=None):
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _to_float(value) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _format_quantity(value) -> str:
+    qty = _to_float(value)
+    if qty.is_integer():
+        return str(int(qty))
+    return f"{qty:,.2f}".rstrip("0").rstrip(".")
+
+
 def _date_range(periodo: str) -> tuple[str, str]:
     """Devuelve (fecha_desde, fecha_hasta) para períodos predefinidos."""
     today = date.today()
@@ -107,7 +129,12 @@ async def ventas_por_producto(
         sucursal_id: Filtrar por sucursal (opcional).
     """
     top = max(1, min(top, 20))
-    params: dict = {"fecha_desde": fecha_desde, "fecha_hasta": fecha_hasta}
+    params: dict = {
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "limit": top,
+        "orden": "total",
+    }
     if sucursal_id:
         params["sucursal_id"] = sucursal_id
 
@@ -119,14 +146,25 @@ async def ventas_por_producto(
     if not data.get("success"):
         return f"Sin datos: {data.get('message', 'sin detalle')}"
 
-    items = (data.get("data") or [])[:top]
+    raw_items = data.get("data") or []
+    items = []
+    for item in raw_items:
+        qty = _to_float(_first_value(item, "cantidad_vendida", "cantidad", "unidades", default=0))
+        total = _to_float(_first_value(item, "total_vendido", "total", "monto", default=0))
+        if qty > 0 or total > 0:
+            items.append(item)
+        if len(items) >= top:
+            break
     if not items:
         return "Sin ventas registradas en el período indicado."
 
-    lines = [f"Top {len(items)} productos ({fecha_desde} → {fecha_hasta}):"]
+    lines = [f"Top {len(items)} productos ({fecha_desde} a {fecha_hasta}):"]
     for i, item in enumerate(items, 1):
+        name = _first_value(item, "nombre", "producto_nombre", "producto", "descripcion", default="?")
+        qty = _first_value(item, "cantidad_vendida", "cantidad", "unidades", default=0)
+        total = _to_float(_first_value(item, "total_vendido", "total", "monto", default=0))
         lines.append(
-            f"  {i}. {item.get('nombre', '?')}: "
-            f"{item.get('cantidad', 0)} uds · ${float(item.get('total', 0)):,.0f}"
+            f"  {i}. {name}: "
+            f"{_format_quantity(qty)} uds - ${total:,.0f}"
         )
     return "\n".join(lines)
