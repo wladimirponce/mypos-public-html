@@ -51,12 +51,26 @@ def _load_skill(path: str) -> Optional[dict]:
             return None
         if data.get("status") not in ("aprobada", "activa"):
             return None
+
+        patterns = data.get("patterns")
+        if not isinstance(patterns, list) or not patterns:
+            return None
+
+        if data.get("tipo") == "sql_readonly":
+            # No se re-valida el SQL aqui a proposito: esa logica vive UNICA
+            # en agent/sql_whitelist_validator.php (PHP) y el backend la
+            # vuelve a correr en cada ejecucion (ConsultaFlexibleService).
+            # Aqui solo se exige que el envelope tenga lo minimo para poder
+            # despachar (id + sql_template no vacios).
+            if not str(data.get("id") or "").strip():
+                return None
+            if not str(data.get("sql_template") or "").strip():
+                return None
+            return data
+
         intent = str(data.get("intent") or "").strip()
         tool = str(data.get("tool") or "").strip()
         if ALLOWED_TOOLS_BY_INTENT.get(intent) != tool:
-            return None
-        patterns = data.get("patterns")
-        if not isinstance(patterns, list) or not patterns:
             return None
         return data
     except Exception:
@@ -77,12 +91,21 @@ def match_skill(message: str) -> Optional[dict]:
             continue
         for pattern in skill.get("patterns", []):
             normalized_pattern = _normalize(str(pattern))
-            if normalized_pattern and normalized_pattern in text:
-                params = skill.get("params") if isinstance(skill.get("params"), dict) else {}
+            if not normalized_pattern or normalized_pattern not in text:
+                continue
+
+            if skill.get("tipo") == "sql_readonly":
                 return {
-                    "intent": str(skill.get("intent") or ""),
-                    "query": str(params.get("query") or ""),
-                    "periodo": str(params.get("periodo_default") or ""),
+                    "tipo": "sql_readonly",
                     "skill_id": str(skill.get("id") or name),
                 }
+
+            params = skill.get("params") if isinstance(skill.get("params"), dict) else {}
+            return {
+                "tipo": "tool",
+                "intent": str(skill.get("intent") or ""),
+                "query": str(params.get("query") or ""),
+                "periodo": str(params.get("periodo_default") or ""),
+                "skill_id": str(skill.get("id") or name),
+            }
     return None

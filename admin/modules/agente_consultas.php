@@ -6,6 +6,8 @@
  * aprobarlas y crear skills seguras consumibles por el agente.
  */
 
+use App\Services\AgentHttpClient;
+
 $agentBasePath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'agent';
 $agentLogPath = $agentBasePath . DIRECTORY_SEPARATOR . 'tmp' . DIRECTORY_SEPARATOR . 'agent_unanswered.txt';
 $agentLogDir = dirname($agentLogPath);
@@ -136,35 +138,126 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $entry = $entries[$idx];
             $proposal = is_array($entry['propuesta'] ?? null) ? $entry['propuesta'] : [];
-            $intent = (string)($proposal['intent_sugerido'] ?? 'pendiente');
-            $tool = (string)($proposal['tool_sugerida'] ?? '');
-            if ($intent === '' || $tool === '') {
-                $error = 'La propuesta no tiene intent/tool suficientes para crear una skill segura.';
-            } elseif (!is_dir($agentSkillsDir) && !@mkdir($agentSkillsDir, 0755, true) && !is_dir($agentSkillsDir)) {
+            $esSqlReadonly = trim((string)($proposal['sql_template_sugerido'] ?? '')) !== '';
+
+            if (!is_dir($agentSkillsDir) && !@mkdir($agentSkillsDir, 0755, true) && !is_dir($agentSkillsDir)) {
                 $error = 'No se pudo crear el directorio agent/skills.';
-            } else {
+            } elseif ($esSqlReadonly) {
+                // --- Skill tipo sql_readonly: requiere pasar el validador de whitelist ---
+                require_once $agentBasePath . DIRECTORY_SEPARATOR . 'sql_whitelist_validator.php';
+
+                $intent = acSlug((string)($proposal['intent_sugerido'] ?? ('consulta_' . substr($id, 0, 8))));
                 $skillId = acSlug($intent . '_' . substr($id, 0, 8));
-                $skillPath = $agentSkillsDir . DIRECTORY_SEPARATOR . $skillId . '.json';
+                $rowLimitRaw = $proposal['row_limit_sugerido'] ?? 50;
                 $skill = [
                     'id' => $skillId,
                     'status' => 'aprobada',
                     'created_at' => date('c'),
                     'source_entry_id' => $id,
+                    'schema_version' => 1,
+                    'tipo' => 'sql_readonly',
                     'intent' => $intent,
-                    'tool' => $tool,
                     'patterns' => $proposal['patterns_sugeridos'] ?? [(string)($entry['consulta'] ?? '')],
-                    'params' => $proposal['params_sugeridos'] ?? [],
+                    'sql_template' => trim((string)$proposal['sql_template_sugerido']),
+                    'tablas_referenciadas' => $proposal['tablas_referenciadas_sugeridas'] ?? [],
+                    'params_permitidos' => $proposal['params_sugeridos_sql'] ?? [],
+                    'row_limit' => is_numeric($rowLimitRaw) ? (int)$rowLimitRaw : 50,
                     'notes' => $proposal['notas'] ?? '',
                 ];
-                $json = json_encode($skill, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                if ($json === false || @file_put_contents($skillPath, $json . "\n", LOCK_EX) === false) {
-                    $error = 'No se pudo crear el archivo de skill.';
+
+                $reason = null;
+                if (!SqlWhitelistValidator::validateSkillEnvelope($skill, $reason)) {
+                    $error = 'No se pudo crear la skill (falla de validacion de seguridad): ' . $reason;
                 } else {
-                    $entries[$idx]['status'] = 'creada';
-                    $entries[$idx]['skill_path'] = $skillPath;
+                    $skillPath = $agentSkillsDir . DIRECTORY_SEPARATOR . $skillId . '.json';
+                    $json = json_encode($skill, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    if ($json === false || @file_put_contents($skillPath, $json . "\n", LOCK_EX) === false) {
+                        $error = 'No se pudo crear el archivo de skill.';
+                    } else {
+                        $entries[$idx]['status'] = 'creada';
+                        $entries[$idx]['skill_path'] = $skillPath;
+                        $entries[$idx]['updated_at'] = date('c');
+                        acSaveEntries($agentLogPath, $entries);
+                        $msg = 'Skill sql_readonly creada (validada contra la whitelist): ' . basename($skillPath);
+                    }
+                }
+            } else {
+                // --- Skill tipo intent+tool (formato original, sin cambios) ---
+                $intent = (string)($proposal['intent_sugerido'] ?? 'pendiente');
+                $tool = (string)($proposal['tool_sugerida'] ?? '');
+                if ($intent === '' || $tool === '') {
+                    $error = 'La propuesta no tiene intent/tool suficientes para crear una skill segura.';
+                } else {
+                    $skillId = acSlug($intent . '_' . substr($id, 0, 8));
+                    $skillPath = $agentSkillsDir . DIRECTORY_SEPARATOR . $skillId . '.json';
+                    $skill = [
+                        'id' => $skillId,
+                        'status' => 'aprobada',
+                        'created_at' => date('c'),
+                        'source_entry_id' => $id,
+                        'intent' => $intent,
+                        'tool' => $tool,
+                        'patterns' => $proposal['patterns_sugeridos'] ?? [(string)($entry['consulta'] ?? '')],
+                        'params' => $proposal['params_sugeridos'] ?? [],
+                        'notes' => $proposal['notas'] ?? '',
+                    ];
+                    $json = json_encode($skill, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    if ($json === false || @file_put_contents($skillPath, $json . "\n", LOCK_EX) === false) {
+                        $error = 'No se pudo crear el archivo de skill.';
+                    } else {
+                        $entries[$idx]['status'] = 'creada';
+                        $entries[$idx]['skill_path'] = $skillPath;
+                        $entries[$idx]['updated_at'] = date('c');
+                        acSaveEntries($agentLogPath, $entries);
+                        $msg = 'Skill creada: ' . basename($skillPath);
+                    }
+                }
+            }
+        }
+    }
+
+    if ($accion === 'generar_sql_ia') {
+        $id = (string)($_POST['id'] ?? '');
+        $idx = acFindIndex($entries, $id);
+        if ($idx === null) {
+            $error = 'No se encontro la propuesta seleccionada.';
+        } else {
+            $consulta = (string)($entries[$idx]['consulta'] ?? '');
+            if ($consulta === '') {
+                $error = 'La entry no tiene una consulta original que enviar al LLM.';
+            } else {
+                $result = AgentHttpClient::postJson('/skills/propose-sql', ['consulta' => $consulta]);
+                $proposal = is_array($entries[$idx]['propuesta'] ?? null) ? $entries[$idx]['propuesta'] : [];
+
+                if (!$result['ok']) {
+                    $error = 'No se pudo generar SQL con IA: ' . $result['error'];
+                } elseif (($result['data']['resoluble'] ?? null) === false) {
+                    $proposal['notas'] = trim(
+                        ($proposal['notas'] ?? '') . "\n[IA] No resoluble via SQL: " .
+                        (string)($result['data']['notes'] ?? 'sin detalle')
+                    );
+                    $entries[$idx]['propuesta'] = $proposal;
                     $entries[$idx]['updated_at'] = date('c');
                     acSaveEntries($agentLogPath, $entries);
-                    $msg = 'Skill creada: ' . basename($skillPath);
+                    $msg = 'El LLM indica que esta consulta no se puede resolver con las tablas permitidas (ver notas).';
+                } else {
+                    $data = $result['data'];
+                    $proposal['tipo_sugerido'] = 'sql_readonly';
+                    $proposal['sql_template_sugerido'] = (string)($data['sql_template'] ?? '');
+                    $proposal['tablas_referenciadas_sugeridas'] = $data['tablas_referenciadas'] ?? [];
+                    $proposal['params_sugeridos_sql'] = $data['params_permitidos'] ?? [];
+                    $proposal['row_limit_sugerido'] = $data['row_limit'] ?? null;
+                    if (!empty($data['patterns'])) {
+                        $proposal['patterns_sugeridos'] = $data['patterns'];
+                    }
+                    $proposal['notas'] = trim(
+                        ($proposal['notas'] ?? '') . "\n[IA] " . (string)($data['notes'] ?? '')
+                    );
+                    $entries[$idx]['propuesta'] = $proposal;
+                    $entries[$idx]['status'] = 'seleccionada';
+                    $entries[$idx]['updated_at'] = date('c');
+                    acSaveEntries($agentLogPath, $entries);
+                    $msg = 'Borrador de SQL generado. Revisa y edita antes de "Crear skill".';
                 }
             }
         }
@@ -264,6 +357,11 @@ foreach ($entries as $entry) {
                                         <input type="hidden" name="accion" value="aprobar">
                                         <input type="hidden" name="id" value="<?= htmlspecialchars($id) ?>">
                                         <button class="d-btn d-btn-sm d-btn-primary" type="submit"><i class="bi bi-hand-thumbs-up"></i> Aprobar</button>
+                                    </form>
+                                    <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline;">
+                                        <input type="hidden" name="accion" value="generar_sql_ia">
+                                        <input type="hidden" name="id" value="<?= htmlspecialchars($id) ?>">
+                                        <button class="d-btn d-btn-sm d-btn-outline" type="submit"><i class="bi bi-magic"></i> Generar SQL con IA</button>
                                     </form>
                                     <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline;">
                                         <input type="hidden" name="accion" value="crear_skill">

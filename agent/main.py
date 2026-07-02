@@ -655,6 +655,7 @@ async def _dispatch_intent(
     sucursal_id: Optional[int] = None,
     query: str = "",
     periodo: str = "",
+    skill_id: Optional[str] = None,
 ) -> Optional[ChatResponse]:
     """
     Ejecuta la tool correspondiente a un intent ya identificado. Lo usan tanto
@@ -662,6 +663,12 @@ async def _dispatch_intent(
     lógica de despacho. Devuelve None si el intent no se puede resolver aquí
     (faltan datos, o es 'accion'/'desconocido' que maneja el agente completo).
     """
+    if intent == "sql_readonly" and skill_id:
+        from tools.consulta_flexible import ejecutar_consulta_flexible
+        return await _direct(ejecutar_consulta_flexible.ainvoke({
+            "empresa_id": empresa_id, "skill_id": skill_id, "sucursal_id": sucursal_id,
+        }), thread_id)
+
     if intent == "ventas":
         from tools.ventas import ventas_periodo
         return await _direct(ventas_periodo.ainvoke({
@@ -924,6 +931,15 @@ async def _try_approved_skill(
     if not result:
         return None
 
+    if result.get("tipo") == "sql_readonly":
+        return await _dispatch_intent(
+            "sql_readonly",
+            empresa_id,
+            thread_id,
+            sucursal_id,
+            skill_id=result["skill_id"],
+        )
+
     return await _dispatch_intent(
         result["intent"],
         empresa_id,
@@ -976,6 +992,10 @@ class ChatResponse(BaseModel):
 class EscalationReply(BaseModel):
     decision: str
     comentario: str = ""
+
+
+class SqlSkillProposalRequest(BaseModel):
+    consulta: str
 
 
 async def _invoke_graph(
@@ -1218,6 +1238,37 @@ async def responder_escalacion(
         "reply": getattr(last, "content", ""),
         "decision": body.decision,
     }
+
+
+@app.post("/skills/propose-sql")
+async def proponer_skill_sql(body: SqlSkillProposalRequest, _: None = Security(_require_secret)):
+    """
+    Le pide al LLM un borrador de skill "sql_readonly" para una consulta que
+    ninguna capa del agente supo responder. SOLO propone -- admin (modulo
+    Consultas IA) es quien revisa/edita y, si aprueba, corre el archivo
+    resultante por agent/sql_whitelist_validator.php antes de escribir la
+    skill. Este endpoint nunca ejecuta SQL ni escribe archivos.
+    """
+    consulta = (body.consulta or "").strip()
+    if not consulta:
+        raise HTTPException(422, "consulta vacia")
+
+    from sql_skill_generator import propose_sql_template
+
+    try:
+        result = await asyncio.wait_for(propose_sql_template(consulta), timeout=20)
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "El LLM no respondio a tiempo")
+    except Exception as exc:
+        if _is_quota_error(exc):
+            cooldown = _mark_quota_exhausted()
+            raise HTTPException(503, f"resource_exhausted, reintenta en {cooldown}s")
+        if _is_provider_busy_error(exc):
+            cooldown = _mark_provider_busy()
+            raise HTTPException(503, f"unavailable, reintenta en {cooldown}s")
+        raise HTTPException(502, f"{exc.__class__.__name__}: {exc}")
+
+    return result
 
 
 @app.get("/health")

@@ -186,6 +186,80 @@ def test_natural_product_queries():
     print(f"   {ok}/{len(cases)} consultas naturales resueltas por reglas\n")
 
 
+def test_skill_engine_sql_readonly():
+    """Verifica match_skill() con skills sql_readonly y con el formato legacy intent+tool."""
+    import json
+    import shutil
+    import tempfile
+
+    print("8. Verificando skill_engine con skills sql_readonly...")
+    from config import settings
+    import skill_engine
+
+    tmp_dir = tempfile.mkdtemp(prefix="mypos_skills_test_")
+    original_skills_path = settings.skills_path
+    try:
+        settings.skills_path = tmp_dir
+
+        skill_sql = {
+            "id": "producto_mas_economico_test",
+            "status": "aprobada",
+            "tipo": "sql_readonly",
+            "intent": "producto_mas_economico",
+            "patterns": ["cual es el producto mas economico"],
+            "sql_template": "SELECT nombre FROM productos WHERE empresa_id = :empresa_id ORDER BY precio_venta ASC LIMIT 1",
+            "row_limit": 1,
+        }
+        with open(os.path.join(tmp_dir, "sql_readonly_test.json"), "w", encoding="utf-8") as fh:
+            json.dump(skill_sql, fh)
+
+        skill_legacy = {
+            "id": "ventas_hoy_test",
+            "status": "aprobada",
+            "intent": "ventas",
+            "tool": "ventas_periodo",
+            "patterns": ["como van las ventas de hoy"],
+            "params": {"periodo_default": "hoy"},
+        }
+        with open(os.path.join(tmp_dir, "legacy_test.json"), "w", encoding="utf-8") as fh:
+            json.dump(skill_legacy, fh)
+
+        skill_malformada = {
+            "id": "malformada_test",
+            "status": "aprobada",
+            "tipo": "sql_readonly",
+            "patterns": ["esto no deberia matchear nunca de verdad 12345"],
+            "sql_template": "",  # vacio -> debe ser rechazada por _load_skill
+            "row_limit": 1,
+        }
+        with open(os.path.join(tmp_dir, "malformada_test.json"), "w", encoding="utf-8") as fh:
+            json.dump(skill_malformada, fh)
+
+        cases = [
+            ("¿Cual es el producto mas economico?", "sql_readonly", "producto_mas_economico_test"),
+            ("Como van las ventas de hoy", "tool", None),
+            ("esto no deberia matchear nunca de verdad 12345", None, None),
+            ("hola, buenas tardes", None, None),
+        ]
+
+        ok = 0
+        for phrase, exp_tipo, exp_skill_id in cases:
+            result = skill_engine.match_skill(phrase)
+            tipo = result.get("tipo") if result else None
+            status = "OK" if tipo == exp_tipo else "FAIL"
+            if exp_skill_id is not None and result:
+                if result.get("skill_id") != exp_skill_id:
+                    status = "FAIL"
+            print(f"   [{status}] '{phrase}' -> {result}")
+            if status == "OK":
+                ok += 1
+        print(f"   {ok}/{len(cases)} casos OK\n")
+        assert ok == len(cases), "Fallaron casos de skill_engine"
+    finally:
+        settings.skills_path = original_skills_path
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 async def main():
     print("=" * 55)
     print("  MyPOS Agent — Test Local")
@@ -196,6 +270,7 @@ async def main():
     test_tool_signatures()
     test_direct_intents()
     test_natural_product_queries()
+    test_skill_engine_sql_readonly()
     graph = await test_graph_compiles()
     await test_conversation(graph)
 

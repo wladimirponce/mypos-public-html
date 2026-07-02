@@ -59,6 +59,24 @@ async def web_get(path: str, empresa_id: int, params: dict | None = None) -> dic
         return resp.json()
 
 
+async def web_post(path: str, empresa_id: int, json_body: dict | None = None, params: dict | None = None) -> dict:
+    """POST autenticado al backend web (JWT Bearer). empresa_id va como query
+    param (igual que web_get) porque TenantMiddleware lo valida ahi antes de
+    llegar al controller; json_body es el cuerpo (ej. {"params": {...}})."""
+    token = await _get_jwt()
+    merged_params = {"empresa_id": empresa_id, **(params or {})}
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{settings.mypos_web_url}{path}",
+            params=merged_params,
+            json=json_body or {},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def admin_get(action: str, params: dict | None = None) -> dict:
     """GET a admin/api.php (X-API-KEY)."""
     merged = {"action": action, **(params or {})}

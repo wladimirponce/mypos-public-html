@@ -51,6 +51,7 @@ use Mypos\Controllers\PublicController;
 use Mypos\Controllers\ProductoAtributoController;
 use Mypos\Controllers\ProductoController;
 use Mypos\Controllers\ProveedorController;
+use Mypos\Controllers\AgenteConsultaFlexibleController;
 use Mypos\Controllers\ReporteController;
 use Mypos\Controllers\RrhhController;
 use Mypos\Controllers\RubroController;
@@ -736,6 +737,9 @@ $router->get('/api/v1/reportes/ventas-por-producto', protectedRoute([$reporteCon
 $router->get('/api/v1/reportes/ventas-por-rubro', protectedRoute([$reporteController, 'ventasPorRubro'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-usuario', protectedRoute([$reporteController, 'ventasPorUsuario'], 'reportes.ver'));
 $router->get('/api/v1/reportes/dashboard', protectedRoute([$reporteController, 'dashboard'], 'dashboard.ver'));
+
+$agenteConsultaFlexibleController = new AgenteConsultaFlexibleController();
+$router->post('/api/v1/agente/consulta-flexible', protectedRoute([$agenteConsultaFlexibleController, 'ejecutar'], 'reportes.ver'));
 
 $router->post('/api/v1/comunicaciones-ventas', [$comunicacionVentasController, 'store']);
 

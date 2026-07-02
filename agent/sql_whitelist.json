@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "description": "Whitelist maestra de tablas y columnas permitidas para skills tipo sql_readonly (texto-a-SQL con aprobacion humana). Fuente de verdad UNICA -- no editable desde el panel admin. Cualquier tabla o columna que no aparezca aqui debe ser rechazada por el validador, tanto al aprobar una skill (admin) como al ejecutarla (backend). Ampliar esta lista requiere revisar el codigo (agent/sql_whitelist_validator.php y agent/sql_whitelist.py), nunca un edit desde la UI.",
+  "forbidden_schemas": ["information_schema", "mysql", "performance_schema", "sys"],
+  "forbidden_keywords": [
+    "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "REPLACE",
+    "GRANT", "REVOKE", "CREATE", "ATTACH", "DETACH", "EXEC", "EXECUTE",
+    "CALL", "LOAD_FILE", "OUTFILE", "DUMPFILE", "UNION", "INTO",
+    "SLEEP", "BENCHMARK", "PROCEDURE", "HANDLER", "LOCK", "UNLOCK"
+  ],
+  "tables": {
+    "productos": {
+      "tenant_column": "empresa_id",
+      "columns": [
+        "id", "empresa_id", "nombre", "sku", "codigo", "precio_venta",
+        "precio_costo", "costo_actual", "unidad_medida", "activo",
+        "controla_stock", "es_producto_peso", "precio_por_kg",
+        "margen_ganancia", "stock_minimo", "created_at", "updated_at"
+      ],
+      "source": "web/mypos-backend/backend/database/init/001_schema.sql:186-211 + 003_catalogo_productos.sql, 039_precio_peso_merma.sql, 064_margen_ganancia.sql"
+    },
+    "stock_ubicacion": {
+      "tenant_column": "empresa_id",
+      "columns": [
+        "id", "empresa_id", "ubicacion_id", "producto_id", "cantidad",
+        "reservado", "stock_minimo", "stock_maximo", "punto_reorden",
+        "updated_at"
+      ],
+      "source": "web/mypos-backend/backend/database/init/030_stock_por_ubicacion.sql:1-18",
+      "notes": "Fuente de verdad de stock. No tiene sucursal_id directo; para filtrar por sucursal hay que unir con ubicaciones_stock."
+    },
+    "ubicaciones_stock": {
+      "tenant_column": "empresa_id",
+      "columns": ["id", "empresa_id", "sucursal_id", "tipo", "activo", "nombre"],
+      "verified": false,
+      "notes": "Columnas inferidas por convencion del proyecto, NO confirmadas linea a linea contra la migracion. Confirmar contra el schema real antes de aprobar cualquier skill que dependa de un JOIN con esta tabla."
+    },
+    "ventas": {
+      "tenant_column": "empresa_id",
+      "columns": [
+        "id", "empresa_id", "sucursal_id", "caja_id", "usuario_id",
+        "cliente_id", "tipo_venta", "folio", "estado", "subtotal",
+        "descuento_total", "impuesto_total", "total", "margen_total",
+        "comision_total", "fecha_venta", "created_at"
+      ],
+      "source": "web/mypos-backend/backend/database/init/001_schema.sql:402-436"
+    }
+  }
+}
