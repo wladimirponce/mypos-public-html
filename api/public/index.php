@@ -54,6 +54,7 @@ use Mypos\Controllers\ProveedorController;
 use Mypos\Controllers\AgenteAlertasConfigController;
 use Mypos\Controllers\AgenteConsultaFlexibleController;
 use Mypos\Controllers\AgenteConsultasLogController;
+use Mypos\Controllers\AgenteExportController;
 use Mypos\Controllers\AgentePerfilController;
 use Mypos\Controllers\ReporteController;
 use Mypos\Controllers\RrhhController;
@@ -749,6 +750,11 @@ $router->post('/api/v1/agente/consulta-flexible', protectedRoute([$agenteConsult
 // perderse por suscripcion vencida).
 $agenteConsultasLogController = new AgenteConsultasLogController();
 $router->post('/api/v1/agente/consultas-log', [$agenteConsultasLogController, 'registrar']);
+
+// Exportaciones a Excel del agente IA (registry fijo de tipos, solo lectura;
+// el archivo se envía SOLO al correo registrado de la empresa).
+$agenteExportController = new AgenteExportController();
+$router->post('/api/v1/agente/exportar', protectedRoute([$agenteExportController, 'exportar'], 'reportes.ver'));
 
 // Perfil compacto de empresa para el prompt del agente IA (auth+tenant
 // inline, sin SubscriptionMiddleware: el agente debe poder informar una

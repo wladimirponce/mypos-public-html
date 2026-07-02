@@ -68,6 +68,46 @@ final class MailService
         }
     }
 
+    /**
+     * Planilla generada por el agente IA (exportaciones "envíame el maestro
+     * de productos al correo"). Adjunta el binario xlsx desde memoria.
+     */
+    public function enviarPlanillaAgente(
+        string $toEmail,
+        string $razonSocial,
+        string $titulo,
+        string $filename,
+        string $contenido,
+        int $filas
+    ): bool {
+        try {
+            $mail = $this->getMailer();
+            $mail->addAddress($toEmail, $razonSocial);
+            $mail->addStringAttachment(
+                $contenido,
+                $filename,
+                PHPMailer::ENCODING_BASE64,
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            );
+
+            $mail->isHTML(true);
+            $mail->Subject = "MyPOS — {$titulo}";
+            $mail->Body = "
+                <h2 style=\"margin-bottom:4px;\">{$titulo}</h2>
+                <p style=\"margin-top:0;color:#555;\">{$razonSocial} — " . date('d/m/Y H:i') . "</p>
+                <p>Adjuntamos la planilla solicitada al asistente ({$filas} filas).</p>
+                <p style=\"color:#888;font-size:12px;\">Por seguridad, el asistente solo envía
+                archivos al correo registrado de la empresa.</p>
+            ";
+
+            $mail->send();
+            return true;
+        } catch (\Throwable $e) {
+            error_log('[AgenteExport] Email error: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     public function enviarCorreoBienvenida(string $toEmail, string $nombreUsuario, string $razonSocial): void
     {
         try {
