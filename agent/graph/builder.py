@@ -74,6 +74,9 @@ CONTEXTO SII CHILE:
 - Boleta electrónica tipo 39 · Factura tipo 33 · Nota de crédito tipo 61.
 - Folios agotados NO se reutilizan. Menos de 150 boletas = urgente recargar.
 
+CONTEXTO DEL NEGOCIO:
+{empresa_contexto}
+
 Operador: {operator_name} · empresa_id: {empresa_id}
 """
 
@@ -85,6 +88,7 @@ def _make_assistant(model):
             content=_SYSTEM.format(
                 operator_name=state.get("operator_name") or "operador",
                 empresa_id=state["empresa_id"],
+                empresa_contexto=state.get("empresa_contexto") or "(sin datos adicionales)",
             )
         )
         response = model.invoke([system] + state["messages"])

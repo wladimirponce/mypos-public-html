@@ -54,6 +54,7 @@ use Mypos\Controllers\ProveedorController;
 use Mypos\Controllers\AgenteAlertasConfigController;
 use Mypos\Controllers\AgenteConsultaFlexibleController;
 use Mypos\Controllers\AgenteConsultasLogController;
+use Mypos\Controllers\AgentePerfilController;
 use Mypos\Controllers\ReporteController;
 use Mypos\Controllers\RrhhController;
 use Mypos\Controllers\RubroController;
@@ -748,6 +749,12 @@ $router->post('/api/v1/agente/consulta-flexible', protectedRoute([$agenteConsult
 // perderse por suscripcion vencida).
 $agenteConsultasLogController = new AgenteConsultasLogController();
 $router->post('/api/v1/agente/consultas-log', [$agenteConsultasLogController, 'registrar']);
+
+// Perfil compacto de empresa para el prompt del agente IA (auth+tenant
+// inline, sin SubscriptionMiddleware: el agente debe poder informar una
+// suscripcion vencida).
+$agentePerfilController = new AgentePerfilController();
+$router->get('/api/v1/agente/perfil-empresa', [$agentePerfilController, 'ver']);
 
 // Preferencias de alertas proactivas del agente (Configuración → Alertas).
 $agenteAlertasConfigController = new AgenteAlertasConfigController();

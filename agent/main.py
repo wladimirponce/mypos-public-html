@@ -32,6 +32,7 @@ from pydantic import BaseModel
 from config import settings
 import quota_state
 import telemetry
+import thread_memory
 
 _graph = None
 _fallback_graph = None
@@ -795,6 +796,80 @@ async def _dispatch_intent(
     return None
 
 
+# ─── Seguimientos con memoria de hilo ─────────────────────────────────────────
+
+# Intents cuyo período puede cambiarse en un seguimiento ("¿y ayer?").
+_FOLLOWUP_PERIOD_INTENTS = frozenset({"ventas", "top_productos"})
+
+# Intents que vale la pena recordar para seguimientos.
+_MEMORABLE_INTENTS = frozenset({"ventas", "top_productos", "producto", "stock_producto", "cliente"})
+
+# Tokens que no aportan significado en un seguimiento corto.
+_FOLLOWUP_FILLERS = frozenset({
+    "y", "que", "tal", "como", "estuvo", "fue", "va", "vamos", "ahora",
+    "muestrame", "muestra", "dame", "ver", "cuanto", "cuanta", "entonces",
+    "el", "la", "los", "las", "de", "del", "en", "lo", "eso", "mismo",
+})
+
+# Palabras que forman las expresiones de período (para vaciar el mensaje).
+_FOLLOWUP_PERIOD_WORDS = frozenset({
+    "hoy", "ayer", "semana", "mes", "anterior", "pasado", "pasada",
+    "ultimo", "ultima", "este", "esta", "dia", "fecha", "hasta", "al",
+    "mensual", "anio", "ano",
+})
+
+
+def _followup_target(text: str, last: Optional[dict]) -> Optional[tuple[str, str, str]]:
+    """
+    Detecta un seguimiento que SOLO cambia el período ("¿y ayer?", "y el mes
+    pasado", "ahora la semana") y devuelve (intent, query, periodo) reusando
+    el último intent del hilo. Devuelve None si el mensaje trae contenido
+    propio (palabras fuera de fillers/período) o si no hay memoria aplicable.
+    Solo se invoca cuando el router de reglas y las skills no reconocieron nada.
+    """
+    if not last or last.get("intent") not in _FOLLOWUP_PERIOD_INTENTS:
+        return None
+    if len(text) > 30:
+        return None
+    periodo = _detect_explicit_period(text)
+    if not periodo:
+        return None
+
+    tokens = [t for t in _re.split(r"[^a-z0-9]+", text) if t]
+    resto = [
+        t for t in tokens
+        if t not in _FOLLOWUP_FILLERS and t not in _FOLLOWUP_PERIOD_WORDS
+    ]
+    if resto:
+        return None
+
+    return str(last["intent"]), str(last.get("query") or ""), periodo
+
+
+def _remember(thread_id: str, intent: Optional[str], query: str, periodo: str) -> None:
+    if intent and intent in _MEMORABLE_INTENTS:
+        thread_memory.save(thread_id, intent, query=query, periodo=periodo)
+
+
+async def _try_followup(
+    message: str,
+    empresa_id: int,
+    thread_id: str,
+    sucursal_id: Optional[int] = None,
+) -> Optional[ChatResponse]:
+    text = _normalize_text(message)
+    target = _followup_target(text, thread_memory.load(thread_id))
+    if target is None:
+        return None
+    intent, query, periodo = target
+    resp = await _dispatch_intent(
+        intent, empresa_id, thread_id, sucursal_id, query=query, periodo=periodo,
+    )
+    if resp is not None:
+        _remember(thread_id, intent, query, periodo)
+    return resp
+
+
 def _detect_intent_rules(text: str, raw: str) -> tuple[Optional[str], str, str]:
     """
     Detecta el intent por reglas (sin IA). Devuelve (intent, query, periodo).
@@ -883,6 +958,7 @@ async def _try_direct_intent(
             query=query, periodo=periodo,
         )
         if resp is not None:
+            _remember(thread_id, intent, query, periodo)
             return resp
 
     return None
@@ -966,10 +1042,13 @@ async def _try_classifier(
     if intent == "desconocido":
         return None  # casos ambiguos → agente completo
 
-    return await _dispatch_intent(
+    resp = await _dispatch_intent(
         intent, empresa_id, thread_id, sucursal_id,
         query=result["query"], periodo=result["periodo"],
     )
+    if resp is not None:
+        _remember(thread_id, intent, result["query"], result["periodo"])
+    return resp
 
 
 async def _try_approved_skill(
@@ -1066,6 +1145,10 @@ async def _invoke_graph(
             detail="No se pudo inicializar el proveedor IA en 10 segundos",
         ) from exc
 
+    # Perfil del negocio para el system prompt (cacheado 10 min; '' si falla)
+    from empresa_profile import get_context
+    empresa_contexto = await get_context(empresa_id)
+
     config = {"configurable": {"thread_id": thread_id}}
     state = {
         "messages": [{"role": "user", "content": message}],
@@ -1073,6 +1156,7 @@ async def _invoke_graph(
         "sucursal_id": sucursal_id,
         "operator_name": operator_name,
         "channel": "web",
+        "empresa_contexto": empresa_contexto,
     }
 
     try:
@@ -1129,6 +1213,16 @@ async def _run(
     )
     if skill is not None:
         return _done(skill, "skill")
+
+    # 1.5ª instancia: seguimiento con memoria de hilo ("¿y ayer?") — sin IA
+    followup = await _try_followup(
+        message=message,
+        empresa_id=empresa_id,
+        thread_id=thread_id,
+        sucursal_id=sucursal_id,
+    )
+    if followup is not None:
+        return _done(followup, "seguimiento")
 
     # 2ª instancia: clasificador ligero Gemini Flash → despacho directo
     classified = await _try_classifier(

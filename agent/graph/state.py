@@ -19,3 +19,5 @@ class AgentState(MessagesState):
     sucursal_id: Optional[int] = None
     operator_name: str = ""
     channel: str = "web"
+    # Bloque de contexto del negocio para el system prompt (empresa_profile.py)
+    empresa_contexto: str = ""

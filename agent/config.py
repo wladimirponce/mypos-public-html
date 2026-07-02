@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     db_path: str = Field(default="persistence/agent.db", alias="AGENT_DB")
     # Estado de cuota LLM compartido entre workers (ver quota_state.py)
     quota_db_path: str = Field(default="persistence/quota_state.db", alias="AGENT_QUOTA_DB")
+    # Memoria ligera por hilo para seguimientos "¿y ayer?" (ver thread_memory.py)
+    thread_memory_db_path: str = Field(default="persistence/thread_memory.db", alias="AGENT_THREAD_MEMORY_DB")
     unanswered_log_path: str = Field(default="tmp/agent_unanswered.txt", alias="AGENT_UNANSWERED_LOG")
     # Telemetría JSONL por consulta (capa, latencia, éxito) — ver telemetry.py
     metrics_log_path: str = Field(default="tmp/agent_metrics.jsonl", alias="AGENT_METRICS_LOG")

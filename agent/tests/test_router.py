@@ -26,6 +26,7 @@ sys.path.insert(0, _AGENT_DIR)
 # Entorno mínimo ANTES de importar config/main (sin tocar archivos reales)
 _TMP = tempfile.mkdtemp(prefix="mypos_agent_tests_")
 os.environ.setdefault("AGENT_QUOTA_DB", os.path.join(_TMP, "quota.db"))
+os.environ.setdefault("AGENT_THREAD_MEMORY_DB", os.path.join(_TMP, "threads.db"))
 os.environ.setdefault("AGENT_METRICS_LOG", os.path.join(_TMP, "metrics.jsonl"))
 os.environ.setdefault("AGENT_UNANSWERED_LOG", os.path.join(_TMP, "unanswered.txt"))
 os.environ.setdefault("AGENT_DB", ":memory:")
@@ -208,6 +209,56 @@ def test_telemetry() -> None:
     print()
 
 
+# ─── 5. Memoria de hilo y seguimientos ───────────────────────────────────────
+
+def test_thread_memory() -> None:
+    print("6. Memoria de hilo (thread_memory)...")
+    import thread_memory
+
+    thread_memory.save("t-abc", "ventas", query="", periodo="hoy")
+    loaded = thread_memory.load("t-abc")
+    check("save/load roundtrip", loaded is not None and loaded["intent"] == "ventas"
+          and loaded["periodo"] == "hoy")
+    check("hilo desconocido devuelve None", thread_memory.load("t-nope") is None)
+    check("expirada devuelve None (ttl=0)", thread_memory.load("t-abc", ttl=0) is None)
+
+    # Persistido en SQLite → visible entre workers
+    import sqlite3
+    con = sqlite3.connect(os.environ["AGENT_THREAD_MEMORY_DB"])
+    row = con.execute("SELECT intent FROM hilos WHERE thread_id='t-abc'").fetchone()
+    con.close()
+    check("persistida en SQLite", row is not None and row[0] == "ventas")
+    print()
+
+
+def test_followup_detection() -> None:
+    print("7. Detección de seguimientos ('¿y ayer?')...")
+    from main import _followup_target, _normalize_text
+
+    ventas = {"intent": "ventas", "query": "", "periodo": "hoy"}
+    top = {"intent": "top_productos", "query": "", "periodo": "mes"}
+    producto = {"intent": "producto", "query": "pan", "periodo": ""}
+
+    cases = [
+        # (mensaje, memoria, esperado)
+        ("¿y ayer?", ventas, ("ventas", "", "ayer")),
+        ("y el mes pasado", ventas, ("ventas", "", "mes_anterior")),
+        ("y la semana", top, ("top_productos", "", "semana")),
+        ("ahora el mes", ventas, ("ventas", "", "mes")),
+        ("hoy", ventas, ("ventas", "", "hoy")),
+        # No debe disparar:
+        ("¿y ayer?", None, None),                       # sin memoria
+        ("¿y ayer?", producto, None),                   # intent sin período
+        ("cuanto vale el pan de ayer", ventas, None),   # trae contenido propio
+        ("y las cajas", ventas, None),                  # sin período explícito
+        ("dame el detalle completo de las ventas de ayer con margen", ventas, None),  # largo
+    ]
+    for msg, memoria, esperado in cases:
+        result = _followup_target(_normalize_text(msg), memoria)
+        check(f"'{msg}'", result == esperado, f"esperaba {esperado}, obtuve {result}")
+    print()
+
+
 # ─── main ─────────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -220,6 +271,8 @@ def main() -> int:
     test_accion_intent()
     test_quota_state()
     test_telemetry()
+    test_thread_memory()
+    test_followup_detection()
 
     print("=" * 60)
     if FAILURES:

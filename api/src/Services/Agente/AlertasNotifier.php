@@ -113,9 +113,14 @@ final class AlertasNotifier
             );
         }
 
+        // Cadena de destinos: override configurado → correo de registro de la
+        // empresa → correo del SUPER_ADMIN (ninguna empresa queda inalcanzable).
         $email = $config['email_alertas'] !== ''
             ? $config['email_alertas']
             : trim((string) ($empresa['email'] ?? ''));
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            $email = $this->emailFallback($empresaId);
+        }
         $emailRequerido = $config['canal_email']
             || $resultado['whatsapp'] === false   // fallback garantizado si WhatsApp fallo
             || $resultado['whatsapp'] === null;   // o si no hay WhatsApp configurado
@@ -172,6 +177,34 @@ final class AlertasNotifier
             $html .= '</ul>';
         }
         return [rtrim($texto), $html];
+    }
+
+    /**
+     * Correo del primer usuario activo de la empresa, priorizando SUPER_ADMIN.
+     * Ultimo eslabon de la cadena de destinos cuando empresas.email esta vacio
+     * (empresas registradas antes del fix de AuthService::register).
+     */
+    private function emailFallback(int $empresaId): string
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT u.email
+                 FROM empresa_usuarios eu
+                 INNER JOIN usuarios u ON u.id = eu.usuario_id
+                 LEFT JOIN roles r ON r.id = eu.rol_id
+                 WHERE eu.empresa_id = :empresa_id
+                   AND eu.activo = 1
+                   AND u.email IS NOT NULL AND u.email <> \'\'
+                 ORDER BY (r.codigo = \'SUPER_ADMIN\') DESC, eu.id ASC
+                 LIMIT 1'
+            );
+            $stmt->execute([':empresa_id' => $empresaId]);
+            $email = trim((string) ($stmt->fetch()['email'] ?? ''));
+            return filter_var($email, FILTER_VALIDATE_EMAIL) !== false ? $email : '';
+        } catch (\Throwable $e) {
+            error_log('[AgenteAlertas] emailFallback: ' . $e->getMessage());
+            return '';
+        }
     }
 
     private function enviarWhatsApp(int $empresaId, string $numero, string $body): bool

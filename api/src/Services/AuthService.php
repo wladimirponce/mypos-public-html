@@ -84,6 +84,10 @@ final class AuthService
                 'rut' => $rutEmpresa,
                 'razon_social' => $razonSocial,
                 'nombre_fantasia' => $razonSocial, // por defecto
+                // Correo de registro: destino garantizado de las alertas del
+                // agente (empresas.email); antes quedaba NULL y las empresas
+                // nacian inalcanzables para los avisos.
+                'email' => $email,
                 'activo' => 1
             ]);
             $empresaId = (int) $empresa['id'];
