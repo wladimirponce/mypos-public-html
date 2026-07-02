@@ -43,8 +43,13 @@ final class AgenteAlertasConfigController
     public function guardar(): void
     {
         try {
-            $empresaId = (int) ($_GET['empresa_id'] ?? 0);
             $payload = Request::json();
+            // Mismo orden de extraccion que protectedRoute(): query param y
+            // si no, body JSON (los services del frontend lo mandan en body).
+            $empresaId = (int) ($_GET['empresa_id'] ?? 0);
+            if ($empresaId <= 0) {
+                $empresaId = (int) ($payload['empresa_id'] ?? 0);
+            }
             Response::success($this->service->guardar($empresaId, $payload));
         } catch (HttpException $exception) {
             Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());

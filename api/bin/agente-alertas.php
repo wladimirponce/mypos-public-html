@@ -46,6 +46,11 @@ if (is_file($autoload)) {
 Env::loadFile(dirname($root) . '/.env');
 Env::loadFile($root . '/.env');
 
+// El PHP CLI del hosting corre en UTC pero MySQL y el negocio operan en hora
+// chilena: sin esto, las ventanas horarias de los chequeos (ej. cierres a las
+// 22:00) quedarian corridas 3-4 horas. Verificado en prod el 2026-07-02.
+date_default_timezone_set((string) (Env::get('APP_TIMEZONE', 'America/Santiago')));
+
 // Lock anti-solape: si una pasada anterior sigue corriendo, salir en silencio.
 $lockFile = $root . '/storage/agente-alertas.lock';
 $lock = fopen($lockFile, 'c');
