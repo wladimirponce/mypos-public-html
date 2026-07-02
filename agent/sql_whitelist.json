@@ -31,9 +31,12 @@
     },
     "ubicaciones_stock": {
       "tenant_column": "empresa_id",
-      "columns": ["id", "empresa_id", "sucursal_id", "tipo", "activo", "nombre"],
-      "verified": false,
-      "notes": "Columnas inferidas por convencion del proyecto, NO confirmadas linea a linea contra la migracion. Confirmar contra el schema real antes de aprobar cualquier skill que dependa de un JOIN con esta tabla."
+      "columns": [
+        "id", "empresa_id", "sucursal_id", "codigo", "nombre", "tipo",
+        "descripcion", "direccion", "principal", "permite_venta", "activo",
+        "created_at", "updated_at", "deleted_at"
+      ],
+      "source": "web/mypos-backend/backend/database/init/029_ubicaciones_stock.sql:1-21 (verificado 2026-07-02)"
     },
     "ventas": {
       "tenant_column": "empresa_id",
@@ -44,6 +47,55 @@
         "comision_total", "fecha_venta", "created_at"
       ],
       "source": "web/mypos-backend/backend/database/init/001_schema.sql:402-436"
+    },
+    "venta_detalles": {
+      "tenant_column": "empresa_id",
+      "columns": [
+        "id", "empresa_id", "venta_id", "producto_id", "linea",
+        "codigo_producto", "codigo_barra_usado", "nombre_producto",
+        "cantidad", "precio_unitario", "costo_unitario", "subtotal",
+        "descuento_total", "impuesto_total", "total", "margen_total",
+        "comision_total", "created_at"
+      ],
+      "source": "web/mypos-backend/backend/database/init/001_schema.sql:438-463"
+    },
+    "clientes": {
+      "tenant_column": "empresa_id",
+      "columns": [
+        "id", "empresa_id", "rut", "razon_social", "nombre_fantasia",
+        "email", "telefono", "direccion", "comuna", "ciudad",
+        "credito_habilitado", "limite_credito", "activo",
+        "created_at", "updated_at"
+      ],
+      "source": "web/mypos-backend/backend/database/init/001_schema.sql:115-136"
+    },
+    "proveedores": {
+      "tenant_column": "empresa_id",
+      "columns": [
+        "id", "empresa_id", "rut", "razon_social", "nombre_fantasia",
+        "email", "telefono", "direccion", "comuna", "ciudad", "activo",
+        "created_at", "updated_at"
+      ],
+      "source": "web/mypos-backend/backend/database/init/001_schema.sql:138-157"
+    },
+    "compras": {
+      "tenant_column": "empresa_id",
+      "columns": [
+        "id", "empresa_id", "sucursal_id", "proveedor_id", "usuario_id",
+        "tipo_documento", "folio", "fecha_documento", "estado", "subtotal",
+        "impuesto_total", "total", "created_at", "updated_at"
+      ],
+      "source": "web/mypos-backend/backend/database/init/001_schema.sql:524-546"
+    },
+    "cierres_diarios": {
+      "tenant_column": "empresa_id",
+      "columns": [
+        "id", "empresa_id", "sucursal_id", "usuario_id", "fecha_cierre",
+        "estado", "total_ventas", "total_descuentos", "total_impuestos",
+        "total_margen", "total_comisiones", "cantidad_ventas",
+        "cerrado_at", "reabierto_at", "created_at", "updated_at"
+      ],
+      "source": "web/mypos-backend/backend/database/init/001_schema.sql:644-669"
     }
   }
 }

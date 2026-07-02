@@ -180,6 +180,16 @@ final class SqlWhitelistValidator
             }
         }
 
+        // Alias de columnas declarados con AS ("SUM(cantidad) AS unidades"):
+        // se registran para permitir su uso posterior en ORDER BY / HAVING
+        // (el SQL generado por el LLM los usa constantemente) y luego se
+        // eliminan las declaraciones del cuerpo a analizar.
+        preg_match_all('/\bAS\s+([a-zA-Z_][a-zA-Z0-9_]*)/i', $body, $aliasMatches);
+        $declaredColumnAliases = [];
+        foreach ($aliasMatches[1] ?? [] as $columnAlias) {
+            $declaredColumnAliases[strtolower($columnAlias)] = true;
+        }
+
         $withoutAliasesDeclared = preg_replace('/\bAS\s+[a-zA-Z_][a-zA-Z0-9_]*/i', ' ', $body);
         $withoutStrings = preg_replace("/'[^']*'/", "''", (string)$withoutAliasesDeclared);
         $withoutPlaceholders = preg_replace('/:[a-zA-Z_][a-zA-Z0-9_]*/', ' ', (string)$withoutStrings);
@@ -199,6 +209,9 @@ final class SqlWhitelistValidator
             }
             if (isset($allowedColumns[$lower])) {
                 continue; // es una columna permitida
+            }
+            if (isset($declaredColumnAliases[$lower])) {
+                continue; // alias de columna declarado con AS en esta consulta
             }
             if (is_numeric($identifier)) {
                 continue;

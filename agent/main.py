@@ -1059,9 +1059,17 @@ async def _try_approved_skill(
 ) -> Optional[ChatResponse]:
     from skill_engine import match_skill
 
-    result = match_skill(message)
+    result = match_skill(message, empresa_id=empresa_id)
     if not result:
         return None
+
+    if result.get("tipo") == "respuesta_directa":
+        # Texto curado por un humano en admin: se sirve tal cual, sin LLM.
+        return ChatResponse(
+            thread_id=thread_id,
+            reply=str(result.get("respuesta") or ""),
+            escalated=False,
+        )
 
     if result.get("tipo") == "sql_readonly":
         return await _dispatch_intent(

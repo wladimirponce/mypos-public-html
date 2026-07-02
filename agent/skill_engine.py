@@ -68,6 +68,16 @@ def _load_skill(path: str) -> Optional[dict]:
                 return None
             return data
 
+        if data.get("tipo") == "respuesta_directa":
+            # Respuesta de texto curada por un humano en admin (botón
+            # "Responder con IA" → aprobar → crear skill). No ejecuta nada:
+            # patrones → texto fijo, servido sin gastar LLM.
+            if not str(data.get("id") or "").strip():
+                return None
+            if not str(data.get("respuesta") or "").strip():
+                return None
+            return data
+
         intent = str(data.get("intent") or "").strip()
         tool = str(data.get("tool") or "").strip()
         if ALLOWED_TOOLS_BY_INTENT.get(intent) != tool:
@@ -77,7 +87,24 @@ def _load_skill(path: str) -> Optional[dict]:
         return None
 
 
-def match_skill(message: str) -> Optional[dict]:
+def _scope_allows(skill: dict, empresa_id: Optional[int]) -> bool:
+    """
+    Ámbito de la skill: sin campo `scope` (o "global") aplica a todas las
+    empresas; "empresa:<id>" solo a esa empresa. Un scope malformado excluye
+    la skill (fallar cerrado).
+    """
+    scope = str(skill.get("scope") or "global").strip().lower()
+    if scope == "global":
+        return True
+    if scope.startswith("empresa:"):
+        try:
+            return empresa_id is not None and int(scope.split(":", 1)[1]) == int(empresa_id)
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def match_skill(message: str, empresa_id: Optional[int] = None) -> Optional[dict]:
     skills_dir = _base_dir()
     if not os.path.isdir(skills_dir):
         return None
@@ -89,6 +116,8 @@ def match_skill(message: str) -> Optional[dict]:
         skill = _load_skill(os.path.join(skills_dir, name))
         if not skill:
             continue
+        if not _scope_allows(skill, empresa_id):
+            continue
         for pattern in skill.get("patterns", []):
             normalized_pattern = _normalize(str(pattern))
             if not normalized_pattern or normalized_pattern not in text:
@@ -97,6 +126,13 @@ def match_skill(message: str) -> Optional[dict]:
             if skill.get("tipo") == "sql_readonly":
                 return {
                     "tipo": "sql_readonly",
+                    "skill_id": str(skill.get("id") or name),
+                }
+
+            if skill.get("tipo") == "respuesta_directa":
+                return {
+                    "tipo": "respuesta_directa",
+                    "respuesta": str(skill.get("respuesta") or ""),
                     "skill_id": str(skill.get("id") or name),
                 }
 

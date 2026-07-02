@@ -47,6 +47,40 @@ check(
     ['empresa_id', 'producto_id']
 );
 
+// --- Tablas ampliadas en Fase 3 (2026-07-02) ---
+
+check(
+    'clientes con mas credito usado (tabla nueva)',
+    true,
+    "SELECT razon_social, limite_credito FROM clientes WHERE empresa_id = :empresa_id AND credito_habilitado = 1 ORDER BY limite_credito DESC LIMIT 10",
+    ['empresa_id']
+);
+
+check(
+    'compras por proveedor (join tablas nuevas)',
+    true,
+    "SELECT pr.razon_social, COUNT(c.id) AS compras, SUM(c.total) AS total FROM compras c JOIN proveedores pr ON pr.id = c.proveedor_id WHERE c.empresa_id = :empresa_id AND c.estado = 'CONFIRMADA' GROUP BY pr.id, pr.razon_social ORDER BY total DESC LIMIT 10",
+    ['empresa_id']
+);
+
+check(
+    'detalle de lo mas vendido (venta_detalles)',
+    true,
+    "SELECT nombre_producto, SUM(cantidad) AS unidades FROM venta_detalles WHERE empresa_id = :empresa_id GROUP BY nombre_producto ORDER BY unidades DESC LIMIT 5",
+    ['empresa_id']
+);
+
+check(
+    'cierres del mes (cierres_diarios)',
+    true,
+    "SELECT fecha_cierre, total_ventas, cantidad_ventas FROM cierres_diarios WHERE empresa_id = :empresa_id AND estado = 'CERRADO' ORDER BY fecha_cierre DESC LIMIT 31",
+    ['empresa_id']
+);
+
+check('rechaza columna inexistente en tabla nueva', false,
+    "SELECT password FROM clientes WHERE empresa_id = :empresa_id",
+    ['empresa_id']);
+
 // --- Casos que deben fallar ---
 
 check('rechaza multi-statement', false,

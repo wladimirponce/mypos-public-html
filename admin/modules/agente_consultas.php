@@ -327,14 +327,52 @@ if ($db !== null && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($accion === 'crear_skill') {
         $entry = acFindEntry($db, $id);
+
+        // Ámbito de la skill: global (default) o solo la empresa de origen.
+        // agent/skill_engine.py::_scope_allows() filtra al matchear.
+        $scope = (string)($_POST['scope'] ?? 'global');
+        if ($scope !== 'global' && preg_match('/^empresa:\d+$/', $scope) !== 1) {
+            $scope = 'global';
+        }
+
         if ($entry === null) {
             $error = 'No se encontro la propuesta seleccionada.';
         } else {
             $proposal = $entry['propuesta'];
             $esSqlReadonly = trim((string)($proposal['sql_template_sugerido'] ?? '')) !== '';
+            $esRespuestaDirecta = !$esSqlReadonly
+                && empty($proposal['tool_sugerida'])
+                && (string)($entry['respuesta_ia_tipo'] ?? '') === 'respuesta_directa'
+                && trim((string)($entry['respuesta_ia'] ?? '')) !== '';
 
             if (!is_dir($agentSkillsDir) && !@mkdir($agentSkillsDir, 0755, true) && !is_dir($agentSkillsDir)) {
                 $error = 'No se pudo crear el directorio agent/skills.';
+            } elseif ($esRespuestaDirecta) {
+                // --- Skill tipo respuesta_directa: texto curado, sin ejecucion ---
+                $intent = acSlug((string)($proposal['intent_sugerido'] ?? ('respuesta_' . substr($id, 0, 8))));
+                $skillId = acSlug($intent . '_' . substr($id, 0, 8));
+                $skill = [
+                    'id' => $skillId,
+                    'status' => 'aprobada',
+                    'created_at' => date('c'),
+                    'source_entry_id' => $id,
+                    'schema_version' => 1,
+                    'tipo' => 'respuesta_directa',
+                    'scope' => $scope,
+                    'patterns' => !empty($proposal['patterns_sugeridos'])
+                        ? $proposal['patterns_sugeridos']
+                        : [$entry['consulta']],
+                    'respuesta' => trim((string)$entry['respuesta_ia']),
+                    'notes' => $proposal['notas'] ?? 'Creada desde "Responder con IA".',
+                ];
+                $skillPath = $agentSkillsDir . DIRECTORY_SEPARATOR . $skillId . '.json';
+                $json = json_encode($skill, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                if ($json === false || @file_put_contents($skillPath, $json . "\n", LOCK_EX) === false) {
+                    $error = 'No se pudo crear el archivo de skill.';
+                } else {
+                    acUpdateEntry($db, $id, ['status' => 'creada', 'skill_path' => $skillPath]);
+                    $msg = "Skill respuesta_directa creada ($scope): " . basename($skillPath);
+                }
             } elseif ($esSqlReadonly) {
                 // --- Skill tipo sql_readonly: requiere pasar el validador de whitelist ---
                 require_once $agentBasePath . DIRECTORY_SEPARATOR . 'sql_whitelist_validator.php';
@@ -349,6 +387,7 @@ if ($db !== null && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     'source_entry_id' => $id,
                     'schema_version' => 1,
                     'tipo' => 'sql_readonly',
+                    'scope' => $scope,
                     'intent' => $intent,
                     'patterns' => $proposal['patterns_sugeridos'] ?? [$entry['consulta']],
                     'sql_template' => trim((string)$proposal['sql_template_sugerido']),
@@ -394,6 +433,7 @@ if ($db !== null && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         'status' => 'aprobada',
                         'created_at' => date('c'),
                         'source_entry_id' => $id,
+                        'scope' => $scope,
                         'intent' => $intent,
                         'tool' => $tool,
                         'patterns' => $proposal['patterns_sugeridos'] ?? [$entry['consulta']],
@@ -581,9 +621,15 @@ foreach ($entries as $entry) {
                                             <button class="d-btn d-btn-sm d-btn-outline" type="submit"><i class="bi bi-stars"></i> Responder con IA</button>
                                         </form>
                                     <?php endif; ?>
-                                    <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline;">
+                                    <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline-flex; gap:4px; align-items:center;">
                                         <input type="hidden" name="accion" value="crear_skill">
                                         <input type="hidden" name="id" value="<?= htmlspecialchars($id) ?>">
+                                        <select name="scope" class="d-input" style="font-size:.75rem; padding:2px 6px; width:auto;" title="Ámbito de la skill">
+                                            <option value="global">Global</option>
+                                            <?php if ($entry['empresa_id'] !== null): ?>
+                                                <option value="empresa:<?= (int)$entry['empresa_id'] ?>">Solo empresa <?= (int)$entry['empresa_id'] ?></option>
+                                            <?php endif; ?>
+                                        </select>
                                         <button class="d-btn d-btn-sm d-btn-success" type="submit"><i class="bi bi-plus-circle"></i> Crear skill</button>
                                     </form>
                                     <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline;">

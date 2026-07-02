@@ -259,6 +259,67 @@ def test_followup_detection() -> None:
     print()
 
 
+# ─── 6. Skills respuesta_directa y scope por empresa ─────────────────────────
+
+def test_skill_respuesta_directa_y_scope() -> None:
+    print("8. Skills respuesta_directa + scope por empresa...")
+    import json
+    import shutil
+
+    from config import settings
+    import skill_engine
+
+    tmp_dir = tempfile.mkdtemp(prefix="mypos_skills_scope_")
+    original = settings.skills_path
+    try:
+        settings.skills_path = tmp_dir
+
+        def write_skill(name: str, data: dict) -> None:
+            with open(os.path.join(tmp_dir, name), "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+
+        write_skill("respuesta_global.json", {
+            "id": "funciona_en_tablet", "status": "aprobada",
+            "tipo": "respuesta_directa", "scope": "global",
+            "patterns": ["funciona en tablet"],
+            "respuesta": "Sí, MyPOS funciona en tablet desde el navegador.",
+        })
+        write_skill("respuesta_empresa24.json", {
+            "id": "horario_elida", "status": "aprobada",
+            "tipo": "respuesta_directa", "scope": "empresa:24",
+            "patterns": ["horario de la carniceria"],
+            "respuesta": "La carnicería atiende de 9 a 20 hrs.",
+        })
+        write_skill("respuesta_sin_texto.json", {
+            "id": "invalida", "status": "aprobada",
+            "tipo": "respuesta_directa",
+            "patterns": ["skill invalida sin texto"],
+            "respuesta": "",
+        })
+
+        r = skill_engine.match_skill("¿funciona en tablet?", empresa_id=5)
+        check("global aplica a cualquier empresa",
+              r is not None and r["tipo"] == "respuesta_directa"
+              and "tablet" in r["respuesta"], str(r))
+
+        r = skill_engine.match_skill("cual es el horario de la carniceria", empresa_id=24)
+        check("scope empresa:24 aplica a la 24",
+              r is not None and r["skill_id"] == "horario_elida", str(r))
+
+        r = skill_engine.match_skill("cual es el horario de la carniceria", empresa_id=7)
+        check("scope empresa:24 NO aplica a otra empresa", r is None, str(r))
+
+        r = skill_engine.match_skill("cual es el horario de la carniceria", empresa_id=None)
+        check("scope empresa sin empresa_id no aplica", r is None, str(r))
+
+        r = skill_engine.match_skill("skill invalida sin texto", empresa_id=24)
+        check("respuesta_directa sin texto se descarta", r is None, str(r))
+    finally:
+        settings.skills_path = original
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    print()
+
+
 # ─── main ─────────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -273,6 +334,7 @@ def main() -> int:
     test_telemetry()
     test_thread_memory()
     test_followup_detection()
+    test_skill_respuesta_directa_y_scope()
 
     print("=" * 60)
     if FAILURES:
