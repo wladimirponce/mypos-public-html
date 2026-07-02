@@ -998,6 +998,10 @@ class SqlSkillProposalRequest(BaseModel):
     consulta: str
 
 
+class DirectAnswerRequest(BaseModel):
+    consulta: str
+
+
 async def _invoke_graph(
     graph_getter,
     message: str,
@@ -1257,6 +1261,36 @@ async def proponer_skill_sql(body: SqlSkillProposalRequest, _: None = Security(_
 
     try:
         result = await asyncio.wait_for(propose_sql_template(consulta), timeout=20)
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "El LLM no respondio a tiempo")
+    except Exception as exc:
+        if _is_quota_error(exc):
+            cooldown = _mark_quota_exhausted()
+            raise HTTPException(503, f"resource_exhausted, reintenta en {cooldown}s")
+        if _is_provider_busy_error(exc):
+            cooldown = _mark_provider_busy()
+            raise HTTPException(503, f"unavailable, reintenta en {cooldown}s")
+        raise HTTPException(502, f"{exc.__class__.__name__}: {exc}")
+
+    return result
+
+
+@app.post("/skills/answer-directly")
+async def responder_directo(body: DirectAnswerRequest, _: None = Security(_require_secret)):
+    """
+    Redacta una respuesta conversacional para preguntas que NO son de datos
+    (ver direct_answer_generator.py). Usado por el boton "Responder con IA"
+    en el modulo Consultas IA, para preguntas que no tienen una propuesta de
+    skill viable (ni intent+tool ni sql_readonly).
+    """
+    consulta = (body.consulta or "").strip()
+    if not consulta:
+        raise HTTPException(422, "consulta vacia")
+
+    from direct_answer_generator import answer_directly
+
+    try:
+        result = await asyncio.wait_for(answer_directly(consulta), timeout=15)
     except asyncio.TimeoutError:
         raise HTTPException(504, "El LLM no respondio a tiempo")
     except Exception as exc:

@@ -109,6 +109,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if ($accion === 'eliminar') {
+        $id = (string)($_POST['id'] ?? '');
+        $idx = acFindIndex($entries, $id);
+        if ($idx === null) {
+            $error = 'No se encontro la propuesta seleccionada.';
+        } else {
+            array_splice($entries, $idx, 1);
+            if (acSaveEntries($agentLogPath, $entries)) {
+                $msg = 'Propuesta eliminada.';
+            } else {
+                $error = 'No se pudo eliminar la propuesta. Revise permisos en agent/tmp.';
+            }
+        }
+    }
+
+    if ($accion === 'eliminar_descartadas') {
+        $antes = count($entries);
+        $entries = array_values(array_filter(
+            $entries,
+            static fn (array $e): bool => (string)($e['status'] ?? '') !== 'descartada'
+        ));
+        $eliminadas = $antes - count($entries);
+        if (acSaveEntries($agentLogPath, $entries)) {
+            $msg = "$eliminadas propuesta(s) descartada(s) eliminada(s).";
+        } else {
+            $error = 'No se pudo eliminar las propuestas descartadas.';
+        }
+    }
+
+    if ($accion === 'responder_ia') {
+        $id = (string)($_POST['id'] ?? '');
+        $idx = acFindIndex($entries, $id);
+        if ($idx === null) {
+            $error = 'No se encontro la propuesta seleccionada.';
+        } else {
+            $consulta = (string)($entries[$idx]['consulta'] ?? '');
+            if ($consulta === '') {
+                $error = 'La entry no tiene una consulta original que enviar al LLM.';
+            } else {
+                $result = AgentHttpClient::postJson('/skills/answer-directly', ['consulta' => $consulta]);
+                if (!$result['ok']) {
+                    $error = 'No se pudo generar respuesta con IA: ' . $result['error'];
+                } else {
+                    $data = $result['data'];
+                    $tipo = (string)($data['tipo'] ?? '');
+                    $entries[$idx]['respuesta_ia'] = (string)($data['respuesta'] ?? '');
+                    $entries[$idx]['respuesta_ia_tipo'] = $tipo;
+                    $entries[$idx]['updated_at'] = date('c');
+                    if ($tipo === 'respuesta_directa') {
+                        $entries[$idx]['status'] = 'aprobada';
+                    }
+                    acSaveEntries($agentLogPath, $entries);
+                    $msg = $tipo === 'requiere_datos'
+                        ? 'La IA indica que esta pregunta necesita datos en vivo: usa "Generar SQL con IA" en vez de esto.'
+                        : 'Respuesta generada con IA (ver detalle seleccionado).';
+                }
+            }
+        }
+    }
+
     if (in_array($accion, ['seleccionar', 'aprobar', 'descartar'], true)) {
         $id = (string)($_POST['id'] ?? '');
         $idx = acFindIndex($entries, $id);
@@ -297,6 +357,15 @@ foreach ($entries as $entry) {
             <span class="d-badge success"><?= (int)($counts['creada'] ?? 0) ?> creadas</span>
             <span class="d-badge info"><?= number_format($fileSize) ?> bytes</span>
             <span class="d-badge secondary"><?= htmlspecialchars($updatedAt) ?></span>
+            <?php if (($counts['descartada'] ?? 0) > 0): ?>
+                <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline;"
+                      onsubmit="return confirm('¿Eliminar las <?= (int)$counts['descartada'] ?> propuestas descartadas? No se puede deshacer.');">
+                    <input type="hidden" name="accion" value="eliminar_descartadas">
+                    <button class="d-btn d-btn-sm d-btn-outline" type="submit">
+                        <i class="bi bi-trash3"></i> Eliminar descartadas (<?= (int)$counts['descartada'] ?>)
+                    </button>
+                </form>
+            <?php endif; ?>
         </div>
     </div>
     <div class="d-card-body">
@@ -333,6 +402,9 @@ foreach ($entries as $entry) {
                                 'creada' => 'success',
                                 'descartada' => 'secondary',
                             ][$status] ?? 'secondary';
+                            $tieneToolPath = !empty($proposal['intent_sugerido']) && !empty($proposal['tool_sugerida']);
+                            $tieneSqlPath = trim((string)($proposal['sql_template_sugerido'] ?? '')) !== '';
+                            $sinPropuestaViable = !$tieneToolPath && !$tieneSqlPath;
                             ?>
                             <div class="border rounded p-3 mb-3" style="border-color:var(--c-border)!important;">
                                 <div class="d-flex justify-content-between align-items-start gap-2">
@@ -363,6 +435,13 @@ foreach ($entries as $entry) {
                                         <input type="hidden" name="id" value="<?= htmlspecialchars($id) ?>">
                                         <button class="d-btn d-btn-sm d-btn-outline" type="submit"><i class="bi bi-magic"></i> Generar SQL con IA</button>
                                     </form>
+                                    <?php if ($sinPropuestaViable): ?>
+                                        <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline;">
+                                            <input type="hidden" name="accion" value="responder_ia">
+                                            <input type="hidden" name="id" value="<?= htmlspecialchars($id) ?>">
+                                            <button class="d-btn d-btn-sm d-btn-outline" type="submit"><i class="bi bi-stars"></i> Responder con IA</button>
+                                        </form>
+                                    <?php endif; ?>
                                     <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline;">
                                         <input type="hidden" name="accion" value="crear_skill">
                                         <input type="hidden" name="id" value="<?= htmlspecialchars($id) ?>">
@@ -372,6 +451,12 @@ foreach ($entries as $entry) {
                                         <input type="hidden" name="accion" value="descartar">
                                         <input type="hidden" name="id" value="<?= htmlspecialchars($id) ?>">
                                         <button class="d-btn d-btn-sm d-btn-outline" type="submit"><i class="bi bi-x-circle"></i> Descartar</button>
+                                    </form>
+                                    <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline;"
+                                          onsubmit="return confirm('¿Eliminar esta propuesta? No se puede deshacer.');">
+                                        <input type="hidden" name="accion" value="eliminar">
+                                        <input type="hidden" name="id" value="<?= htmlspecialchars($id) ?>">
+                                        <button class="d-btn d-btn-sm d-btn-outline" type="submit"><i class="bi bi-trash3"></i> Eliminar</button>
                                     </form>
                                 </div>
                             </div>
@@ -385,32 +470,34 @@ foreach ($entries as $entry) {
                     <div class="d-card-header">Detalle seleccionado</div>
                     <div class="d-card-body">
                         <?php if ($selectedEntry): ?>
-                            <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;font-size:.75rem;max-height:38vh;overflow:auto;"><?= htmlspecialchars(json_encode($selectedEntry, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></pre>
+                            <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;font-size:.75rem;max-height:32vh;overflow-y:auto;overflow-x:hidden;white-space:pre-wrap;word-break:break-word;"><?= htmlspecialchars(json_encode($selectedEntry, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></pre>
                         <?php else: ?>
                             <div class="text-muted">Seleccione una propuesta para revisar su JSON.</div>
                         <?php endif; ?>
                     </div>
                 </div>
 
-                <form method="POST" action="dashboard.php?module=agente_consultas">
-                    <input type="hidden" name="accion" value="guardar_json">
-                    <label class="form-label fw-semibold">Editor JSON completo</label>
-                    <textarea
-                        name="contenido"
-                        class="d-input"
-                        spellcheck="false"
-                        style="width:100%; min-height:36vh; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.8rem; line-height:1.45; white-space:pre;"
-                    ><?= htmlspecialchars($contenidoActual) ?></textarea>
+                <details>
+                    <summary class="fw-semibold" style="cursor:pointer;">Editor JSON completo (avanzado)</summary>
+                    <form method="POST" action="dashboard.php?module=agente_consultas" class="mt-2">
+                        <input type="hidden" name="accion" value="guardar_json">
+                        <textarea
+                            name="contenido"
+                            class="d-input"
+                            spellcheck="false"
+                            style="width:100%; min-height:28vh; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.8rem; line-height:1.45;"
+                        ><?= htmlspecialchars($contenidoActual) ?></textarea>
 
-                    <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mt-3">
-                        <div class="text-muted" style="font-size:.82rem;">
-                            El guardado valida JSON y reemplaza el archivo completo.
+                        <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mt-3">
+                            <div class="text-muted" style="font-size:.82rem;">
+                                El guardado valida JSON y reemplaza el archivo completo.
+                            </div>
+                            <button type="submit" class="d-btn d-btn-primary">
+                                <i class="bi bi-save"></i> Guardar JSON
+                            </button>
                         </div>
-                        <button type="submit" class="d-btn d-btn-primary">
-                            <i class="bi bi-save"></i> Guardar JSON
-                        </button>
-                    </div>
-                </form>
+                    </form>
+                </details>
             </div>
         </div>
     </div>
