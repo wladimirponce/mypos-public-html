@@ -51,6 +51,7 @@ use Mypos\Controllers\PublicController;
 use Mypos\Controllers\ProductoAtributoController;
 use Mypos\Controllers\ProductoController;
 use Mypos\Controllers\ProveedorController;
+use Mypos\Controllers\AgenteAlertasConfigController;
 use Mypos\Controllers\AgenteConsultaFlexibleController;
 use Mypos\Controllers\AgenteConsultasLogController;
 use Mypos\Controllers\ReporteController;
@@ -747,6 +748,11 @@ $router->post('/api/v1/agente/consulta-flexible', protectedRoute([$agenteConsult
 // perderse por suscripcion vencida).
 $agenteConsultasLogController = new AgenteConsultasLogController();
 $router->post('/api/v1/agente/consultas-log', [$agenteConsultasLogController, 'registrar']);
+
+// Preferencias de alertas proactivas del agente (Configuración → Alertas).
+$agenteAlertasConfigController = new AgenteAlertasConfigController();
+$router->get('/api/v1/agente/alertas-config', protectedRoute([$agenteAlertasConfigController, 'ver'], 'configuracion.ver'));
+$router->put('/api/v1/agente/alertas-config', protectedRoute([$agenteAlertasConfigController, 'guardar'], 'configuracion.editar'));
 
 $router->post('/api/v1/comunicaciones-ventas', [$comunicacionVentasController, 'store']);
 

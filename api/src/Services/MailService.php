@@ -37,6 +37,37 @@ final class MailService
         return $mail;
     }
 
+    /**
+     * Alertas proactivas del agente IA (Fase 1, docs/AGENTE_PLAN_MEJORA.md).
+     * Devuelve bool en vez de void: el motor registra enviada/fallida en
+     * agente_alertas_log y decide el fallback segun el resultado.
+     */
+    public function enviarAlertasAgente(string $toEmail, string $razonSocial, string $htmlListado): bool
+    {
+        try {
+            $mail = $this->getMailer();
+            $mail->addAddress($toEmail, $razonSocial);
+
+            $mail->isHTML(true);
+            $mail->Subject = 'Alertas MyPOS — ' . $razonSocial;
+            $mail->Body = "
+                <h2 style=\"margin-bottom:4px;\">Alertas de tu negocio</h2>
+                <p style=\"margin-top:0;color:#555;\">{$razonSocial} — " . date('d/m/Y H:i') . "</p>
+                {$htmlListado}
+                <p style=\"color:#888;font-size:12px;\">Este aviso lo genera el asistente MyPOS
+                revisando tus datos. Puedes ajustar umbrales y canales en Configuración → Alertas.</p>
+            ";
+
+            $mail->send();
+            return true;
+        } catch (\Throwable $e) {
+            // \Throwable (no solo Exception de PHPMailer): un Error de clase
+            // ausente o de config jamás debe tumbar la pasada del runner.
+            error_log('[AgenteAlertas] Email error: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     public function enviarCorreoBienvenida(string $toEmail, string $nombreUsuario, string $razonSocial): void
     {
         try {
