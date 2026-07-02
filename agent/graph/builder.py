@@ -7,12 +7,15 @@ con la misma interfaz: bind_tools() funciona igual para todos.
 
 Flujo:
   START → assistant → tools → assistant → ... → END
-                    ↘ escalate (pausa) → assistant → END
+
+El agente es de SOLO LECTURA: no existe ningún nodo de acciones ni de
+escalación. Las peticiones de modificación se responden con la guía del
+procedimiento manual (tool `guia_accion_manual`).
 """
 
 import os
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import SystemMessage, ToolMessage
+from langchain_core.messages import SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
@@ -25,8 +28,9 @@ from tools import ALL_TOOLS
 _SYSTEM = """\
 Eres el asistente interno de MyPOS, sistema de punto de venta chileno.
 Ayudas a los operadores a consultar información de su negocio en tiempo real.
+Eres de SOLO LECTURA: jamás modificas datos del sistema.
 
-CAPACIDADES DE CONSULTA (sin aprobación):
+CAPACIDADES DE CONSULTA:
 VENTAS
 - ventas_periodo         → ventas de hoy / ayer / semana / mes / mes_anterior
 - ventas_por_producto    → ranking de productos más vendidos (top N configurable)
@@ -53,12 +57,15 @@ FINANZAS
 SII
 - estado_folios_sii      → folios disponibles por tipo de DTE y alertas de CAF
 
+ACCIONES (NO las ejecutas)
+- guia_accion_manual     → guía del procedimiento manual en MyPOS
+
 REGLAS IMPORTANTES:
 1. Responde siempre en español, de forma concisa y directa.
 2. Usa siempre el empresa_id del operador sin modificarlo.
-3. Para CUALQUIER acción que modifique datos (anular venta, emitir DTE,
-   cerrar caja, ajustar stock, cambiar precios, configuración) usa
-   `solicitar_aprobacion_humana` ANTES de actuar. Nunca ejecutes sin aprobación.
+3. NUNCA modificas datos (anular venta, emitir DTE, cerrar caja, ajustar
+   stock, cambiar precios, configuración). Si el operador pide algo así,
+   usa `guia_accion_manual` y explica dónde hacerlo manualmente en MyPOS.
 4. Si el usuario pide un rango de fechas libre (ej. "del 5 al 20 de mayo"),
    usa ventas_por_producto o ventas_periodo con las fechas explícitas.
 5. Si la consulta es ambigua, haz UNA pregunta corta para aclarar.
@@ -85,40 +92,12 @@ def _make_assistant(model):
     return assistant
 
 
-def _escalate_node(state: AgentState) -> dict:
-    """
-    LangGraph pausa ANTES de este nodo (interrupt_before=["escalate"]).
-    Cuando el operador responde desde el panel, el grafo reanuda aquí
-    con el estado actualizado (escalation_reason con la decisión).
-    """
-    last = state["messages"][-1]
-    tool_call_id = ""
-    for tc in getattr(last, "tool_calls", []):
-        if tc["name"] == "solicitar_aprobacion_humana":
-            tool_call_id = tc["id"]
-            break
-
-    human_reply = state.get("escalation_reason") or "Aprobado por supervisor."
-    return {
-        "escalated": False,
-        "escalation_reason": "",
-        "messages": [
-            ToolMessage(content=f"Supervisor: {human_reply}", tool_call_id=tool_call_id)
-        ],
-    }
-
-
 # ─── Router ───────────────────────────────────────────────────────────────────
 
 def _route(state: AgentState) -> str:
     last = state["messages"][-1]
     calls = getattr(last, "tool_calls", None) or []
-    if not calls:
-        return END
-    for tc in calls:
-        if tc["name"] == "solicitar_aprobacion_humana":
-            return "escalate"
-    return "tools"
+    return "tools" if calls else END
 
 
 # ─── Build ────────────────────────────────────────────────────────────────────
@@ -169,12 +148,10 @@ async def build_graph(llm_provider: str | None = None, llm_model: str | None = N
     workflow = StateGraph(AgentState)
     workflow.add_node("assistant", _make_assistant(model))
     workflow.add_node("tools", ToolNode(ALL_TOOLS))
-    workflow.add_node("escalate", _escalate_node)
 
     workflow.set_entry_point("assistant")
     workflow.add_conditional_edges("assistant", _route)
     workflow.add_edge("tools", "assistant")
-    workflow.add_edge("escalate", "assistant")
 
     # BUG FIX: dirname("agent.db") == "" → makedirs("") falla.
     # Usar el directorio padre solo si existe en el path.
@@ -184,7 +161,4 @@ async def build_graph(llm_provider: str | None = None, llm_model: str | None = N
     conn = await aiosqlite.connect(settings.db_path)
     checkpointer = AsyncSqliteSaver(conn)
 
-    return workflow.compile(
-        checkpointer=checkpointer,
-        interrupt_before=["escalate"],
-    )
+    return workflow.compile(checkpointer=checkpointer)

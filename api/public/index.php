@@ -52,6 +52,7 @@ use Mypos\Controllers\ProductoAtributoController;
 use Mypos\Controllers\ProductoController;
 use Mypos\Controllers\ProveedorController;
 use Mypos\Controllers\AgenteConsultaFlexibleController;
+use Mypos\Controllers\AgenteConsultasLogController;
 use Mypos\Controllers\ReporteController;
 use Mypos\Controllers\RrhhController;
 use Mypos\Controllers\RubroController;
@@ -740,6 +741,12 @@ $router->get('/api/v1/reportes/dashboard', protectedRoute([$reporteController, '
 
 $agenteConsultaFlexibleController = new AgenteConsultaFlexibleController();
 $router->post('/api/v1/agente/consulta-flexible', protectedRoute([$agenteConsultaFlexibleController, 'ejecutar'], 'reportes.ver'));
+
+// Bandeja de consultas no resueltas del agente IA (auth+tenant inline en el
+// controller, sin SubscriptionMiddleware: el log de aprendizaje no debe
+// perderse por suscripcion vencida).
+$agenteConsultasLogController = new AgenteConsultasLogController();
+$router->post('/api/v1/agente/consultas-log', [$agenteConsultasLogController, 'registrar']);
 
 $router->post('/api/v1/comunicaciones-ventas', [$comunicacionVentasController, 'store']);
 

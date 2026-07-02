@@ -6,7 +6,7 @@ from tools.libros import resumen_iva
 from tools.compras import compras_pendientes, sugerencias_reposicion
 from tools.folios import estado_folios_sii
 from tools.caja import estado_cajas
-from tools.escalate import solicitar_aprobacion_humana
+from tools.escalate import guia_accion_manual
 
 ALL_TOOLS = [
     # Ventas
@@ -28,6 +28,6 @@ ALL_TOOLS = [
     resumen_iva,
     # SII
     estado_folios_sii,
-    # Escalación
-    solicitar_aprobacion_humana,
+    # Acciones → guía manual (el agente es de solo lectura)
+    guia_accion_manual,
 ]

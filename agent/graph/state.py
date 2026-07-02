@@ -19,5 +19,3 @@ class AgentState(MessagesState):
     sucursal_id: Optional[int] = None
     operator_name: str = ""
     channel: str = "web"
-    escalated: bool = False
-    escalation_reason: str = ""

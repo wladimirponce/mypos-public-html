@@ -5,7 +5,7 @@ Verifica:
   1. Que todos los imports funcionan
   2. Que el grafo compila sin errores
   3. Que una conversación de prueba fluye correctamente
-  4. Que la escalación pausa el grafo y lo reanuda
+  4. Que el grafo solo tiene nodos de lectura (assistant + tools)
 
 Uso:
   pip install -r requirements.txt
@@ -50,7 +50,6 @@ def test_state_defaults():
     from graph.state import AgentState
     state = AgentState(messages=[], empresa_id=5)
     assert state.get("empresa_id") == 5
-    assert not state.get("escalated")
     print("   OK\n")
 
 
@@ -63,7 +62,7 @@ async def test_graph_compiles():
         print(f"   Nodos: {nodes}")
         assert "assistant" in nodes
         assert "tools" in nodes
-        assert "escalate" in nodes
+        assert "escalate" not in nodes, "El nodo escalate fue eliminado (agente solo lectura)"
         print("   OK\n")
         return graph
     except ImportError as e:
@@ -90,8 +89,6 @@ async def test_conversation(graph):
         "sucursal_id": None,
         "operator_name": "Tester",
         "channel": "web",
-        "escalated": False,
-        "escalation_reason": "",
     }
 
     try:

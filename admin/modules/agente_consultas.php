@@ -1,80 +1,185 @@
 <?php
 /**
- * Consultas IA no resueltas.
+ * Consultas IA no resueltas — bandeja del agente.
  *
- * Mantiene un archivo .txt con JSON estructurado para revisar propuestas,
- * aprobarlas y crear skills seguras consumibles por el agente.
+ * Fuente de datos: tabla `agente_consultas_log` (migración 067, misma BD).
+ * El agente Python inserta vía POST /api/v1/agente/consultas-log; este módulo
+ * revisa propuestas, las aprueba y crea skills seguras en agent/skills/.
+ *
+ * Si existe el archivo legacy agent/tmp/agent_unanswered.txt (formato
+ * anterior, o entradas escritas por el fallback del agente cuando el backend
+ * no responde), se importa automáticamente a la tabla al abrir el módulo y
+ * el archivo se renombra con sufijo .imported-YYYYmmdd-His.
  */
 
+use App\Core\Database;
 use App\Services\AgentHttpClient;
 
 $agentBasePath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'agent';
 $agentLogPath = $agentBasePath . DIRECTORY_SEPARATOR . 'tmp' . DIRECTORY_SEPARATOR . 'agent_unanswered.txt';
-$agentLogDir = dirname($agentLogPath);
 $agentSkillsDir = $agentBasePath . DIRECTORY_SEPARATOR . 'skills';
 $msg = '';
 $error = '';
 
-function acLoadEntries(string $path, ?string &$error = null): array
+/** Columnas que el editor JSON por entrada puede modificar. */
+const AC_EDITABLE_COLUMNS = [
+    'status', 'consulta', 'respuesta', 'respuesta_ia', 'respuesta_ia_tipo', 'skill_path',
+];
+
+function acDb(?string &$error = null): ?PDO
+{
+    try {
+        return Database::getInstance();
+    } catch (Throwable $e) {
+        $error = 'Sin conexion a la base de datos: ' . $e->getMessage();
+        return null;
+    }
+}
+
+/** Convierte una fila de agente_consultas_log a la forma que usa la UI. */
+function acRowToEntry(array $row): array
+{
+    $propuesta = json_decode((string)($row['propuesta'] ?? ''), true);
+    return [
+        'id' => (string)$row['uid'],
+        'created_at' => (string)($row['created_at'] ?? ''),
+        'updated_at' => (string)($row['updated_at'] ?? ''),
+        'status' => (string)($row['status'] ?? 'pendiente'),
+        'source' => (string)($row['source'] ?? 'agent'),
+        'thread_id' => (string)($row['thread_id'] ?? ''),
+        'empresa_id' => $row['empresa_id'] !== null ? (int)$row['empresa_id'] : null,
+        'sucursal_id' => $row['sucursal_id'] !== null ? (int)$row['sucursal_id'] : null,
+        'operador' => (string)($row['operador'] ?? ''),
+        'consulta' => (string)($row['consulta'] ?? ''),
+        'respuesta' => (string)($row['respuesta'] ?? ''),
+        'respuesta_ia' => (string)($row['respuesta_ia'] ?? ''),
+        'respuesta_ia_tipo' => (string)($row['respuesta_ia_tipo'] ?? ''),
+        'propuesta' => is_array($propuesta) ? $propuesta : [],
+        'skill_path' => (string)($row['skill_path'] ?? ''),
+    ];
+}
+
+/** @return array<int, array> entradas en orden de creación (la UI las invierte) */
+function acLoadEntries(PDO $db): array
+{
+    $rows = $db->query('SELECT * FROM agente_consultas_log ORDER BY id ASC')->fetchAll();
+    return array_map('acRowToEntry', $rows);
+}
+
+function acFindEntry(PDO $db, string $uid): ?array
+{
+    $stmt = $db->prepare('SELECT * FROM agente_consultas_log WHERE uid = :uid LIMIT 1');
+    $stmt->execute([':uid' => $uid]);
+    $row = $stmt->fetch();
+    return $row ? acRowToEntry($row) : null;
+}
+
+/**
+ * UPDATE parcial de una entrada. $fields usa nombres de columna reales;
+ * `propuesta` acepta array y se serializa aquí. Placeholders únicos por
+ * columna (EMULATE_PREPARES=false: nunca repetir un placeholder con nombre).
+ */
+function acUpdateEntry(PDO $db, string $uid, array $fields): bool
+{
+    if (isset($fields['propuesta']) && is_array($fields['propuesta'])) {
+        $fields['propuesta'] = json_encode(
+            $fields['propuesta'],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        );
+    }
+    $sets = [];
+    $binds = [':uid_where' => $uid];
+    foreach ($fields as $column => $value) {
+        $sets[] = "`$column` = :set_$column";
+        $binds[":set_$column"] = $value;
+    }
+    if ($sets === []) {
+        return true;
+    }
+    $sql = 'UPDATE agente_consultas_log SET ' . implode(', ', $sets)
+        . ', updated_at = CURRENT_TIMESTAMP WHERE uid = :uid_where';
+    return $db->prepare($sql)->execute($binds);
+}
+
+/**
+ * Importa el archivo legacy (JSON estructurado o texto libre) a la tabla.
+ * INSERT IGNORE por uid: reimportar no duplica. Renombra el archivo al
+ * terminar para no reimportar en cada carga. Devuelve cuántas insertó.
+ */
+function acImportLegacy(PDO $db, string $path, ?string &$importError = null): int
 {
     if (!is_file($path)) {
-        return [];
+        return 0;
     }
-    $raw = (string)@file_get_contents($path);
-    if (trim($raw) === '') {
-        return [];
+    $raw = trim((string)@file_get_contents($path));
+    if ($raw === '') {
+        @rename($path, $path . '.imported-' . date('Ymd-His'));
+        return 0;
     }
+
     $data = json_decode($raw, true);
     if (!is_array($data)) {
-        return [[
+        // Formato TXT antiguo: una sola entrada legacy con el contenido crudo.
+        $data = [[
             'id' => 'legacy_' . bin2hex(random_bytes(6)),
-            'created_at' => date('c'),
-            'updated_at' => date('c'),
             'status' => 'pendiente',
             'source' => 'legacy_txt',
             'consulta' => 'Contenido legacy importado desde texto libre',
             'respuesta' => $raw,
-            'propuesta' => [
-                'titulo' => 'Migrar registro legacy',
-                'resoluble' => false,
-                'tipo' => 'legacy_txt',
-                'accion_sugerida' => 'revisar_manual',
-                'intent_sugerido' => '',
-                'tool_sugerida' => '',
-                'confianza' => 'pendiente',
-                'patterns_sugeridos' => [],
-                'params_sugeridos' => new stdClass(),
-                'notas' => 'Este registro venia del formato TXT anterior. Guarde el JSON para convertir el archivo.',
-            ],
+            'propuesta' => ['titulo' => 'Migrar registro legacy', 'resoluble' => false],
         ]];
+    } elseif (!array_is_list($data)) {
+        $data = [$data];
     }
-    if (array_is_list($data)) {
-        return $data;
-    }
-    return [$data];
-}
 
-function acSaveEntries(string $path, array $entries): bool
-{
-    $dir = dirname($path);
-    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
-        return false;
-    }
-    $json = json_encode($entries, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($json === false) {
-        return false;
-    }
-    return @file_put_contents($path, $json . "\n", LOCK_EX) !== false;
-}
+    $stmt = $db->prepare(
+        'INSERT IGNORE INTO agente_consultas_log
+            (uid, empresa_id, sucursal_id, thread_id, operador, source, status,
+             consulta, respuesta, respuesta_ia, respuesta_ia_tipo, propuesta, skill_path)
+         VALUES
+            (:uid, :empresa_id, :sucursal_id, :thread_id, :operador, :source, :status,
+             :consulta, :respuesta, :respuesta_ia, :respuesta_ia_tipo, :propuesta, :skill_path)'
+    );
 
-function acFindIndex(array $entries, string $id): ?int
-{
-    foreach ($entries as $idx => $entry) {
-        if ((string)($entry['id'] ?? '') === $id) {
-            return $idx;
+    $inserted = 0;
+    foreach ($data as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $uid = trim((string)($entry['id'] ?? ''));
+        if ($uid === '') {
+            $uid = 'legacy_' . bin2hex(random_bytes(6));
+        }
+        $propuesta = $entry['propuesta'] ?? null;
+        try {
+            $stmt->execute([
+                ':uid' => mb_substr($uid, 0, 64),
+                ':empresa_id' => isset($entry['empresa_id']) && is_numeric($entry['empresa_id'])
+                    ? (int)$entry['empresa_id'] : null,
+                ':sucursal_id' => isset($entry['sucursal_id']) && is_numeric($entry['sucursal_id'])
+                    ? (int)$entry['sucursal_id'] : null,
+                ':thread_id' => mb_substr((string)($entry['thread_id'] ?? ''), 0, 200),
+                ':operador' => mb_substr((string)($entry['operador'] ?? ''), 0, 200),
+                ':source' => mb_substr((string)($entry['source'] ?? 'legacy_txt'), 0, 30),
+                ':status' => mb_substr((string)($entry['status'] ?? 'pendiente'), 0, 20),
+                ':consulta' => (string)($entry['consulta'] ?? ''),
+                ':respuesta' => (string)($entry['respuesta'] ?? ''),
+                ':respuesta_ia' => (string)($entry['respuesta_ia'] ?? ''),
+                ':respuesta_ia_tipo' => mb_substr((string)($entry['respuesta_ia_tipo'] ?? ''), 0, 40),
+                ':propuesta' => is_array($propuesta)
+                    ? json_encode($propuesta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : null,
+                ':skill_path' => mb_substr((string)($entry['skill_path'] ?? ''), 0, 255),
+            ]);
+            $inserted += $stmt->rowCount() > 0 ? 1 : 0;
+        } catch (Throwable $e) {
+            $importError = 'Error importando entrada legacy: ' . $e->getMessage();
+            return $inserted; // no renombrar: reintentar en la próxima carga
         }
     }
-    return null;
+
+    @rename($path, $path . '.imported-' . date('Ymd-His'));
+    return $inserted;
 }
 
 function acSlug(string $value): string
@@ -85,119 +190,147 @@ function acSlug(string $value): string
     return $value !== '' ? $value : 'skill';
 }
 
-$entries = acLoadEntries($agentLogPath, $loadError);
-if (!empty($loadError)) {
-    $error = $loadError;
+/**
+ * Pares intent→tool que el agente acepta. DEBE coincidir con
+ * agent/skill_engine.py::ALLOWED_TOOLS_BY_INTENT (fuente de verdad):
+ * una skill con un par que no esté aquí se crea "muerta" — skill_engine
+ * la descarta silenciosamente al cargar y nunca matchea.
+ */
+function acAllowedToolsByIntent(): array
+{
+    return [
+        'ventas' => 'ventas_periodo',
+        'top_productos' => 'ventas_por_producto',
+        'stock_critico' => 'stock_critico',
+        'reposicion' => 'sugerencias_reposicion',
+        'cajas' => 'estado_cajas',
+        'cierres' => 'cierres_pendientes',
+        'iva' => 'resumen_iva',
+        'compras' => 'compras_pendientes',
+        'folios' => 'estado_folios_sii',
+        'cliente' => 'buscar_cliente',
+        'producto' => 'buscar_producto',
+        'stock_producto' => 'buscar_producto',
+        'ayuda' => 'ayuda',
+    ];
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+$db = acDb($dbError);
+if ($db === null) {
+    $error = $dbError . ' — este modulo requiere la migracion 067_agente_consultas_log.sql aplicada.';
+}
+
+$importedCount = 0;
+if ($db !== null) {
+    try {
+        $importedCount = acImportLegacy($db, $agentLogPath, $importError);
+        if (!empty($importError)) {
+            $error = $importError;
+        } elseif ($importedCount > 0) {
+            $msg = "$importedCount entrada(s) legacy importadas desde el archivo a la tabla.";
+        }
+    } catch (Throwable $e) {
+        $error = 'No se pudo leer agente_consultas_log: ' . $e->getMessage()
+            . ' — ¿esta aplicada la migracion 067_agente_consultas_log.sql?';
+        $db = null;
+    }
+}
+
+if ($db !== null && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $accion = (string)($_POST['accion'] ?? '');
+    $id = (string)($_POST['id'] ?? '');
 
     if ($accion === 'guardar_json') {
         $contenido = trim(str_replace(["\r\n", "\r"], "\n", (string)($_POST['contenido'] ?? '')));
-        $contenido = $contenido === '' ? '[]' : $contenido;
         $decoded = json_decode($contenido, true);
         if (!is_array($decoded)) {
             $error = 'No se guardo: el contenido no es JSON valido.';
+        } elseif ($id === '' || acFindEntry($db, $id) === null) {
+            $error = 'No se encontro la entrada a editar.';
         } else {
-            $entries = array_is_list($decoded) ? $decoded : [$decoded];
-            if (acSaveEntries($agentLogPath, $entries)) {
-                $msg = 'JSON guardado correctamente.';
+            $fields = [];
+            foreach (AC_EDITABLE_COLUMNS as $column) {
+                if (array_key_exists($column, $decoded)) {
+                    $fields[$column] = (string)$decoded[$column];
+                }
+            }
+            if (array_key_exists('propuesta', $decoded) && is_array($decoded['propuesta'])) {
+                $fields['propuesta'] = $decoded['propuesta'];
+            }
+            if (acUpdateEntry($db, $id, $fields)) {
+                $msg = 'Entrada actualizada (solo campos editables: '
+                    . implode(', ', AC_EDITABLE_COLUMNS) . ', propuesta).';
             } else {
-                $error = 'No se pudo guardar el archivo. Revise permisos en agent/tmp.';
+                $error = 'No se pudo actualizar la entrada.';
             }
         }
     }
 
     if ($accion === 'eliminar') {
-        $id = (string)($_POST['id'] ?? '');
-        $idx = acFindIndex($entries, $id);
-        if ($idx === null) {
-            $error = 'No se encontro la propuesta seleccionada.';
+        $stmt = $db->prepare('DELETE FROM agente_consultas_log WHERE uid = :uid');
+        $stmt->execute([':uid' => $id]);
+        if ($stmt->rowCount() > 0) {
+            $msg = 'Propuesta eliminada.';
         } else {
-            array_splice($entries, $idx, 1);
-            if (acSaveEntries($agentLogPath, $entries)) {
-                $msg = 'Propuesta eliminada.';
-            } else {
-                $error = 'No se pudo eliminar la propuesta. Revise permisos en agent/tmp.';
-            }
+            $error = 'No se encontro la propuesta seleccionada.';
         }
     }
 
     if ($accion === 'eliminar_descartadas') {
-        $antes = count($entries);
-        $entries = array_values(array_filter(
-            $entries,
-            static fn (array $e): bool => (string)($e['status'] ?? '') !== 'descartada'
-        ));
-        $eliminadas = $antes - count($entries);
-        if (acSaveEntries($agentLogPath, $entries)) {
-            $msg = "$eliminadas propuesta(s) descartada(s) eliminada(s).";
-        } else {
-            $error = 'No se pudo eliminar las propuestas descartadas.';
-        }
+        $stmt = $db->prepare("DELETE FROM agente_consultas_log WHERE status = 'descartada'");
+        $stmt->execute();
+        $msg = $stmt->rowCount() . ' propuesta(s) descartada(s) eliminada(s).';
     }
 
     if ($accion === 'responder_ia') {
-        $id = (string)($_POST['id'] ?? '');
-        $idx = acFindIndex($entries, $id);
-        if ($idx === null) {
+        $entry = acFindEntry($db, $id);
+        if ($entry === null) {
             $error = 'No se encontro la propuesta seleccionada.';
+        } elseif ($entry['consulta'] === '') {
+            $error = 'La entry no tiene una consulta original que enviar al LLM.';
         } else {
-            $consulta = (string)($entries[$idx]['consulta'] ?? '');
-            if ($consulta === '') {
-                $error = 'La entry no tiene una consulta original que enviar al LLM.';
+            $result = AgentHttpClient::postJson('/skills/answer-directly', ['consulta' => $entry['consulta']]);
+            if (!$result['ok']) {
+                $error = 'No se pudo generar respuesta con IA: ' . $result['error'];
             } else {
-                $result = AgentHttpClient::postJson('/skills/answer-directly', ['consulta' => $consulta]);
-                if (!$result['ok']) {
-                    $error = 'No se pudo generar respuesta con IA: ' . $result['error'];
-                } else {
-                    $data = $result['data'];
-                    $tipo = (string)($data['tipo'] ?? '');
-                    $entries[$idx]['respuesta_ia'] = (string)($data['respuesta'] ?? '');
-                    $entries[$idx]['respuesta_ia_tipo'] = $tipo;
-                    $entries[$idx]['updated_at'] = date('c');
-                    if ($tipo === 'respuesta_directa') {
-                        $entries[$idx]['status'] = 'aprobada';
-                    }
-                    acSaveEntries($agentLogPath, $entries);
-                    $msg = $tipo === 'requiere_datos'
-                        ? 'La IA indica que esta pregunta necesita datos en vivo: usa "Generar SQL con IA" en vez de esto.'
-                        : 'Respuesta generada con IA (ver detalle seleccionado).';
+                $data = $result['data'];
+                $tipo = (string)($data['tipo'] ?? '');
+                $fields = [
+                    'respuesta_ia' => (string)($data['respuesta'] ?? ''),
+                    'respuesta_ia_tipo' => $tipo,
+                ];
+                if ($tipo === 'respuesta_directa') {
+                    $fields['status'] = 'aprobada';
                 }
+                acUpdateEntry($db, $id, $fields);
+                $msg = $tipo === 'requiere_datos'
+                    ? 'La IA indica que esta pregunta necesita datos en vivo: usa "Generar SQL con IA" en vez de esto.'
+                    : 'Respuesta generada con IA (ver detalle seleccionado).';
             }
         }
     }
 
     if (in_array($accion, ['seleccionar', 'aprobar', 'descartar'], true)) {
-        $id = (string)($_POST['id'] ?? '');
-        $idx = acFindIndex($entries, $id);
-        if ($idx === null) {
+        $status = [
+            'seleccionar' => 'seleccionada',
+            'aprobar' => 'aprobada',
+            'descartar' => 'descartada',
+        ][$accion];
+        if (acFindEntry($db, $id) === null) {
             $error = 'No se encontro la propuesta seleccionada.';
+        } elseif (acUpdateEntry($db, $id, ['status' => $status])) {
+            $msg = "Propuesta marcada como $status.";
         } else {
-            $status = [
-                'seleccionar' => 'seleccionada',
-                'aprobar' => 'aprobada',
-                'descartar' => 'descartada',
-            ][$accion];
-            $entries[$idx]['status'] = $status;
-            $entries[$idx]['updated_at'] = date('c');
-            if (acSaveEntries($agentLogPath, $entries)) {
-                $msg = "Propuesta marcada como $status.";
-            } else {
-                $error = 'No se pudo actualizar el estado.';
-            }
+            $error = 'No se pudo actualizar el estado.';
         }
     }
 
     if ($accion === 'crear_skill') {
-        $id = (string)($_POST['id'] ?? '');
-        $idx = acFindIndex($entries, $id);
-        if ($idx === null) {
+        $entry = acFindEntry($db, $id);
+        if ($entry === null) {
             $error = 'No se encontro la propuesta seleccionada.';
         } else {
-            $entry = $entries[$idx];
-            $proposal = is_array($entry['propuesta'] ?? null) ? $entry['propuesta'] : [];
+            $proposal = $entry['propuesta'];
             $esSqlReadonly = trim((string)($proposal['sql_template_sugerido'] ?? '')) !== '';
 
             if (!is_dir($agentSkillsDir) && !@mkdir($agentSkillsDir, 0755, true) && !is_dir($agentSkillsDir)) {
@@ -217,7 +350,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'schema_version' => 1,
                     'tipo' => 'sql_readonly',
                     'intent' => $intent,
-                    'patterns' => $proposal['patterns_sugeridos'] ?? [(string)($entry['consulta'] ?? '')],
+                    'patterns' => $proposal['patterns_sugeridos'] ?? [$entry['consulta']],
                     'sql_template' => trim((string)$proposal['sql_template_sugerido']),
                     'tablas_referenciadas' => $proposal['tablas_referenciadas_sugeridas'] ?? [],
                     'params_permitidos' => $proposal['params_sugeridos_sql'] ?? [],
@@ -234,19 +367,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($json === false || @file_put_contents($skillPath, $json . "\n", LOCK_EX) === false) {
                         $error = 'No se pudo crear el archivo de skill.';
                     } else {
-                        $entries[$idx]['status'] = 'creada';
-                        $entries[$idx]['skill_path'] = $skillPath;
-                        $entries[$idx]['updated_at'] = date('c');
-                        acSaveEntries($agentLogPath, $entries);
+                        acUpdateEntry($db, $id, ['status' => 'creada', 'skill_path' => $skillPath]);
                         $msg = 'Skill sql_readonly creada (validada contra la whitelist): ' . basename($skillPath);
                     }
                 }
             } else {
-                // --- Skill tipo intent+tool (formato original, sin cambios) ---
+                // --- Skill tipo intent+tool (formato original) ---
                 $intent = (string)($proposal['intent_sugerido'] ?? 'pendiente');
                 $tool = (string)($proposal['tool_sugerida'] ?? '');
+                $allowed = acAllowedToolsByIntent();
                 if ($intent === '' || $tool === '') {
                     $error = 'La propuesta no tiene intent/tool suficientes para crear una skill segura.';
+                } elseif (($allowed[$intent] ?? null) !== $tool) {
+                    $error = "Par intent/tool invalido: '$intent' → '$tool'. "
+                        . 'El agente la descartaria silenciosamente. Pares validos: '
+                        . implode(', ', array_map(
+                            static fn (string $i, string $t): string => "$i→$t",
+                            array_keys($allowed),
+                            $allowed
+                        )) . '.';
                 } else {
                     $skillId = acSlug($intent . '_' . substr($id, 0, 8));
                     $skillPath = $agentSkillsDir . DIRECTORY_SEPARATOR . $skillId . '.json';
@@ -257,7 +396,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'source_entry_id' => $id,
                         'intent' => $intent,
                         'tool' => $tool,
-                        'patterns' => $proposal['patterns_sugeridos'] ?? [(string)($entry['consulta'] ?? '')],
+                        'patterns' => $proposal['patterns_sugeridos'] ?? [$entry['consulta']],
                         'params' => $proposal['params_sugeridos'] ?? [],
                         'notes' => $proposal['notas'] ?? '',
                     ];
@@ -265,10 +404,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($json === false || @file_put_contents($skillPath, $json . "\n", LOCK_EX) === false) {
                         $error = 'No se pudo crear el archivo de skill.';
                     } else {
-                        $entries[$idx]['status'] = 'creada';
-                        $entries[$idx]['skill_path'] = $skillPath;
-                        $entries[$idx]['updated_at'] = date('c');
-                        acSaveEntries($agentLogPath, $entries);
+                        acUpdateEntry($db, $id, ['status' => 'creada', 'skill_path' => $skillPath]);
                         $msg = 'Skill creada: ' . basename($skillPath);
                     }
                 }
@@ -277,71 +413,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($accion === 'generar_sql_ia') {
-        $id = (string)($_POST['id'] ?? '');
-        $idx = acFindIndex($entries, $id);
-        if ($idx === null) {
+        $entry = acFindEntry($db, $id);
+        if ($entry === null) {
             $error = 'No se encontro la propuesta seleccionada.';
+        } elseif ($entry['consulta'] === '') {
+            $error = 'La entry no tiene una consulta original que enviar al LLM.';
         } else {
-            $consulta = (string)($entries[$idx]['consulta'] ?? '');
-            if ($consulta === '') {
-                $error = 'La entry no tiene una consulta original que enviar al LLM.';
-            } else {
-                $result = AgentHttpClient::postJson('/skills/propose-sql', ['consulta' => $consulta]);
-                $proposal = is_array($entries[$idx]['propuesta'] ?? null) ? $entries[$idx]['propuesta'] : [];
+            $result = AgentHttpClient::postJson('/skills/propose-sql', ['consulta' => $entry['consulta']]);
+            $proposal = $entry['propuesta'];
 
-                if (!$result['ok']) {
-                    $error = 'No se pudo generar SQL con IA: ' . $result['error'];
-                } elseif (($result['data']['resoluble'] ?? null) === false) {
-                    $proposal['notas'] = trim(
-                        ($proposal['notas'] ?? '') . "\n[IA] No resoluble via SQL: " .
-                        (string)($result['data']['notes'] ?? 'sin detalle')
-                    );
-                    $entries[$idx]['propuesta'] = $proposal;
-                    $entries[$idx]['updated_at'] = date('c');
-                    acSaveEntries($agentLogPath, $entries);
-                    $msg = 'El LLM indica que esta consulta no se puede resolver con las tablas permitidas (ver notas).';
-                } else {
-                    $data = $result['data'];
-                    $proposal['tipo_sugerido'] = 'sql_readonly';
-                    $proposal['sql_template_sugerido'] = (string)($data['sql_template'] ?? '');
-                    $proposal['tablas_referenciadas_sugeridas'] = $data['tablas_referenciadas'] ?? [];
-                    $proposal['params_sugeridos_sql'] = $data['params_permitidos'] ?? [];
-                    $proposal['row_limit_sugerido'] = $data['row_limit'] ?? null;
-                    if (!empty($data['patterns'])) {
-                        $proposal['patterns_sugeridos'] = $data['patterns'];
-                    }
-                    $proposal['notas'] = trim(
-                        ($proposal['notas'] ?? '') . "\n[IA] " . (string)($data['notes'] ?? '')
-                    );
-                    $entries[$idx]['propuesta'] = $proposal;
-                    $entries[$idx]['status'] = 'seleccionada';
-                    $entries[$idx]['updated_at'] = date('c');
-                    acSaveEntries($agentLogPath, $entries);
-                    $msg = 'Borrador de SQL generado. Revisa y edita antes de "Crear skill".';
+            if (!$result['ok']) {
+                $error = 'No se pudo generar SQL con IA: ' . $result['error'];
+            } elseif (($result['data']['resoluble'] ?? null) === false) {
+                $proposal['notas'] = trim(
+                    ($proposal['notas'] ?? '') . "\n[IA] No resoluble via SQL: " .
+                    (string)($result['data']['notes'] ?? 'sin detalle')
+                );
+                acUpdateEntry($db, $id, ['propuesta' => $proposal]);
+                $msg = 'El LLM indica que esta consulta no se puede resolver con las tablas permitidas (ver notas).';
+            } else {
+                $data = $result['data'];
+                $proposal['tipo_sugerido'] = 'sql_readonly';
+                $proposal['sql_template_sugerido'] = (string)($data['sql_template'] ?? '');
+                $proposal['tablas_referenciadas_sugeridas'] = $data['tablas_referenciadas'] ?? [];
+                $proposal['params_sugeridos_sql'] = $data['params_permitidos'] ?? [];
+                $proposal['row_limit_sugerido'] = $data['row_limit'] ?? null;
+                if (!empty($data['patterns'])) {
+                    $proposal['patterns_sugeridos'] = $data['patterns'];
                 }
+                $proposal['notas'] = trim(
+                    ($proposal['notas'] ?? '') . "\n[IA] " . (string)($data['notes'] ?? '')
+                );
+                acUpdateEntry($db, $id, ['propuesta' => $proposal, 'status' => 'seleccionada']);
+                $msg = 'Borrador de SQL generado. Revisa y edita antes de "Crear skill".';
             }
         }
     }
 }
 
-$entries = acLoadEntries($agentLogPath, $reloadError);
-if (!$error && !empty($reloadError)) {
-    $error = $reloadError;
+$entries = [];
+$lastUpdated = 'Sin datos';
+if ($db !== null) {
+    try {
+        $entries = acLoadEntries($db);
+        foreach ($entries as $e) {
+            $candidate = $e['updated_at'] !== '' ? $e['updated_at'] : $e['created_at'];
+            if ($lastUpdated === 'Sin datos' || $candidate > $lastUpdated) {
+                $lastUpdated = $candidate;
+            }
+        }
+    } catch (Throwable $e) {
+        $error = 'No se pudo leer agente_consultas_log: ' . $e->getMessage()
+            . ' — ¿esta aplicada la migracion 067_agente_consultas_log.sql?';
+    }
 }
 
-$selectedId = (string)($_GET['selected'] ?? '');
+$selectedId = (string)($_GET['selected'] ?? ($_POST['id'] ?? ''));
 $selectedEntry = null;
-if ($selectedId !== '') {
-    $idx = acFindIndex($entries, $selectedId);
-    $selectedEntry = $idx !== null ? $entries[$idx] : null;
+foreach ($entries as $entry) {
+    if ((string)$entry['id'] === $selectedId) {
+        $selectedEntry = $entry;
+        break;
+    }
 }
 if ($selectedEntry === null && !empty($entries)) {
     $selectedEntry = $entries[count($entries) - 1];
 }
 
-$contenidoActual = is_file($agentLogPath) ? (string)@file_get_contents($agentLogPath) : "[]\n";
-$fileSize = is_file($agentLogPath) ? (int)filesize($agentLogPath) : 0;
-$updatedAt = is_file($agentLogPath) ? date('Y-m-d H:i:s', (int)filemtime($agentLogPath)) : 'Aun no creado';
 $counts = ['pendiente' => 0, 'seleccionada' => 0, 'aprobada' => 0, 'creada' => 0, 'descartada' => 0];
 foreach ($entries as $entry) {
     $status = (string)($entry['status'] ?? 'pendiente');
@@ -355,8 +493,8 @@ foreach ($entries as $entry) {
         <div class="d-flex align-items-center gap-2 flex-wrap">
             <span class="d-badge warning"><?= (int)($counts['pendiente'] ?? 0) ?> pendientes</span>
             <span class="d-badge success"><?= (int)($counts['creada'] ?? 0) ?> creadas</span>
-            <span class="d-badge info"><?= number_format($fileSize) ?> bytes</span>
-            <span class="d-badge secondary"><?= htmlspecialchars($updatedAt) ?></span>
+            <span class="d-badge info"><?= count($entries) ?> total</span>
+            <span class="d-badge secondary"><?= htmlspecialchars($lastUpdated) ?></span>
             <?php if (($counts['descartada'] ?? 0) > 0): ?>
                 <form method="POST" action="dashboard.php?module=agente_consultas" style="display:inline;"
                       onsubmit="return confirm('¿Eliminar las <?= (int)$counts['descartada'] ?> propuestas descartadas? No se puede deshacer.');">
@@ -378,8 +516,8 @@ foreach ($entries as $entry) {
 
         <div class="d-alert info">
             <i class="bi bi-info-circle"></i>
-            El archivo sigue siendo `.txt`, pero ahora contiene JSON estructurado con propuestas. Ruta:
-            <code><?= htmlspecialchars($agentLogPath) ?></code>
+            Fuente de datos: tabla <code>agente_consultas_log</code> (migracion 067). El agente inserta
+            via API; si el backend no responde, cae al archivo legacy y este modulo lo importa al abrir.
         </div>
 
         <div class="row g-3">
@@ -392,8 +530,8 @@ foreach ($entries as $entry) {
                         <?php endif; ?>
                         <?php foreach (array_reverse($entries) as $entry): ?>
                             <?php
-                            $proposal = is_array($entry['propuesta'] ?? null) ? $entry['propuesta'] : [];
-                            $id = (string)($entry['id'] ?? '');
+                            $proposal = $entry['propuesta'];
+                            $id = (string)$entry['id'];
                             $status = (string)($entry['status'] ?? 'pendiente');
                             $badgeClass = [
                                 'pendiente' => 'warning',
@@ -413,7 +551,8 @@ foreach ($entries as $entry) {
                                 </div>
                                 <div class="mt-2" style="font-size:.88rem;"><?= htmlspecialchars((string)($entry['consulta'] ?? '')) ?></div>
                                 <div class="text-muted mt-1" style="font-size:.75rem;">
-                                    Tool: <?= htmlspecialchars((string)($proposal['tool_sugerida'] ?? '-')) ?>
+                                    Empresa: <?= $entry['empresa_id'] !== null ? (int)$entry['empresa_id'] : '-' ?>
+                                    · Tool: <?= htmlspecialchars((string)($proposal['tool_sugerida'] ?? '-')) ?>
                                     · <?= htmlspecialchars((string)($entry['created_at'] ?? '')) ?>
                                 </div>
                                 <div class="d-flex gap-2 flex-wrap mt-3">
@@ -477,27 +616,31 @@ foreach ($entries as $entry) {
                     </div>
                 </div>
 
+                <?php if ($selectedEntry): ?>
                 <details>
-                    <summary class="fw-semibold" style="cursor:pointer;">Editor JSON completo (avanzado)</summary>
+                    <summary class="fw-semibold" style="cursor:pointer;">Editar entrada seleccionada (JSON, avanzado)</summary>
                     <form method="POST" action="dashboard.php?module=agente_consultas" class="mt-2">
                         <input type="hidden" name="accion" value="guardar_json">
+                        <input type="hidden" name="id" value="<?= htmlspecialchars((string)$selectedEntry['id']) ?>">
                         <textarea
                             name="contenido"
                             class="d-input"
                             spellcheck="false"
                             style="width:100%; min-height:28vh; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:.8rem; line-height:1.45;"
-                        ><?= htmlspecialchars($contenidoActual) ?></textarea>
+                        ><?= htmlspecialchars(json_encode($selectedEntry, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) ?></textarea>
 
                         <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mt-3">
                             <div class="text-muted" style="font-size:.82rem;">
-                                El guardado valida JSON y reemplaza el archivo completo.
+                                Solo se guardan los campos editables (status, consulta, respuesta,
+                                respuesta_ia, respuesta_ia_tipo, skill_path, propuesta) de ESTA entrada.
                             </div>
                             <button type="submit" class="d-btn d-btn-primary">
-                                <i class="bi bi-save"></i> Guardar JSON
+                                <i class="bi bi-save"></i> Guardar entrada
                             </button>
                         </div>
                     </form>
                 </details>
+                <?php endif; ?>
             </div>
         </div>
     </div>

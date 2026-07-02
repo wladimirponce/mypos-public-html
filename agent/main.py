@@ -3,9 +3,13 @@ FastAPI agent for MyPOS.
 
 Endpoints:
   POST /chat
-  GET  /escalaciones
-  POST /escalaciones/{thread_id}/responder
+  POST /skills/propose-sql
+  POST /skills/answer-directly
   GET  /health
+
+El agente es de SOLO LECTURA sobre los datos del negocio: las peticiones de
+modificación se responden con la guía del procedimiento manual
+(tools/escalate.py::GUIA_ACCIONES), nunca se ejecutan.
 """
 
 from __future__ import annotations
@@ -26,23 +30,21 @@ from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
 
 from config import settings
+import quota_state
+import telemetry
 
 _graph = None
 _fallback_graph = None
 _SECRET_HEADER = APIKeyHeader(name="X-Agent-Secret", auto_error=False)
 _RUN_TIMEOUT_SECONDS = 35
-_last_llm_call_at = 0.0
-_quota_blocked_until = 0.0
-_provider_busy_until = 0.0
-_quota_lock = asyncio.Lock()
 
 
 def _quota_seconds_left() -> int:
-    return max(0, int(_quota_blocked_until - time.time()))
+    return max(0, int(quota_state.get_value("quota_blocked_until") - time.time()))
 
 
 def _provider_busy_seconds_left() -> int:
-    return max(0, int(_provider_busy_until - time.time()))
+    return max(0, int(quota_state.get_value("provider_busy_until") - time.time()))
 
 
 def _quota_message(seconds: int) -> str:
@@ -227,7 +229,7 @@ def _is_unanswered_reply(reply: str) -> bool:
     return any(marker in text for marker in markers)
 
 
-def _append_unanswered_log(
+async def _append_unanswered_log(
     message: str,
     reply: str,
     thread_id: str,
@@ -235,6 +237,37 @@ def _append_unanswered_log(
     sucursal_id: Optional[int],
     operator_name: str,
 ) -> None:
+    """
+    Registra una consulta no resuelta en la bandeja "Consultas IA".
+
+    Destino principal: tabla agente_consultas_log en MySQL, vía el backend
+    (POST /api/v1/agente/consultas-log, migración 067). Si el backend no
+    responde, cae al archivo JSON local legacy — admin lo importa a la tabla
+    automáticamente al abrir la bandeja, así no se pierde nada.
+    """
+    uid = uuid.uuid4().hex
+    propuesta = _build_unanswered_proposal(message, reply)
+
+    try:
+        from tools.mypos_client import web_post
+
+        await web_post(
+            "/v1/agente/consultas-log",
+            empresa_id,
+            json_body={
+                "uid": uid,
+                "thread_id": _safe_log_text(thread_id, 200),
+                "operador": _safe_log_text(operator_name, 200),
+                "consulta": _safe_log_text(message),
+                "respuesta": _safe_log_text(reply),
+                "propuesta": propuesta,
+            },
+            params={"sucursal_id": sucursal_id} if sucursal_id else None,
+        )
+        return
+    except Exception:
+        pass  # backend caído/no migrado → fallback a archivo
+
     path = _unanswered_log_path()
     try:
         directory = os.path.dirname(path)
@@ -243,7 +276,7 @@ def _append_unanswered_log(
 
         now = datetime.now().isoformat(timespec="seconds")
         entry = {
-            "id": uuid.uuid4().hex,
+            "id": uid,
             "created_at": now,
             "updated_at": now,
             "status": "pendiente",
@@ -254,7 +287,7 @@ def _append_unanswered_log(
             "operador": _safe_log_text(operator_name, 200),
             "consulta": _safe_log_text(message),
             "respuesta": _safe_log_text(reply),
-            "propuesta": _build_unanswered_proposal(message, reply),
+            "propuesta": propuesta,
         }
         entries = _load_unanswered_entries(path)
         entries.append(entry)
@@ -265,8 +298,6 @@ def _append_unanswered_log(
 
 
 async def _reserve_llm_slot() -> Optional[ChatResponse]:
-    global _last_llm_call_at
-
     busy_seconds_left = _provider_busy_seconds_left()
     if busy_seconds_left > 0:
         return ChatResponse(
@@ -283,44 +314,32 @@ async def _reserve_llm_slot() -> Optional[ChatResponse]:
             escalated=False,
         )
 
-    async with _quota_lock:
-        seconds_left = _quota_seconds_left()
-        if seconds_left > 0:
-            return ChatResponse(
-                thread_id="",
-                reply=_quota_message(seconds_left),
-                escalated=False,
-            )
+    # Reserva atómica compartida entre workers (ver quota_state.py)
+    min_interval = max(0, int(settings.llm_min_interval_seconds))
+    reserved, wait = quota_state.try_reserve_slot(min_interval)
+    if not reserved:
+        return ChatResponse(
+            thread_id="",
+            reply=(
+                "Estoy regulando las consultas IA para no agotar la cuota. "
+                f"Espera {wait} segundos o usa una consulta directa "
+                "(ventas de hoy, cajas, producto o stock)."
+            ),
+            escalated=False,
+        )
 
-        elapsed = time.time() - _last_llm_call_at
-        min_interval = max(0, int(settings.llm_min_interval_seconds))
-        if elapsed < min_interval:
-            wait = max(1, int(min_interval - elapsed))
-            return ChatResponse(
-                thread_id="",
-                reply=(
-                    "Estoy regulando las consultas IA para no agotar la cuota. "
-                    f"Espera {wait} segundos o usa una consulta directa "
-                    "(ventas de hoy, cajas, producto o stock)."
-                ),
-                escalated=False,
-            )
-
-        _last_llm_call_at = time.time()
-        return None
+    return None
 
 
 def _mark_quota_exhausted() -> int:
-    global _quota_blocked_until
     cooldown = max(60, int(settings.llm_quota_cooldown_seconds))
-    _quota_blocked_until = time.time() + cooldown
+    quota_state.set_value("quota_blocked_until", time.time() + cooldown)
     return cooldown
 
 
 def _mark_provider_busy() -> int:
-    global _provider_busy_until
     cooldown = min(max(60, int(settings.llm_quota_cooldown_seconds)), 180)
-    _provider_busy_until = time.time() + cooldown
+    quota_state.set_value("provider_busy_until", time.time() + cooldown)
     return cooldown
 
 
@@ -513,7 +532,9 @@ def _is_top_products_query(text: str) -> bool:
 
 
 def _is_boxes_query(text: str) -> bool:
-    return _contains_any(text, ("caja", "cajas")) and not _contains_any(text, ("cierre", "cierres"))
+    return _contains_any(text, ("caja", "cajas")) and not _contains_any(
+        text, ("cierre", "cierres", "sin cerrar")
+    )
 
 
 def _is_closures_query(text: str) -> bool:
@@ -536,7 +557,8 @@ def _is_client_query(text: str) -> bool:
 
 def _is_iva_query(text: str) -> bool:
     return _contains_any(text, ("iva", "impuesto", "debito fiscal", "credito fiscal",
-                                "libro iva", "cuanto pago sii", "declaracion"))
+                                "libro iva", "cuanto pago sii", "pago al sii",
+                                "pagar al sii", "pagarle al sii", "declaracion"))
 
 
 def _is_purchase_query(text: str) -> bool:
@@ -581,6 +603,28 @@ def _is_natural_product_query(text: str) -> bool:
         text == verb or text.endswith(" " + verb)
         for verb in ("hay", "tienen", "tiene", "tienes", "venden", "vende")
     )
+
+
+def _is_action_request(text: str) -> bool:
+    """
+    Detecta peticiones que MODIFICAN datos (anular, emitir, ajustar, cerrar
+    caja…). El agente es de solo lectura: estas consultas se responden con la
+    guía del procedimiento manual (GUIA_ACCIONES), nunca se ejecutan y nunca
+    deben caer en un intent de consulta ("anula la venta 5" NO es 'ventas').
+    Solo verbos imperativos inequívocos para no capturar consultas legítimas.
+    """
+    return _contains_any(text, (
+        "anula", "anular", "elimina", "eliminar", "borra", "borrar",
+        "modifica", "modificar", "emite", "emitir",
+        "cambia el precio", "cambiar el precio", "cambia precio",
+        "sube el precio", "subir el precio", "baja el precio", "bajar el precio",
+        "ajusta el stock", "ajustar el stock", "ajusta stock", "ajustar stock",
+        "cierra la caja", "cerrar la caja", "cierra caja",
+        "abre la caja", "abrir la caja", "abre caja",
+        "da de baja", "dar de baja",
+        "crea un", "crear un", "crea una", "crear una",
+        "registra un", "registrar un", "registra una", "registrar una",
+    ))
 
 
 def _is_help_query(text: str) -> bool:
@@ -661,7 +705,8 @@ async def _dispatch_intent(
     Ejecuta la tool correspondiente a un intent ya identificado. Lo usan tanto
     el router por reglas como el clasificador Gemini Flash, para no duplicar la
     lógica de despacho. Devuelve None si el intent no se puede resolver aquí
-    (faltan datos, o es 'accion'/'desconocido' que maneja el agente completo).
+    (faltan datos, o es 'desconocido' que maneja el agente completo).
+    'accion' responde con la guía manual: el agente nunca modifica datos.
     """
     if intent == "sql_readonly" and skill_id:
         from tools.consulta_flexible import ejecutar_consulta_flexible
@@ -741,7 +786,12 @@ async def _dispatch_intent(
     if intent == "ayuda":
         return ChatResponse(thread_id=thread_id, reply=_HELP_TEXT, escalated=False)
 
-    # accion / desconocido → lo resuelve el agente completo (escalación)
+    if intent == "accion":
+        # El agente no modifica datos: guía manual sin gastar LLM.
+        from tools.escalate import GUIA_ACCIONES
+        return ChatResponse(thread_id=thread_id, reply=GUIA_ACCIONES, escalated=False)
+
+    # desconocido → lo resuelve el agente completo
     return None
 
 
@@ -750,8 +800,11 @@ def _detect_intent_rules(text: str, raw: str) -> tuple[Optional[str], str, str]:
     Detecta el intent por reglas (sin IA). Devuelve (intent, query, periodo).
     El orden importa: lo más específico primero; producto queda de último porque
     sus marcadores naturales ('hay', 'tiene') son amplios y solo deben capturar
-    lo que nada más reconoció.
+    lo que nada más reconoció. Las acciones van PRIMERO: "anula la venta 5"
+    contiene 'venta' pero no es una consulta de ventas.
     """
+    if _is_action_request(text):
+        return "accion", "", ""
     if _is_top_products_query(text):
         return "top_productos", "", _detect_explicit_period(text)
     if _is_sales_query(text):
@@ -910,8 +963,8 @@ async def _try_classifier(
         return None
 
     intent = result["intent"]
-    if intent in ("accion", "desconocido"):
-        return None  # acciones y casos ambiguos → agente completo (escalación)
+    if intent == "desconocido":
+        return None  # casos ambiguos → agente completo
 
     return await _dispatch_intent(
         intent, empresa_id, thread_id, sucursal_id,
@@ -989,11 +1042,6 @@ class ChatResponse(BaseModel):
     escalated: bool = False
 
 
-class EscalationReply(BaseModel):
-    decision: str
-    comentario: str = ""
-
-
 class SqlSkillProposalRequest(BaseModel):
     consulta: str
 
@@ -1025,8 +1073,6 @@ async def _invoke_graph(
         "sucursal_id": sucursal_id,
         "operator_name": operator_name,
         "channel": "web",
-        "escalated": False,
-        "escalation_reason": "",
     }
 
     try:
@@ -1040,21 +1086,6 @@ async def _invoke_graph(
             detail=f"El proveedor IA no respondio en {_RUN_TIMEOUT_SECONDS} segundos",
         ) from exc
 
-    snapshot = await graph.aget_state(config)
-    if "escalate" in (snapshot.next or []):
-        last = result["messages"][-1]
-        reason = ""
-        for tool_call in getattr(last, "tool_calls", []):
-            if tool_call["name"] == "solicitar_aprobacion_humana":
-                reason = tool_call["args"].get("motivo", "")
-                break
-
-        return ChatResponse(
-            thread_id=thread_id,
-            reply=f"Esta accion requiere aprobacion de un supervisor: {reason}",
-            escalated=True,
-        )
-
     last = result["messages"][-1]
     return ChatResponse(thread_id=thread_id, reply=getattr(last, "content", "") or "")
 
@@ -1066,6 +1097,20 @@ async def _run(
     sucursal_id: Optional[int] = None,
     operator_name: str = "",
 ) -> ChatResponse:
+    started = time.perf_counter()
+
+    def _done(resp: ChatResponse, layer: str) -> ChatResponse:
+        telemetry.record(
+            layer=layer,
+            empresa_id=empresa_id,
+            thread_id=thread_id,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            ok=not _is_unanswered_reply(resp.reply),
+            message=message,
+            reply_len=len(resp.reply or ""),
+        )
+        return resp
+
     # 1ª instancia: router por reglas (sin IA, siempre funciona aunque no haya cuota)
     direct = await _try_direct_intent(
         message=message,
@@ -1074,7 +1119,7 @@ async def _run(
         sucursal_id=sucursal_id,
     )
     if direct is not None:
-        return direct
+        return _done(direct, "reglas")
 
     skill = await _try_approved_skill(
         message=message,
@@ -1083,7 +1128,7 @@ async def _run(
         sucursal_id=sucursal_id,
     )
     if skill is not None:
-        return skill
+        return _done(skill, "skill")
 
     # 2ª instancia: clasificador ligero Gemini Flash → despacho directo
     classified = await _try_classifier(
@@ -1093,73 +1138,91 @@ async def _run(
         sucursal_id=sucursal_id,
     )
     if classified is not None:
-        return classified
+        return _done(classified, "clasificador")
 
-    # 3ª instancia: agente completo (acciones que escalan a humano)
+    # 3ª instancia: agente completo
     if _quota_seconds_left() > 0 and _grok_ready():
-        return await _invoke_graph(
-            _get_fallback_graph,
-            message,
-            empresa_id,
-            thread_id,
-            sucursal_id,
-            operator_name,
-        )
-
-    ready, reason = _provider_ready()
-    if not ready:
-        if _grok_ready():
-            return await _invoke_graph(
+        return _done(
+            await _invoke_graph(
                 _get_fallback_graph,
                 message,
                 empresa_id,
                 thread_id,
                 sucursal_id,
                 operator_name,
-            )
-        raise HTTPException(status_code=503, detail=reason)
-
-    quota_response = await _reserve_llm_slot()
-    if quota_response is not None:
-        quota_response.thread_id = thread_id
-        return quota_response
-
-    try:
-        return await _invoke_graph(
-            _get_graph,
-            message,
-            empresa_id,
-            thread_id,
-            sucursal_id,
-            operator_name,
+            ),
+            "grafo_fallback",
         )
-    except Exception as exc:
-        if _is_quota_error(exc) and _grok_ready():
-            try:
-                return await _invoke_graph(
+
+    ready, reason = _provider_ready()
+    if not ready:
+        if _grok_ready():
+            return _done(
+                await _invoke_graph(
                     _get_fallback_graph,
                     message,
                     empresa_id,
                     thread_id,
                     sucursal_id,
                     operator_name,
+                ),
+                "grafo_fallback",
+            )
+        raise HTTPException(status_code=503, detail=reason)
+
+    quota_response = await _reserve_llm_slot()
+    if quota_response is not None:
+        quota_response.thread_id = thread_id
+        return _done(quota_response, "cuota")
+
+    try:
+        return _done(
+            await _invoke_graph(
+                _get_graph,
+                message,
+                empresa_id,
+                thread_id,
+                sucursal_id,
+                operator_name,
+            ),
+            "grafo",
+        )
+    except Exception as exc:
+        if _is_quota_error(exc) and _grok_ready():
+            try:
+                return _done(
+                    await _invoke_graph(
+                        _get_fallback_graph,
+                        message,
+                        empresa_id,
+                        thread_id,
+                        sucursal_id,
+                        operator_name,
+                    ),
+                    "grafo_fallback",
                 )
             except Exception as fallback_exc:
                 exc = fallback_exc
 
         if _is_quota_error(exc):
             cooldown = _mark_quota_exhausted()
-            return ChatResponse(
-                thread_id=thread_id,
-                reply=_quota_message(cooldown),
-                escalated=False,
+            return _done(
+                ChatResponse(
+                    thread_id=thread_id,
+                    reply=_quota_message(cooldown),
+                    escalated=False,
+                ),
+                "cuota",
             )
         if _is_provider_busy_error(exc):
             cooldown = _mark_provider_busy()
-            return ChatResponse(
-                thread_id=thread_id,
-                reply=_provider_busy_message(cooldown),
-                escalated=False,
+            return _done(
+                ChatResponse(
+                    thread_id=thread_id,
+                    reply=_provider_busy_message(cooldown),
+                    escalated=False,
+                ),
+                "cuota",
             )
         raise
 
@@ -1167,6 +1230,19 @@ async def _run(
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, _: None = Security(_require_secret)):
     thread_id = req.thread_id or f"web-{req.empresa_id}-{uuid.uuid4().hex[:8]}"
+    started = time.perf_counter()
+
+    def _record_error(detail: str) -> None:
+        telemetry.record(
+            layer="error",
+            empresa_id=req.empresa_id,
+            thread_id=thread_id,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            ok=False,
+            message=req.message,
+            reply_len=len(detail),
+        )
+
     try:
         response = await _run(
             message=req.message,
@@ -1177,7 +1253,8 @@ async def chat(req: ChatRequest, _: None = Security(_require_secret)):
         )
     except HTTPException as exc:
         detail = str(exc.detail or exc.status_code)
-        _append_unanswered_log(
+        _record_error(detail)
+        await _append_unanswered_log(
             req.message,
             detail,
             thread_id,
@@ -1187,9 +1264,11 @@ async def chat(req: ChatRequest, _: None = Security(_require_secret)):
         )
         raise
     except Exception as exc:
-        _append_unanswered_log(
+        detail = f"{exc.__class__.__name__}: {exc}"
+        _record_error(detail)
+        await _append_unanswered_log(
             req.message,
-            f"{exc.__class__.__name__}: {exc}",
+            detail,
             thread_id,
             req.empresa_id,
             req.sucursal_id,
@@ -1198,7 +1277,7 @@ async def chat(req: ChatRequest, _: None = Security(_require_secret)):
         raise
 
     if _is_unanswered_reply(response.reply):
-        _append_unanswered_log(
+        await _append_unanswered_log(
             req.message,
             response.reply,
             response.thread_id,
@@ -1207,41 +1286,6 @@ async def chat(req: ChatRequest, _: None = Security(_require_secret)):
             req.operator_name,
         )
     return response
-
-
-@app.get("/escalaciones")
-async def listar_escalaciones(_: None = Security(_require_secret)):
-    return {"escalaciones": [], "nota": "implementar query sobre agent.db"}
-
-
-@app.post("/escalaciones/{thread_id}/responder")
-async def responder_escalacion(
-    thread_id: str,
-    body: EscalationReply,
-    _: None = Security(_require_secret),
-):
-    graph = await _get_graph()
-    config = {"configurable": {"thread_id": thread_id}}
-
-    snapshot = await graph.aget_state(config)
-    if "escalate" not in (snapshot.next or []):
-        raise HTTPException(404, "No hay escalacion pendiente para este thread")
-
-    await graph.aupdate_state(
-        config,
-        {
-            "escalation_reason": f"{body.decision}: {body.comentario}",
-            "escalated": False,
-        },
-    )
-    result = await graph.ainvoke(None, config=config)
-    last = result["messages"][-1]
-
-    return {
-        "thread_id": thread_id,
-        "reply": getattr(last, "content", ""),
-        "decision": body.decision,
-    }
 
 
 @app.post("/skills/propose-sql")
