@@ -16,7 +16,7 @@ use App\Core\EnvLoader;
  */
 class GeminiParser
 {
-    private const MODEL    = 'gemini-2.0-flash';
+    private const MODEL    = 'gemini-2.5-flash';
     private const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
     private const TIMEOUT  = 45; // segundos
 

@@ -238,7 +238,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // --- CONTROL DE LIMITES Y ROTACION DE LLAVES GEMINI ---
             $gemini_api_base = rtrim(getenv('GEMINI_API_BASE') ?: 'https://generativelanguage.googleapis.com/v1beta', '/');
-            $gemini_model = getenv('GEMINI_MODEL') ?: 'gemini-1.5-flash';
+            $gemini_model = getenv('GEMINI_MODEL') ?: 'gemini-2.5-flash';
             
             // Cargar llaves disponibles
             $gemini_keys = [];

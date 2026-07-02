@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # Ejemplos de modelo:
     #   "claude-opus-4-8"      → provider "anthropic"  → requiere ANTHROPIC_API_KEY
     #   "gpt-4o"               → provider "openai"     → requiere OPENAI_API_KEY
-    #   "gemini-1.5-pro"       → provider "google_genai" → requiere GOOGLE_API_KEY
+    #   "gemini-2.5-flash"     → provider "google_genai" → requiere GOOGLE_API_KEY
     #   "llama3"               → provider "ollama"     → sin API key (local)
     llm_model: str = Field(default="claude-opus-4-8", alias="LLM_MODEL")
     llm_provider: str = Field(default="anthropic", alias="LLM_PROVIDER")
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # {intent, query, periodo} en JSON. Reusa GOOGLE_API_KEY. No usa tool-calling
     # ni el grafo pesado, así consume muy pocos tokens y la cuota dura mucho más.
     classifier_enabled: bool = Field(default=True, alias="CLASSIFIER_ENABLED")
-    classifier_model: str = Field(default="gemini-1.5-flash", alias="CLASSIFIER_MODEL")
+    classifier_model: str = Field(default="gemini-2.5-flash", alias="CLASSIFIER_MODEL")
 
     # ── MyPOS Web Backend (JWT Bearer) ────────────────────────────────────────
     # En producción usar 127.0.0.1 (misma máquina, evita DNS y TLS extra)
