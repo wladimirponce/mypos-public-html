@@ -30,6 +30,7 @@ from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
 
 from config import settings
+import cl_time
 import quota_state
 import telemetry
 import thread_memory
@@ -120,6 +121,7 @@ def _tool_for_intent(intent: str) -> str:
         "cliente": "buscar_cliente",
         "producto": "buscar_producto",
         "stock_producto": "buscar_producto",
+        "exportar": "exportar_excel_a_correo",
         "ayuda": "ayuda",
     }.get(intent, "")
 
@@ -456,7 +458,9 @@ _HELP_TEXT = (
     "• Compras: 'órdenes de compra pendientes'\n"
     "• Finanzas: 'IVA del mes', '¿cuánto pago al SII?'\n"
     "• SII: '¿cuántos folios quedan?'\n"
-    "• Clientes: 'busca al cliente Juan Pérez', 'cliente RUT 12345678-9'"
+    "• Clientes: 'busca al cliente Juan Pérez', 'cliente RUT 12345678-9'\n"
+    "• Exportar: 'envíame un excel del maestro de productos al correo', "
+    "'exporta las ventas del mes' (llega al correo registrado de la empresa)"
 )
 
 
@@ -628,6 +632,43 @@ def _is_action_request(text: str) -> bool:
     ))
 
 
+# Palabras que identifican un pedido de exportación/planilla.
+_EXPORT_MARKERS = ("excel", "planilla", "csv", "exporta", "exportar", "exportame", "xls")
+
+# Tema de la exportación → tipo del registry del backend (ExportacionService::TIPOS).
+_EXPORT_TIPOS = (
+    ("productos", ("producto", "productos", "maestro de producto", "catalogo", "articulos")),
+    ("clientes", ("cliente", "clientes",)),
+    ("proveedores", ("proveedor", "proveedores",)),
+    ("stock", ("stock", "inventario", "existencias")),
+    ("ventas", ("venta", "ventas",)),
+    ("compras", ("compra", "compras",)),
+    ("cierres", ("cierre", "cierres",)),
+)
+
+
+def _is_export_request(text: str) -> bool:
+    """
+    Pedido de planilla: "envíame un excel del maestro de productos al correo",
+    "exporta las ventas del mes", "mándame la planilla de clientes",
+    "envíame el maestro de productos al correo" (sin decir 'excel').
+    Va ANTES que los intents de consulta en el router: "excel de ventas"
+    no debe responder los totales de ventas.
+    """
+    if _contains_any(text, _EXPORT_MARKERS):
+        return True
+    pide_envio = _contains_any(text, ("enviame", "envia", "mandame", "manda", "envio"))
+    por_correo = _contains_any(text, ("correo", "mail", "email"))
+    return pide_envio and por_correo
+
+
+def _extract_export_tipo(text: str) -> str:
+    for tipo, markers in _EXPORT_TIPOS:
+        if _contains_any(text, markers):
+            return tipo
+    return ""
+
+
 def _is_help_query(text: str) -> bool:
     """El operador pregunta qué puede hacer el asistente."""
     return _contains_any(text, (
@@ -671,7 +712,7 @@ def _extract_product_query(raw: str) -> str:
 
 def _periodo_a_fechas(periodo: str) -> tuple[str, str]:
     """(fecha_desde, fecha_hasta) para un período predefinido. Default: mes a la fecha."""
-    today = date.today()
+    today = cl_time.today()  # hora chilena, no la del servidor (UTC)
     if periodo in ("ultimos_30", "hasta_hoy"):
         return str(today - timedelta(days=29)), str(today)
     if periodo == "ayer":
@@ -784,6 +825,14 @@ async def _dispatch_intent(
             }), thread_id)
         return None
 
+    if intent == "exportar":
+        from tools.exportar import ejecutar_export
+        return ChatResponse(
+            thread_id=thread_id,
+            reply=await ejecutar_export(empresa_id, query, periodo),
+            escalated=False,
+        )
+
     if intent == "ayuda":
         return ChatResponse(thread_id=thread_id, reply=_HELP_TEXT, escalated=False)
 
@@ -880,6 +929,10 @@ def _detect_intent_rules(text: str, raw: str) -> tuple[Optional[str], str, str]:
     """
     if _is_action_request(text):
         return "accion", "", ""
+    if _is_export_request(text):
+        # query = tipo de exportación; si no se reconoce el tema, igual se
+        # despacha a "exportar" y la tool responde el menú de tipos.
+        return "exportar", _extract_export_tipo(text), _detect_explicit_period(text)
     if _is_top_products_query(text):
         return "top_productos", "", _detect_explicit_period(text)
     if _is_sales_query(text):
@@ -1102,16 +1155,16 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    detail = str(exc).strip() or exc.__class__.__name__
-    if len(detail) > 240:
-        detail = detail[:240] + "..."
+    # B2 (auditoría): no filtrar el detalle interno de la excepción al cliente
+    # (podía revelar rutas, SQL, credenciales en el mensaje). El detalle
+    # completo queda solo en el log del servidor; el cliente recibe un mensaje
+    # genérico. Ver docs/AUDITORIA_SEGURIDAD_2026-07.md.
+    import logging
+    logging.getLogger("mypos.agent").exception("Error interno no controlado del agente")
 
     return JSONResponse(
         status_code=500,
-        content={
-            "detail": f"Error interno del agente IA: {detail}",
-            "error_type": exc.__class__.__name__,
-        },
+        content={"detail": "Error interno del agente IA. Intenta nuevamente en unos minutos."},
     )
 
 

@@ -206,6 +206,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             // -----------------------------------------
 
+            // --- AGENTE DE NEGOCIO: NÚMERO AUTORIZADO DEL DUEÑO (Fase 4) ---
+            // Si el mensaje llega a la línea de UNA empresa y viene del número
+            // autorizado en Configuración → Alertas (agente_alertas_config),
+            // responde el agente interno de MyPOS (ventas, stock, cajas,
+            // exportaciones...) en vez del asistente comercial, y NO se crea
+            // conversación/lead en el CRM. Aislamiento: el número autorizado
+            // solo accede a SU empresa (la dueña de la línea receptora).
+            // La respuesta va como texto libre: el dueño inició la conversación,
+            // así que cae dentro de la ventana de 24 h de Meta (sin plantilla).
+            if ($empresaWhatsappId !== null) {
+                $stmtAut = $db->prepare(
+                    'SELECT whatsapp_numero FROM agente_alertas_config
+                     WHERE empresa_id = ? AND activo = 1 AND canal_whatsapp = 1
+                       AND whatsapp_numero IS NOT NULL AND whatsapp_numero <> ""
+                     LIMIT 1'
+                );
+                $stmtAut->execute([$empresaWhatsappId]);
+                $numeroAutorizado = preg_replace('/[^\d]/', '', (string)($stmtAut->fetchColumn() ?: ''));
+                $fromNorm = preg_replace('/[^\d]/', '', (string)$from);
+
+                if ($numeroAutorizado !== '' && $fromNorm === $numeroAutorizado) {
+                    $agentReply = '';
+                    try {
+                        $agentResp = (new \Mypos\Services\AgentService())->chat([
+                            'message' => $userMessage,
+                            'empresa_id' => $empresaWhatsappId,
+                            'operator_name' => $userName !== '' ? $userName : 'Dueño (WhatsApp)',
+                            // Mismo thread por número → la memoria de hilo del
+                            // agente ("¿y ayer?") también funciona por WhatsApp.
+                            'thread_id' => 'wa-' . $empresaWhatsappId . '-' . $fromNorm,
+                        ]);
+                        $agentReply = trim((string)($agentResp['reply'] ?? ''));
+                    } catch (\Throwable $e) {
+                        file_put_contents(
+                            $log_file,
+                            '[' . date('Y-m-d H:i:s') . "] [AgenteWA] empresa $empresaWhatsappId: " . $e->getMessage() . "\n",
+                            FILE_APPEND
+                        );
+                    }
+                    if ($agentReply === '') {
+                        $agentReply = 'El asistente no pudo responder en este momento. '
+                            . 'Intenta de nuevo en unos minutos o revisa el chat dentro de MyPOS.';
+                    }
+
+                    $agentPayload = json_encode([
+                        'messaging_product' => 'whatsapp',
+                        'to' => $from,
+                        'type' => 'text',
+                        'text' => ['body' => mb_substr($agentReply, 0, 3800)],
+                    ], JSON_UNESCAPED_UNICODE);
+
+                    $agentCtx = stream_context_create(['http' => [
+                        'header' => "Content-Type: application/json\r\nAuthorization: Bearer " . $empresaAccessToken . "\r\n",
+                        'method' => 'POST',
+                        'content' => $agentPayload,
+                        'timeout' => 15,
+                        'ignore_errors' => true,
+                    ]]);
+                    @file_get_contents($empresaApiUrl, false, $agentCtx);
+
+                    http_response_code(200);
+                    echo 'OK';
+                    exit;
+                }
+            }
+            // --- FIN AGENTE DE NEGOCIO ---
+
             // --- MEMORIA DE CONVERSACION ---
             $stmt = $db->prepare('SELECT id, context_summary FROM whatsapp_conversations WHERE phone_number = ? AND empresa_id = ?');
             $stmt->execute([$from, $empresaWhatsappId]);

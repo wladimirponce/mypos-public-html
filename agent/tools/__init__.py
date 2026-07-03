@@ -7,6 +7,7 @@ from tools.compras import compras_pendientes, sugerencias_reposicion
 from tools.folios import estado_folios_sii
 from tools.caja import estado_cajas
 from tools.escalate import guia_accion_manual
+from tools.exportar import exportar_excel_a_correo
 
 ALL_TOOLS = [
     # Ventas
@@ -28,6 +29,8 @@ ALL_TOOLS = [
     resumen_iva,
     # SII
     estado_folios_sii,
+    # Exportaciones (Excel al correo registrado de la empresa)
+    exportar_excel_a_correo,
     # Acciones → guía manual (el agente es de solo lectura)
     guia_accion_manual,
 ]

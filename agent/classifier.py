@@ -26,7 +26,7 @@ _models = {}
 VALID_INTENTS = {
     "ventas", "top_productos", "stock_critico", "reposicion", "cajas",
     "cierres", "iva", "compras", "folios", "cliente", "producto",
-    "stock_producto", "ayuda", "accion", "desconocido",
+    "stock_producto", "exportar", "ayuda", "accion", "desconocido",
 }
 
 _SYSTEM = """Eres un clasificador de intención para MyPOS, un punto de venta chileno.
@@ -47,6 +47,7 @@ intents posibles:
 - compras: órdenes de compra pendientes a proveedores.
 - folios: folios o CAF del SII disponibles.
 - cliente: buscar un cliente. "query"=nombre, RUT o email.
+- exportar: pide una planilla/excel enviada al correo. "query"=tema exacto (productos|clientes|proveedores|stock|ventas|compras|cierres). Completa "periodo" si aplica.
 - ayuda: pregunta qué puede hacer el asistente.
 - accion: pide MODIFICAR datos (anular venta, cerrar caja, cambiar precio, emitir documento, ajustar stock).
 - desconocido: no calza con ninguna.

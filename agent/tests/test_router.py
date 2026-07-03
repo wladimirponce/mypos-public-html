@@ -91,6 +91,16 @@ ROUTER_CASES = [
     ("7802820442731", "producto", "7802820442731", None),
     # Ayuda
     ("que puedes hacer", "ayuda", None, None),
+    # Exportaciones → Excel al correo registrado (ANTES que ventas: "excel de
+    # ventas" no debe responder totales)
+    ("enviame un excel del maestro de productos completo al correo", "exportar", "productos", None),
+    ("exporta las ventas del mes", "exportar", "ventas", "mes"),
+    ("mandame la planilla de clientes", "exportar", "clientes", None),
+    ("enviame el maestro de productos al correo", "exportar", "productos", None),
+    ("excel del stock", "exportar", "stock", None),
+    ("exportar compras de la semana", "exportar", "compras", "semana"),
+    ("csv de proveedores", "exportar", "proveedores", None),
+    ("enviame un excel al correo", "exportar", "", None),  # sin tema → menú de tipos
     # Acciones → guía manual (el agente es de solo lectura, nunca ejecuta)
     ("anula la venta 1543", "accion", None, None),
     ("cierra la caja 2", "accion", None, None),

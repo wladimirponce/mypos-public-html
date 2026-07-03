@@ -213,7 +213,11 @@ final class ConsultaFlexibleService
      */
     private function execute(string $sqlTemplate, array $binds, int $rowLimit): array
     {
-        $pdo = $this->connection ?? Database::connection();
+        // M5 (auditoría): ejecutar con la conexión de SOLO LECTURA del agente
+        // cuando está configurada (usuario MySQL solo-SELECT). Control de fondo
+        // real ante cualquier bypass del validador. Fallback seguro a la
+        // principal si no está configurado. Ver docs/AGENTE_SQL_READONLY.md.
+        $pdo = $this->connection ?? Database::readOnlyConnection();
 
         try {
             // Limite de tiempo de ejecucion best-effort (MySQL 5.7.8+); si el
@@ -222,6 +226,16 @@ final class ConsultaFlexibleService
             $pdo->exec('SET SESSION MAX_EXECUTION_TIME=5000');
         } catch (Throwable) {
             // ignorar, best-effort
+        }
+
+        // B3 (auditoría): garantizar un LIMIT en el propio SQL cuando la
+        // plantilla no lo trae, para no escanear tablas completas. Se usa
+        // rowLimit+1 para que el corte en PHP (abajo) siga detectando
+        // 'truncated'. La plantilla ya fue validada como un único SELECT sin
+        // punto y coma extra. Ver docs/AUDITORIA_SEGURIDAD_2026-07.md.
+        $sqlTemplate = rtrim(trim($sqlTemplate), ';');
+        if (!preg_match('/\blimit\b/i', $sqlTemplate)) {
+            $sqlTemplate .= ' LIMIT ' . ((int) $rowLimit + 1);
         }
 
         try {

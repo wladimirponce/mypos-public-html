@@ -29,7 +29,7 @@ os.environ.setdefault("MYPOS_API_KEY", "test-api-key")
 os.environ.setdefault("AGENT_SECRET", "test-secret")
 os.environ.setdefault("AGENT_DB", ":memory:")  # SQLite en memoria, sin archivo
 
-_EXPECTED_TOOLS = 13
+_EXPECTED_TOOLS = 14
 
 
 def test_imports():

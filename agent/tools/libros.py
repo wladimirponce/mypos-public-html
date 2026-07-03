@@ -10,6 +10,7 @@ from datetime import date
 
 from langchain_core.tools import tool
 
+import cl_time
 from tools.mypos_client import web_get
 
 
@@ -27,7 +28,7 @@ async def resumen_iva(
         periodo: Mes en formato YYYY-MM. Si se omite, usa el mes actual.
     """
     if not periodo:
-        hoy = date.today()
+        hoy = cl_time.today()  # hora chilena, no la del servidor (UTC)
         periodo = f"{hoy.year}-{hoy.month:02d}"
 
     try:

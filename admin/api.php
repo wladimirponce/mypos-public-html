@@ -206,7 +206,10 @@ use App\Core\Context;
 use App\Repositories\EmpresaRepository;
 
 // InicializaciÃ³n de Contexto DinÃ¡mico (Multi-Cliente)
-$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? $_SESSION['active_api_key'] ?? $_GET['api_key'] ?? $_POST['api_key'] ?? '';
+// M1: la API key NO se acepta por query string ($_GET) para no filtrarla en
+// logs de acceso, proxies, Referer ni historial. Solo header X-API-KEY, sesion
+// admin activa o cuerpo POST (form). Ver docs/AUDITORIA_SEGURIDAD_2026-07.md.
+$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? $_SESSION['active_api_key'] ?? $_POST['api_key'] ?? '';
 
 // ResoluciÃ³n del empresa_id solicitado en la peticiÃ³n. El cliente (APK u otro
 // consumidor) puede pasar `empresa_id` por GET, POST o body JSON para indicar
@@ -269,26 +272,52 @@ try {
 }
 
 // â”€â”€â”€ Definir constantes de empresa desde la BD (o valores neutros) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Validacion de la clave compartida admin<->web (SaaS servidor-a-servidor). Solo se
-// exige si la empresa YA tiene admin_api_key provisionada en BD: asi no rompe
-// instalaciones en transicion ni peticiones desde sesion admin. La clave la
-// autogestiona el web backend (la genera y persiste en la misma columna dte_configuracion).
-if (empty($_SESSION['admin_id']) && $requestedEmpresaId !== null && $requestedEmpresaId > 0 && !empty($apiKey)) {
+// Validacion de la clave compartida admin<->web (SaaS servidor-a-servidor).
+// DENY-BY-DEFAULT (hallazgo A2 de la auditoria, docs/AUDITORIA_SEGURIDAD_2026-07.md):
+// una peticion server-a-server sobre una empresa especifica DEBE traer la
+// admin_api_key correcta de esa empresa. Sin clave provisionada, sin clave en
+// la peticion, o ante un error de BD → 401 (fail-closed). Las peticiones desde
+// sesion admin autenticada no pasan por aqui (tienen su propio gate de login).
+//
+// Valvula de transicion SOLO para instalaciones que aun no corrieron la
+// provision de claves (migracion 065): defina ADMIN_API_ALLOW_LEGACY_NOKEY=1
+// en el entorno para permitir empresas SIN clave provisionada. Es temporal:
+// una vez respaldadas todas las empresas activas, quitela para volver al modo
+// seguro. NUNCA relaja el chequeo cuando la empresa SI tiene clave.
+if (empty($_SESSION['admin_id']) && $requestedEmpresaId !== null && $requestedEmpresaId > 0) {
+    $allowLegacyNoKey = ((string) (getenv('ADMIN_API_ALLOW_LEGACY_NOKEY') ?: '')) === '1';
+    $denyReason = null;
     try {
         $pdoKey = \App\Core\Database::getInstance();
         $stKey = $pdoKey->prepare('SELECT admin_api_key FROM dte_configuracion WHERE empresa_id = ? LIMIT 1');
         $stKey->execute([$requestedEmpresaId]);
-        $expectedKey = $stKey->fetchColumn();
-        if (is_string($expectedKey) && trim($expectedKey) !== '' && !hash_equals(trim($expectedKey), (string)$apiKey)) {
-            if (PHP_SAPI !== 'cli' && !headers_sent()) {
-                http_response_code(401);
-                header('Content-Type: application/json; charset=UTF-8');
+        $expectedKeyRaw = $stKey->fetchColumn();
+        $expectedKey = is_string($expectedKeyRaw) ? trim($expectedKeyRaw) : '';
+
+        if ($expectedKey === '') {
+            // Empresa sin clave provisionada: denegar salvo transicion explicita.
+            if (!$allowLegacyNoKey) {
+                $denyReason = 'La empresa no tiene clave admin_api_key provisionada.';
             }
-            echo json_encode(['ok' => false, 'error' => 'API key invalida para la empresa.']);
-            exit;
+        } elseif (empty($apiKey) || !hash_equals($expectedKey, (string) $apiKey)) {
+            $denyReason = 'API key invalida para la empresa.';
         }
     } catch (\Throwable $eKey) {
-        // Columna admin_api_key inexistente (migracion 065 sin aplicar): no bloquear.
+        // Fail-closed: ante cualquier error de BD (columna faltante, etc.) no se
+        // concede acceso, salvo que la transicion legacy este explicitamente activa.
+        error_log('api.php: fallo validando admin_api_key: ' . $eKey->getMessage());
+        if (!$allowLegacyNoKey) {
+            $denyReason = 'No se pudo validar la clave de la empresa.';
+        }
+    }
+
+    if ($denyReason !== null) {
+        if (PHP_SAPI !== 'cli' && !headers_sent()) {
+            http_response_code(401);
+            header('Content-Type: application/json; charset=UTF-8');
+        }
+        echo json_encode(['ok' => false, 'error' => $denyReason]);
+        exit;
     }
 }
 

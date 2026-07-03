@@ -41,6 +41,11 @@ final class Router
 
         if ($handler !== null) {
             $handler();
+            // B1: cortar aquí tras un match estático. Antes se caía al loop de
+            // rutas dinámicas y a Response::error(404) — funcionaba solo porque
+            // los handlers hacen exit. El return evita doble ejecución si algún
+            // handler no termina el proceso. Ver docs/AUDITORIA_SEGURIDAD_2026-07.md.
+            return;
         }
 
         foreach ($this->routes[$normalizedMethod] ?? [] as $route => $routeHandler) {

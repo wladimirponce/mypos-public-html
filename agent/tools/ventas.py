@@ -12,6 +12,7 @@ from typing import Optional
 
 from langchain_core.tools import tool
 
+import cl_time
 from tools.mypos_client import web_get
 
 
@@ -39,7 +40,7 @@ def _format_quantity(value) -> str:
 
 def _date_range(periodo: str) -> tuple[str, str]:
     """Devuelve (fecha_desde, fecha_hasta) para períodos predefinidos."""
-    today = date.today()
+    today = cl_time.today()  # hora chilena, no la del servidor (UTC)
     if periodo == "ayer":
         d = today - timedelta(days=1)
         return str(d), str(d)

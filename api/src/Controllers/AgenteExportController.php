@@ -29,8 +29,17 @@ final class AgenteExportController
         try {
             $payload = Request::json();
             $tipo = strtolower(trim((string) ($payload['tipo'] ?? '')));
-            $fechaDesde = $this->fecha((string) ($payload['fecha_desde'] ?? ''), date('Y-m-01'));
-            $fechaHasta = $this->fecha((string) ($payload['fecha_hasta'] ?? ''), date('Y-m-d'));
+
+            // Defaults de fechas EN MySQL, no con date() de PHP: el PHP del
+            // hosting corre en UTC y MySQL en hora chilena — con date() los
+            // defaults apuntarian a otro dia (misma clase de bug corregida
+            // en AlertasRunner el 2026-07-02).
+            $db = \Mypos\Config\Database::connection();
+            $hoy = $db->query(
+                "SELECT DATE_FORMAT(CURDATE(), '%Y-%m-01') AS desde, CURDATE() AS hasta"
+            )->fetch();
+            $fechaDesde = $this->fecha((string) ($payload['fecha_desde'] ?? ''), (string) $hoy['desde']);
+            $fechaHasta = $this->fecha((string) ($payload['fecha_hasta'] ?? ''), (string) $hoy['hasta']);
 
             if ($tipo === '') {
                 throw new HttpException('tipo obligatorio', 422);
