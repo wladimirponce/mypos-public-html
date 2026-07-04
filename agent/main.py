@@ -520,8 +520,20 @@ def _detect_explicit_period(text: str) -> str:
 
 
 def _is_sales_query(text: str) -> bool:
+    """
+    Totales de ventas de un período. REGLA DE HUMILDAD: si la frase menciona
+    "producto(s)", NO es una consulta de totales — es top_productos o búsqueda
+    de producto, y si ninguna regla específica la reconoció, debe decidir el
+    clasificador (IA), no esta regla amplia. Una regla codiciosa que atrapa
+    cualquier "vendido" le quita la consulta a la capa inteligente (bug real
+    2026-07-02: "cuál es el producto que más se ha vendido" → "ventas de hoy").
+    """
     sales_words = ("venta", "ventas", "vendimos", "vendido", "vendidos", "facturamos", "recaudamos")
-    return _contains_any(text, sales_words)
+    if not _contains_any(text, sales_words):
+        return False
+    if _contains_any(text, ("producto", "productos", "articulo", "articulos")):
+        return False
+    return True
 
 
 def _is_top_products_query(text: str) -> bool:
@@ -533,6 +545,15 @@ def _is_top_products_query(text: str) -> bool:
         "producto se vendio", "producto que mas se vendio",
         "producto que mas estamos vendiendo", "que mas estamos vendiendo",
         "producto que mas vendemos", "que mas vendemos",
+        # Tiempos compuestos y orden invertido: "que mas se ha vendido",
+        # "se han vendido mas", "lo que mas se vende" (bug real 2026-07-02:
+        # caian en _is_sales_query por la palabra 'vendido' → "ventas de hoy")
+        "mas se ha vendido", "se ha vendido mas",
+        "mas se han vendido", "se han vendido mas",
+        "mas ha vendido", "mas han vendido",
+        "mas se vende", "mas se vendio", "mas se esta vendiendo",
+        "mas se estan vendiendo", "esta vendiendo mas", "estan vendiendo mas",
+        "estamos vendiendo mas",
     ))
 
 

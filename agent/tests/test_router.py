@@ -60,6 +60,12 @@ ROUTER_CASES = [
     ("lo mas vendido de la semana", "top_productos", None, "semana"),
     ("que producto se vendio mas hoy", "top_productos", None, "hoy"),
     ("cual es el producto que mas vendemos", "top_productos", None, ""),
+    # Regresión bug real 2026-07-02 (respondía "ventas de hoy" en prod):
+    ("cual es el producto que mas se ha vendido", "top_productos", None, ""),
+    ("que producto se ha vendido mas este mes", "top_productos", None, "mes"),
+    ("que es lo que mas se vende", "top_productos", None, ""),
+    ("cuales productos se han vendido mas", "top_productos", None, ""),
+    ("que se esta vendiendo mas", "top_productos", None, ""),
     # Stock crítico / reposición
     ("stock critico", "stock_critico", None, None),
     ("que se esta agotando", "stock_critico", None, None),
@@ -108,9 +114,13 @@ ROUTER_CASES = [
     ("cambia el precio del pan a 1500", "accion", None, None),
     ("ajusta el stock del aceite", "accion", None, None),
     ("elimina el cliente juan", "accion", None, None),
-    # No capturables por reglas → clasificador/agente
+    # No capturables por reglas → clasificador/agente (regla de humildad:
+    # ante ambigüedad, las reglas se abstienen y decide la IA)
     ("hola buenas tardes", None, None, None),
     ("cual es el producto mas economico", None, None, None),
+    # "producto"+"ventas" sin marcador claro: NO debe responder totales de
+    # ventas; se abstiene y lo clasifica Gemini
+    ("cual es el producto estrella en ventas", None, None, None),
 ]
 
 
