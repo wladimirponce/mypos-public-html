@@ -1543,6 +1543,9 @@ async def health():
     return {
         "status": "ok",
         "agent": "MyPOS Agent",
+        # Marca de versión del código desplegado (actualizar en cada deploy
+        # relevante): permite verificar qué corre en prod sin adivinar.
+        "version": "2026-07-03-fase4-exportaciones",
         "host": "www.mypos.cl",
         "model": settings.llm_model,
         "provider": settings.llm_provider,
