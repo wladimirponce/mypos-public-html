@@ -257,15 +257,21 @@ def test_followup_detection() -> None:
 
     ventas = {"intent": "ventas", "query": "", "periodo": "hoy"}
     top = {"intent": "top_productos", "query": "", "periodo": "mes"}
+    top_ant = {"intent": "top_productos", "query": "", "periodo": "mes_anterior"}
     producto = {"intent": "producto", "query": "pan", "periodo": ""}
 
     cases = [
-        # (mensaje, memoria, esperado)
-        ("¿y ayer?", ventas, ("ventas", "", "ayer")),
-        ("y el mes pasado", ventas, ("ventas", "", "mes_anterior")),
-        ("y la semana", top, ("top_productos", "", "semana")),
-        ("ahora el mes", ventas, ("ventas", "", "mes")),
-        ("hoy", ventas, ("ventas", "", "hoy")),
+        # (mensaje, memoria, esperado (intent, query, periodo, top))
+        ("¿y ayer?", ventas, ("ventas", "", "ayer", None)),
+        ("y el mes pasado", ventas, ("ventas", "", "mes_anterior", None)),
+        ("y la semana", top, ("top_productos", "", "semana", None)),
+        ("ahora el mes", ventas, ("ventas", "", "mes", None)),
+        ("hoy", ventas, ("ventas", "", "hoy", None)),
+        # "top N" reusa el período recordado (bug real 2026-07-04)
+        ("dame el top 2", top_ant, ("top_productos", "", "mes_anterior", 2)),
+        ("top 5", top_ant, ("top_productos", "", "mes_anterior", 5)),
+        ("muestrame el top 20 productos", top, ("top_productos", "", "mes", 20)),
+        ("dame el top 3", ventas, None),                # memoria no es un ranking
         # No debe disparar:
         ("¿y ayer?", None, None),                       # sin memoria
         ("¿y ayer?", producto, None),                   # intent sin período

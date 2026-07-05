@@ -109,17 +109,21 @@ final class ReporteRepository
     public function ventasPorProducto(int $empresaId, ?int $sucursalId, string $from, string $to, int $limit, string $order): array
     {
         $orderBy = $order === 'cantidad' ? 'cantidad_vendida' : 'total_vendido';
+        // GROUP BY solo por producto_id: codigo/nombre en venta_detalles son
+        // SNAPSHOTS por venta — si el producto cambio de nombre o codigo entre
+        // ventas, agrupar por ellos parte el historial en filas duplicadas
+        // (bug real: el mismo producto aparecia 2 veces en el top, 2026-07-04).
         $statement = $this->connection->prepare(
             "SELECT vd.producto_id,
-                    vd.codigo_producto AS codigo,
-                    vd.nombre_producto AS nombre,
+                    MAX(vd.codigo_producto) AS codigo,
+                    MAX(vd.nombre_producto) AS nombre,
                     COALESCE(SUM(vd.cantidad), 0) AS cantidad_vendida,
                     COALESCE(SUM(vd.total), 0) AS total_vendido,
                     COALESCE(SUM(vd.margen_total), 0) AS margen_estimado
              FROM venta_detalles vd
              INNER JOIN ventas v ON v.id = vd.venta_id AND v.empresa_id = vd.empresa_id
              WHERE {$this->salesWhere($sucursalId, 'v')}
-             GROUP BY vd.producto_id, vd.codigo_producto, vd.nombre_producto
+             GROUP BY vd.producto_id
              ORDER BY {$orderBy} DESC
              LIMIT {$limit}"
         );

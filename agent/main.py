@@ -763,6 +763,7 @@ async def _dispatch_intent(
     query: str = "",
     periodo: str = "",
     skill_id: Optional[str] = None,
+    top: Optional[int] = None,
 ) -> Optional[ChatResponse]:
     """
     Ejecuta la tool correspondiente a un intent ya identificado. Lo usan tanto
@@ -786,10 +787,17 @@ async def _dispatch_intent(
 
     if intent == "top_productos":
         from tools.ventas import ventas_por_producto
+        # Sin período explícito, reusar el del hilo si el contexto reciente
+        # era el mismo tema ("dame el top 2" tras "top del mes anterior"
+        # debe seguir hablando del mes anterior, no del mes en curso).
+        if not periodo:
+            memoria = thread_memory.load(thread_id)
+            if memoria and memoria.get("intent") == "top_productos":
+                periodo = str(memoria.get("periodo") or "")
         fd, ft = _periodo_a_fechas(periodo or "mes")
         return await _direct(ventas_por_producto.ainvoke({
             "empresa_id": empresa_id, "fecha_desde": fd, "fecha_hasta": ft,
-            "top": 10, "sucursal_id": sucursal_id,
+            "top": top or 10, "sucursal_id": sucursal_id,
         }), thread_id)
 
     if intent == "stock_critico":
@@ -889,18 +897,41 @@ _FOLLOWUP_PERIOD_WORDS = frozenset({
 })
 
 
-def _followup_target(text: str, last: Optional[dict]) -> Optional[tuple[str, str, str]]:
+# "dame el top 5", "top 3", "muestrame el top 20" tras un ranking previo.
+_TOP_N_PATTERN = _re.compile(
+    r"^(?:y |dame |dame el |dame los |muestrame |muestrame el |ver |ahora |el |los )*"
+    r"top\s*(\d{1,2})(?:\s*(?:productos|mejores))?$"
+)
+
+
+def _followup_target(
+    text: str, last: Optional[dict]
+) -> Optional[tuple[str, str, str, Optional[int]]]:
     """
-    Detecta un seguimiento que SOLO cambia el período ("¿y ayer?", "y el mes
-    pasado", "ahora la semana") y devuelve (intent, query, periodo) reusando
-    el último intent del hilo. Devuelve None si el mensaje trae contenido
-    propio (palabras fuera de fillers/período) o si no hay memoria aplicable.
+    Detecta un seguimiento y devuelve (intent, query, periodo, top) reusando
+    la memoria del hilo. Dos formas:
+      1. Cambio de período: "¿y ayer?", "y el mes pasado" → mismo intent,
+         período nuevo.
+      2. Cambio de tamaño del ranking: "dame el top 2" tras un top_productos
+         → mismo período RECORDADO (bug real 2026-07-04: sin esto usaba el
+         mes en curso y respondía "sin ventas"), N nuevo.
+    Devuelve None si el mensaje trae contenido propio o no hay memoria.
     Solo se invoca cuando el router de reglas y las skills no reconocieron nada.
     """
     if not last or last.get("intent") not in _FOLLOWUP_PERIOD_INTENTS:
         return None
     if len(text) > 30:
         return None
+
+    limpio = text.strip(" ?!.,;:")
+
+    # Forma 2: "dame el top N" → reusar período recordado
+    match = _TOP_N_PATTERN.match(limpio)
+    if match and last.get("intent") == "top_productos":
+        top = max(1, min(int(match.group(1)), 20))
+        return "top_productos", "", str(last.get("periodo") or ""), top
+
+    # Forma 1: solo cambia el período
     periodo = _detect_explicit_period(text)
     if not periodo:
         return None
@@ -913,7 +944,7 @@ def _followup_target(text: str, last: Optional[dict]) -> Optional[tuple[str, str
     if resto:
         return None
 
-    return str(last["intent"]), str(last.get("query") or ""), periodo
+    return str(last["intent"]), str(last.get("query") or ""), periodo, None
 
 
 def _remember(thread_id: str, intent: Optional[str], query: str, periodo: str) -> None:
@@ -931,9 +962,10 @@ async def _try_followup(
     target = _followup_target(text, thread_memory.load(thread_id))
     if target is None:
         return None
-    intent, query, periodo = target
+    intent, query, periodo, top = target
     resp = await _dispatch_intent(
-        intent, empresa_id, thread_id, sucursal_id, query=query, periodo=periodo,
+        intent, empresa_id, thread_id, sucursal_id,
+        query=query, periodo=periodo, top=top,
     )
     if resp is not None:
         _remember(thread_id, intent, query, periodo)
