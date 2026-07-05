@@ -116,13 +116,20 @@ try:
     def application(environ, start_response):
         global _asgi_application
 
-        if environ.get("PATH_INFO", "").rstrip("/").endswith("/health"):
-            return _health_app(environ, start_response)
-
+        # /health lo responde la app REAL (main.py) cuando carga bien: así el
+        # health refleja la versión y config vigentes (classifier, cuota,
+        # graph_loaded...). El health del wrapper queda SOLO como fallback si
+        # main no importa — antes interceptaba siempre y enmascaraba el estado
+        # real (diagnóstico erróneo en prod, 2026-07-03).
         if _asgi_application is None:
-            from main import app
+            try:
+                from main import app
 
-            _asgi_application = ASGIMiddleware(app)
+                _asgi_application = ASGIMiddleware(app)
+            except Exception as exc:
+                if environ.get("PATH_INFO", "").rstrip("/").endswith("/health"):
+                    return _health_app(environ, start_response)
+                return _diagnostic_app(exc)(environ, start_response)
 
         return _asgi_application(environ, start_response)
 except Exception as exc:
