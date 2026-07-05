@@ -1,0 +1,1 @@
+import{a8 as a,ai as t}from"./index-DF0M5oiR.js";const s={get(e){return a.get(t.agenteAlertas.config,{params:{empresa_id:e}})},update(e,r){return a.put(t.agenteAlertas.config,{empresa_id:e,...r})}};export{s as a};
