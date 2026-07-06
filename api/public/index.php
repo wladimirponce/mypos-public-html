@@ -52,6 +52,7 @@ use Mypos\Controllers\ProductoAtributoController;
 use Mypos\Controllers\ProductoController;
 use Mypos\Controllers\ProveedorController;
 use Mypos\Controllers\AgenteAlertasConfigController;
+use Mypos\Controllers\AgenteConsultaAdhocController;
 use Mypos\Controllers\AgenteConsultaFlexibleController;
 use Mypos\Controllers\AgenteConsultasLogController;
 use Mypos\Controllers\AgenteExportController;
@@ -744,6 +745,12 @@ $router->get('/api/v1/reportes/dashboard', protectedRoute([$reporteController, '
 
 $agenteConsultaFlexibleController = new AgenteConsultaFlexibleController();
 $router->post('/api/v1/agente/consulta-flexible', protectedRoute([$agenteConsultaFlexibleController, 'ejecutar'], 'reportes.ver'));
+
+// Capa 2.5: consultas SQL dinamicas generadas en linea por el LLM (mismo
+// validador y cadena de tenant que consulta-flexible; flag por empresa +
+// cuota diaria dentro del controller).
+$agenteConsultaAdhocController = new AgenteConsultaAdhocController();
+$router->post('/api/v1/agente/consulta-adhoc', protectedRoute([$agenteConsultaAdhocController, 'ejecutar'], 'reportes.ver'));
 
 // Bandeja de consultas no resueltas del agente IA (auth+tenant inline en el
 // controller, sin SubscriptionMiddleware: el log de aprendizaje no debe

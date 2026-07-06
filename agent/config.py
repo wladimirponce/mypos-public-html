@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     llm_min_interval_seconds: int = Field(default=8, alias="LLM_MIN_INTERVAL_SECONDS")
     llm_quota_cooldown_seconds: int = Field(default=300, alias="LLM_QUOTA_COOLDOWN_SECONDS")
 
+    # ── Consultas SQL dinámicas en línea (capa 2.5, ver adhoc.py) ─────────────
+    # Interruptor GLOBAL del agente; el flag por empresa (agente_alertas_config
+    # → consulta_adhoc) es el autoritativo y lo verifica el backend siempre.
+    adhoc_enabled: bool = Field(default=True, alias="ADHOC_ENABLED")
+
     # ── Clasificador de intención (segunda instancia) ─────────────────────────
     # Modelo chico y barato que SOLO entiende qué quiere el usuario y devuelve
     # {intent, query, periodo} en JSON. Reusa GOOGLE_API_KEY. No usa tool-calling

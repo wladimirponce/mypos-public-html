@@ -78,10 +78,25 @@ final class PerfilEmpresaService
             // sin folios
         }
 
+        // Flag de consultas dinamicas (capa 2.5): el agente lo consulta aqui
+        // (cacheado 10 min) para no gastar una generacion LLM cuando la
+        // empresa lo tiene apagado. El backend re-verifica igual al ejecutar.
+        $adhoc = ['activo' => false, 'max_dia' => 30];
+        try {
+            $config = (new AlertasConfigService($this->db))->config($empresaId);
+            $adhoc = $config['alertas']['consulta_adhoc'] ?? $adhoc;
+        } catch (\Throwable) {
+            // sin tabla de config: queda apagado
+        }
+
         return [
             'razon_social' => (string) ($empresa['razon_social'] ?? ''),
             'nombre_fantasia' => (string) ($empresa['nombre_fantasia'] ?? ''),
             'giro' => (string) ($empresa['giro'] ?? ''),
+            'consulta_adhoc' => [
+                'activo' => (bool) ($adhoc['activo'] ?? false),
+                'max_dia' => (int) ($adhoc['max_dia'] ?? 30),
+            ],
             'sucursales' => $sucursales,
             'suscripcion' => [
                 'plan' => (string) ($suscripcion['plan_id'] ?? ''),

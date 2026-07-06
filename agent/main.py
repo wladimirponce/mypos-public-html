@@ -657,7 +657,12 @@ def _is_action_request(text: str) -> bool:
 _EXPORT_MARKERS = ("excel", "planilla", "csv", "exporta", "exportar", "exportame", "xls")
 
 # Tema de la exportación → tipo del registry del backend (ExportacionService::TIPOS).
+# El orden importa: los temas compuestos van ANTES que sus palabras sueltas
+# ("productos vendidos" debe ganar a "productos"/"ventas").
 _EXPORT_TIPOS = (
+    ("ventas_productos", ("productos vendidos", "vendidos con stock", "lo vendido",
+                          "ventas por producto", "vendido con su stock",
+                          "resumen de productos vendidos", "que se vendio")),
     ("productos", ("producto", "productos", "maestro de producto", "catalogo", "articulos")),
     ("clientes", ("cliente", "clientes",)),
     ("proveedores", ("proveedor", "proveedores",)),
@@ -1012,7 +1017,11 @@ def _detect_intent_rules(text: str, raw: str) -> tuple[Optional[str], str, str]:
             return "cliente", q, ""
     if _is_product_search(text, raw) or _is_natural_product_query(text):
         q = _extract_product_query(raw)
-        if len(q) >= 2:
+        # Regla de humildad: si el "producto" extraído es media oración
+        # (extractor no pudo aislar un nombre), NO es una búsqueda simple —
+        # que decida la IA. Bug real 2026-07-04: "envíame un resumen de los
+        # productos vendidos... incluye el stock..." buscaba la frase entera.
+        if 2 <= len(q) <= 40:
             return "producto", q, ""
     return None, "", ""
 
@@ -1347,6 +1356,26 @@ async def _run(
     )
     if classified is not None:
         return _done(classified, "clasificador")
+
+    # 2.5ª instancia: consulta SQL dinámica generada en línea (solo empresas
+    # con el flag activo; ver adhoc.py — el backend re-valida y audita todo).
+    if settings.adhoc_enabled:
+        try:
+            from adhoc import intentar_consulta_adhoc
+
+            adhoc_reply = await intentar_consulta_adhoc(
+                message=message,
+                empresa_id=empresa_id,
+                thread_id=thread_id,
+                sucursal_id=sucursal_id,
+            )
+        except Exception:
+            adhoc_reply = None  # esta capa jamás rompe el chat
+        if adhoc_reply:
+            return _done(
+                ChatResponse(thread_id=thread_id, reply=adhoc_reply, escalated=False),
+                "adhoc",
+            )
 
     # 3ª instancia: agente completo
     if _quota_seconds_left() > 0 and _grok_ready():

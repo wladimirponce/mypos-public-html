@@ -97,7 +97,7 @@ ROUTER_CASES = [
     ("7802820442731", "producto", "7802820442731", None),
     # Ayuda
     ("que puedes hacer", "ayuda", None, None),
-    # Exportaciones → Excel al correo registrado (ANTES que ventas: "excel de
+    # Exportaciones -> Excel al correo registrado (ANTES que ventas: "excel de
     # ventas" no debe responder totales)
     ("enviame un excel del maestro de productos completo al correo", "exportar", "productos", None),
     ("exporta las ventas del mes", "exportar", "ventas", "mes"),
@@ -106,21 +106,28 @@ ROUTER_CASES = [
     ("excel del stock", "exportar", "stock", None),
     ("exportar compras de la semana", "exportar", "compras", "semana"),
     ("csv de proveedores", "exportar", "proveedores", None),
-    ("enviame un excel al correo", "exportar", "", None),  # sin tema → menú de tipos
-    # Acciones → guía manual (el agente es de solo lectura, nunca ejecuta)
+    # Informe cruzado vendidos+stock (pedido real 2026-07-04); gana a
+    # "productos" y "ventas" sueltos por el orden de _EXPORT_TIPOS
+    ("enviame al correo los productos vendidos del mes pasado con su stock", "exportar", "ventas_productos", "mes_anterior"),
+    ("exporta lo vendido de la semana", "exportar", "ventas_productos", "semana"),
+    ("enviame un excel al correo", "exportar", "", None),  # sin tema -> menú de tipos
+    # Acciones -> guía manual (el agente es de solo lectura, nunca ejecuta)
     ("anula la venta 1543", "accion", None, None),
     ("cierra la caja 2", "accion", None, None),
     ("emite una nota de credito", "accion", None, None),
     ("cambia el precio del pan a 1500", "accion", None, None),
     ("ajusta el stock del aceite", "accion", None, None),
     ("elimina el cliente juan", "accion", None, None),
-    # No capturables por reglas → clasificador/agente (regla de humildad:
+    # No capturables por reglas -> clasificador/agente (regla de humildad:
     # ante ambigüedad, las reglas se abstienen y decide la IA)
     ("hola buenas tardes", None, None, None),
     ("cual es el producto mas economico", None, None, None),
     # "producto"+"ventas" sin marcador claro: NO debe responder totales de
     # ventas; se abstiene y lo clasifica Gemini
     ("cual es el producto estrella en ventas", None, None, None),
+    # Petición compleja multi-parte: "stock de" NO debe convertirla en
+    # búsqueda de producto con la frase entera como query (bug 2026-07-04)
+    ("enviame un resumen de los productos vendidos el mes pasado, incluye el stock de esos productos y cuanto vendimos", None, None, None),
 ]
 
 
@@ -242,7 +249,7 @@ def test_thread_memory() -> None:
     check("hilo desconocido devuelve None", thread_memory.load("t-nope") is None)
     check("expirada devuelve None (ttl=0)", thread_memory.load("t-abc", ttl=0) is None)
 
-    # Persistido en SQLite → visible entre workers
+    # Persistido en SQLite -> visible entre workers
     import sqlite3
     con = sqlite3.connect(os.environ["AGENT_THREAD_MEMORY_DB"])
     row = con.execute("SELECT intent FROM hilos WHERE thread_id='t-abc'").fetchone()
@@ -346,6 +353,53 @@ def test_skill_respuesta_directa_y_scope() -> None:
     print()
 
 
+# ─── 7. Capa 2.5: envelope y formateo de consultas dinámicas ─────────────────
+
+def test_adhoc() -> None:
+    print("9. Consultas dinámicas (adhoc): envelope y formateo...")
+    from adhoc import construir_envelope, formatear_filas
+
+    propuesta_ok = {
+        "resoluble": True,
+        "sql_template": "SELECT nombre, precio_venta FROM productos WHERE empresa_id = :empresa_id ORDER BY precio_venta DESC",
+        "tablas_referenciadas": ["productos"],
+        "params_permitidos": {"empresa_id": {"tipo": "int", "fuente": "contexto", "requerido": True}},
+        "row_limit": 5,
+        "patterns": ["producto mas caro"],
+        "notes": "Productos ordenados por precio",
+    }
+    env = construir_envelope("cual es el producto mas caro", propuesta_ok)
+    check("envelope válido construido",
+          env is not None and env["tipo"] == "sql_readonly"
+          and env["id"].startswith("adhoc_") and env["row_limit"] == 5
+          and env["intent"] == "consulta_adhoc")
+
+    check("no resoluble -> None",
+          construir_envelope("x", {"resoluble": False, "notes": "no"}) is None)
+    check("sin SQL -> None",
+          construir_envelope("x", {"resoluble": True, "sql_template": ""}) is None)
+    check("param extraido -> None (requiere aprobación humana)",
+          construir_envelope("x", {**propuesta_ok, "params_permitidos": {
+              "empresa_id": {"fuente": "contexto"},
+              "producto_like": {"fuente": "extraido", "max_length": 60},
+          }}) is None)
+    env2 = construir_envelope("x", {**propuesta_ok, "row_limit": 9999})
+    check("row_limit inválido -> 50", env2 is not None and env2["row_limit"] == 50)
+
+    # Formateo
+    r = formatear_filas(["total"], [{"total": 1234567}], False, "Total de ventas")
+    check("una celda -> frase directa", "total: 1.234.567" in r and "Consulté" in r, r)
+
+    filas = [{"nombre": f"P{i}", "precio_venta": 1000 + i} for i in range(15)]
+    r = formatear_filas(["nombre", "precio_venta"], filas, True, "")
+    check("máx 10 filas + resto anunciado", "10. " in r and "… y 5 fila(s) más" in r
+          and "truncado" in r.lower(), r[:120])
+
+    r = formatear_filas(["x"], [], False, "nota")
+    check("sin filas -> mensaje claro", "no arrojó resultados" in r)
+    print()
+
+
 # ─── main ─────────────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -361,6 +415,7 @@ def main() -> int:
     test_thread_memory()
     test_followup_detection()
     test_skill_respuesta_directa_y_scope()
+    test_adhoc()
 
     print("=" * 60)
     if FAILURES:

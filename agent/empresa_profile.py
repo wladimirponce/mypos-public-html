@@ -1,5 +1,6 @@
 """
-Perfil de empresa para el prompt del agente completo (Fase 2).
+Perfil de empresa para el prompt del agente completo (Fase 2) y flags de
+capacidades por empresa (capa 2.5).
 
 Antes el LLM solo sabía "empresa_id: 24"; ahora recibe un bloque de contexto
 con nombre, rubro, sucursales, ambiente SII, folios y suscripción, así las
@@ -7,16 +8,18 @@ respuestas dejan de ser genéricas ("tu negocio") y puede advertir cosas como
 folios bajos o suscripción por vencer sin gastar tools.
 
 Fuente: GET /api/v1/agente/perfil-empresa (backend web, cuenta de servicio).
-Cache en memoria por empresa con TTL de 10 min — el perfil cambia poco y el
-grafo es la capa menos usada. Ante cualquier error devuelve "" y el agente
-funciona igual que antes (el contexto es un extra, nunca un bloqueo).
+Cache en memoria por empresa con TTL de 10 min — se cachea el dict CRUDO y de
+ahí salen tanto el texto del prompt como los flags (consulta_adhoc). Ante
+cualquier error devuelve valores seguros ('' / apagado): el contexto es un
+extra, nunca un bloqueo.
 """
 
 from __future__ import annotations
 
 import time
+from typing import Optional
 
-_cache: dict[int, tuple[float, str]] = {}
+_cache: dict[int, tuple[float, dict]] = {}
 _TTL_SECONDS = 600
 
 
@@ -55,8 +58,8 @@ def _formatear(data: dict) -> str:
     return "\n".join(lineas)
 
 
-async def get_context(empresa_id: int) -> str:
-    """Bloque de texto para el system prompt, o '' si no se pudo obtener."""
+async def _get_raw(empresa_id: int) -> Optional[dict]:
+    """Dict crudo del perfil, cacheado. None si el backend no respondió."""
     now = time.time()
     cached = _cache.get(empresa_id)
     if cached and now - cached[0] < _TTL_SECONDS:
@@ -66,11 +69,28 @@ async def get_context(empresa_id: int) -> str:
         from tools.mypos_client import web_get
 
         data = await web_get("/v1/agente/perfil-empresa", empresa_id)
-        texto = _formatear(data.get("data") or {})
+        raw = data.get("data") or {}
     except Exception:
-        # Sin perfil el agente responde igual; no cacheamos el fallo para
-        # reintentar en la próxima conversación.
-        return ""
+        # No cacheamos el fallo: reintentar en la próxima conversación.
+        return None
 
-    _cache[empresa_id] = (now, texto)
-    return texto
+    _cache[empresa_id] = (now, raw)
+    return raw
+
+
+async def get_context(empresa_id: int) -> str:
+    """Bloque de texto para el system prompt, o '' si no se pudo obtener."""
+    raw = await _get_raw(empresa_id)
+    return _formatear(raw) if raw else ""
+
+
+async def adhoc_habilitado(empresa_id: int) -> bool:
+    """
+    True si la empresa tiene activadas las consultas SQL dinámicas (capa 2.5).
+    Falla cerrado: sin perfil → False (el backend re-verifica igual).
+    """
+    raw = await _get_raw(empresa_id)
+    if not raw:
+        return False
+    adhoc = raw.get("consulta_adhoc") or {}
+    return bool(adhoc.get("activo"))

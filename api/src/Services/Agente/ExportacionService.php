@@ -26,6 +26,7 @@ final class ExportacionService
         'proveedores' => ['titulo' => 'Maestro de proveedores', 'con_fechas' => false],
         'stock'       => ['titulo' => 'Stock por ubicación', 'con_fechas' => false],
         'ventas'      => ['titulo' => 'Ventas del período', 'con_fechas' => true],
+        'ventas_productos' => ['titulo' => 'Productos vendidos con stock actual', 'con_fechas' => true],
         'compras'     => ['titulo' => 'Compras del período', 'con_fechas' => true],
         'cierres'     => ['titulo' => 'Cierres diarios del período', 'con_fechas' => true],
     ];
@@ -126,6 +127,37 @@ final class ExportacionService
                        AND DATE(fecha_venta) BETWEEN :desde AND :hasta
                      ORDER BY fecha_venta',
                     [':empresa_id' => $empresaId, ':desde' => $fechaDesde, ':hasta' => $fechaHasta]
+                );
+
+            case 'ventas_productos':
+                // Informe cruzado pedido por el dueño (2026-07-04): qué se
+                // vendió en el período, cuánto, con qué margen y cuánto stock
+                // queda hoy de cada producto. Placeholders únicos por regla
+                // de EMULATE_PREPARES=false (:empresa_id / :empresa_id2).
+                return $this->query(
+                    ['Producto', 'Código', 'Unidades vendidas', 'Total vendido',
+                     'Margen', 'Stock actual'],
+                    'SELECT MAX(vd.nombre_producto) AS nombre,
+                            MAX(vd.codigo_producto) AS codigo,
+                            COALESCE(SUM(vd.cantidad), 0) AS unidades,
+                            COALESCE(SUM(vd.total), 0) AS total_vendido,
+                            COALESCE(SUM(vd.margen_total), 0) AS margen,
+                            COALESCE(MAX(st.stock_actual), 0) AS stock_actual
+                     FROM venta_detalles vd
+                     INNER JOIN ventas v ON v.id = vd.venta_id AND v.empresa_id = vd.empresa_id
+                     LEFT JOIN (
+                         SELECT producto_id, SUM(cantidad) AS stock_actual
+                         FROM stock_ubicacion
+                         WHERE empresa_id = :empresa_id2
+                         GROUP BY producto_id
+                     ) st ON st.producto_id = vd.producto_id
+                     WHERE vd.empresa_id = :empresa_id
+                       AND DATE(v.fecha_venta) BETWEEN :desde AND :hasta
+                       AND v.estado <> \'ANULADA\'
+                     GROUP BY vd.producto_id
+                     ORDER BY total_vendido DESC',
+                    [':empresa_id' => $empresaId, ':empresa_id2' => $empresaId,
+                     ':desde' => $fechaDesde, ':hasta' => $fechaHasta]
                 );
 
             case 'compras':

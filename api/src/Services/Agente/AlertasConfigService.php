@@ -27,6 +27,11 @@ final class AlertasConfigService
         'suscripcion'      => ['activo' => true, 'dias_aviso' => 5],
         'compras_borrador' => ['activo' => true, 'dias' => 3],
         'resumen_diario'   => ['activo' => false],
+        // No es una "alerta": interruptor de las consultas SQL dinamicas en
+        // linea del chat (capa 2.5, /agente/consulta-adhoc). Vive aqui porque
+        // esta tabla es de facto la config del agente por empresa. OFF por
+        // defecto: requiere el usuario MySQL read-only aplicado en prod.
+        'consulta_adhoc'   => ['activo' => false, 'max_dia' => 30],
     ];
 
     private PDO $db;

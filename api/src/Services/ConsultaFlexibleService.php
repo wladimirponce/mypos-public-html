@@ -46,20 +46,36 @@ final class ConsultaFlexibleService
      */
     public function ejecutar(int $empresaId, ?int $sucursalId, string $skillId, array $paramsExtraidos): array
     {
-        if ($empresaId <= 0) {
-            throw new HttpException('empresa_id invalido', 422);
-        }
         if ($skillId === '' || !preg_match('/^[a-z0-9_]+$/', $skillId)) {
             throw new HttpException('skill_id invalido', 422);
         }
 
-        $skill = $this->loadSkill($skillId);
+        return $this->ejecutarEnvelope($empresaId, $sucursalId, $this->loadSkill($skillId), $paramsExtraidos);
+    }
+
+    /**
+     * Ejecuta un envelope sql_readonly SIN archivo de skill de por medio.
+     * Lo usan tanto ejecutar() (skills aprobadas en disco) como el endpoint
+     * de consultas dinamicas en linea (/agente/consulta-adhoc): la cadena de
+     * confianza es IDENTICA — el envelope se valida aqui contra la whitelist
+     * en cada ejecucion y el tenant se inyecta del contexto autenticado.
+     *
+     * @param array<string, mixed> $skill
+     * @param array<string, mixed> $paramsExtraidos
+     * @return array{columns: array<int,string>, rows: array<int,array<string,mixed>>, row_count: int, truncated: bool}
+     */
+    public function ejecutarEnvelope(int $empresaId, ?int $sucursalId, array $skill, array $paramsExtraidos): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id invalido', 422);
+        }
+
         $this->requireValidator();
 
         $reason = null;
         if (!\SqlWhitelistValidator::validateSkillEnvelope($skill, $reason)) {
-            // Si esto dispara en produccion, alguien edito el archivo a mano
-            // despues de aprobado y quedo invalido -- no ejecutar bajo ninguna circunstancia.
+            // Si esto dispara con una skill en disco, alguien la edito a mano
+            // despues de aprobada -- no ejecutar bajo ninguna circunstancia.
             throw new HttpException('La skill no paso la validacion de seguridad: ' . $reason, 500);
         }
         if (($skill['status'] ?? '') !== 'aprobada' && ($skill['status'] ?? '') !== 'activa') {

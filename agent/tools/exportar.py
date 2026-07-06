@@ -17,7 +17,8 @@ import cl_time
 from tools.mypos_client import web_post
 
 TIPOS_EXPORT = (
-    "productos", "clientes", "proveedores", "stock", "ventas", "compras", "cierres",
+    "productos", "clientes", "proveedores", "stock", "ventas",
+    "ventas_productos", "compras", "cierres",
 )
 
 
