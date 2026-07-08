@@ -412,14 +412,33 @@ final class VentaService
             // que no representa un artículo con precio fijo.
             $esContenedorBalanza = strtoupper(trim((string) ($product['descripcion'] ?? ''))) === 'CARNICERIA';
             $precioOverride = isset($item['precio_unitario']) ? (int) round((float) $item['precio_unitario']) : 0;
+            $esLineaBalanza = $esContenedorBalanza && $precioOverride > 0;
 
-            if ($esContenedorBalanza && $precioOverride > 0) {
+            if ($esLineaBalanza) {
                 $precioBase = (float) $precioOverride;
             } elseif ($esPeso && isset($product['precio_por_kg']) && (float) $product['precio_por_kg'] > 0) {
                 $precioBase = (float) $product['precio_por_kg'];
             } else {
                 $precioBase = (float) $product['precio_venta'];
             }
+
+            $nombreProducto = (string) $product['nombre'];
+            if ($esLineaBalanza) {
+                $nombreOverride = trim((string) ($item['nombre_producto'] ?? ''));
+                $nombreOverride = trim((string) preg_replace('/\s+/', ' ', $nombreOverride));
+                if ($nombreOverride !== '') {
+                    $nombreProducto = substr($nombreOverride, 0, 160);
+                }
+            }
+
+            $codigoBarraUsado = $product['codigo_barra_usado'] ?? ($item['codigo'] ?? null);
+            if ($esLineaBalanza && isset($item['codigo_barra_usado'])) {
+                $codigoBarraOverride = trim((string) $item['codigo_barra_usado']);
+                if ($codigoBarraOverride !== '') {
+                    $codigoBarraUsado = substr($codigoBarraOverride, 0, 80);
+                }
+            }
+
             $unitPrice = (int) round($precioBase);
             $unitCost = (int) ($product['precio_costo'] ?? $product['costo_actual'] ?? 0);
             $subtotal = (int) round($precioBase * $quantity);
@@ -433,8 +452,8 @@ final class VentaService
             $prepared[] = [
                 'producto_id' => (int) $product['id'],
                 'codigo_producto' => (string) ($product['codigo'] ?? $product['sku'] ?? ''),
-                'codigo_barra_usado' => $product['codigo_barra_usado'] ?? ($item['codigo'] ?? null),
-                'nombre_producto' => (string) $product['nombre'],
+                'codigo_barra_usado' => $codigoBarraUsado,
+                'nombre_producto' => $nombreProducto,
                 'cantidad' => $quantity,
                 'cantidad_formatted' => $this->formatQuantity($quantity),
                 'precio_unitario' => $unitPrice,

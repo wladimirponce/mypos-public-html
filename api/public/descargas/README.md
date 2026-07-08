@@ -25,6 +25,8 @@ Servicio local multiempresa de impresión directa para impresoras ESC/POS.
 | GET | http://localhost:5555/status | Estado del servicio |
 | GET | http://localhost:5555/test | Imprimir ticket de prueba |
 | POST | http://localhost:5555/print | Imprimir ticket (enviar JSON) |
+| GET | http://localhost:5555/balanza/estado | Diagnostico TCP de balanza DIGI SM-300 |
+| GET | http://localhost:5555/balanza/rcth?n=1234 | Detalle de vale SM-300 por numero RCTH |
 
 ## Formato JSON para /print
 
@@ -59,6 +61,28 @@ explicitamente antes de iniciar el servicio:
 set MYPOS_PRINTER_NAME=Nombre exacto de la impresora
 start_mypos_print_server.bat
 ```
+
+## Balanza DIGI SM-300
+
+El POS detecta un vale de balanza al escanear un EAN-13 con prefijo `2`. El numero
+RCTH se toma de los digitos 3 a 6 del codigo y el navegador consulta al servidor
+local:
+
+```http
+GET http://localhost:5555/balanza/rcth?n=1234
+```
+
+Por defecto el bridge intenta conectar con la pesa en `192.168.0.130` y prueba los
+puertos `10000,8000,4000,9100`. Se puede ajustar antes de iniciar el servicio:
+
+```bat
+set MYPOS_BALANZA_IP=192.168.0.130
+set MYPOS_BALANZA_PORTS=10000,8000,4000,9100
+```
+
+Si la balanza responde con detalle interpretable, el POS agrega una linea por corte.
+Si no responde o el formato no calza, el POS mantiene el respaldo actual: una linea
+con el total embebido en el EAN-13.
 
 ### Imprimir boleta electronica PDF
 

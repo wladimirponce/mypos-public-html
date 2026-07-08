@@ -1,9 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import io
 import json
 import os
+import re
 import socket
 import tempfile
 import time
@@ -30,7 +31,7 @@ except Exception:  # pragma: no cover
     Image = None
 
 
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 HOST = "127.0.0.1"
 PORT = 5555
 DEFAULT_WIDTH = 48
@@ -497,10 +498,10 @@ def write_boleta_dte_image_pdf(path: str, data: dict[str, Any]) -> bool:
         # y produce un barcode de ~65x70mm, aceptable en el PDF de 80mm de ancho.
         # scale=3 daba 0.375mm pero el barcode era tan grande que ocupaba todo el PDF.
         ted_safe = resolve_ted(data).encode("iso-8859-1", errors="replace").decode("iso-8859-1")
-        # 12 cols, scale=2, ratio=1.5: alto reducido 50% respecto a ratio=3.
-        # modulo 0.25mm @203dpi. TED largo (~1000B+) con ratio=3 resultaba 2x alto.
+        # 12 cols, scale=2, ratio=3: modulo 0.25mm @203dpi, fila 3x modulo
+        # (minimo ISO 15438; con ratio<3 el scanner del SII no decodifica).
         codes = pdf417_encode(ted_safe, columns=12, security_level=5, encoding="iso-8859-1")
-        barcode_img = pdf417_render(codes, scale=2, ratio=1.5, padding=6).convert("RGB")
+        barcode_img = pdf417_render(codes, scale=2, ratio=3, padding=6).convert("RGB")
         max_bc = width - 2 * margin
         if barcode_img.width > max_bc:
             ratio = max_bc / barcode_img.width
@@ -631,8 +632,11 @@ def append_pdf417(ticket: bytearray, ted: str, columns: int = 8, raster_width: i
         # padding=10 (zona de silencio imprescindible para el lector del SII).
         codes = pdf417_encode(ted_safe, columns=columns, security_level=5, encoding="iso-8859-1")
         modules_wide = (columns + 4) * 17 + 1
-        scale = max(2, round(raster_width / modules_wide))
-        img = pdf417_render(codes, scale=scale, ratio=1.5, padding=10)
+        # Escala entera mas grande que quepa SIN reescalar despues: reescalar el
+        # raster destruye los modulos. ratio=3 es el minimo ISO 15438 (fila 3x modulo);
+        # con ratio<3 el scanner no distingue las filas y no decodifica.
+        scale = max(1, (raster_width - 24) // modules_wide)
+        img = pdf417_render(codes, scale=scale, ratio=3, padding=10)
         ticket.extend(CMD_CENTER)
         ticket.extend(image_to_escpos_raster(img, max_width=raster_width))
         ticket.extend(b"\n")
@@ -655,8 +659,10 @@ def append_pdf417(ticket: bytearray, ted: str, columns: int = 8, raster_width: i
 
 
 def append_dte_timbre(ticket: bytearray, data: dict[str, Any], columns: int = 8, raster_width: int = 560) -> None:
+    # El PNG del admin (~1380px) solo sirve si cabe SIN reescalar: encogerlo
+    # destruye los modulos del PDF417 y el scanner del SII no lo lee.
     img = timbre_image(data)
-    if img is not None:
+    if img is not None and img.width <= raster_width:
         try:
             ticket.extend(CMD_CENTER)
             ticket.extend(image_to_escpos_raster(img, max_width=raster_width))
@@ -664,6 +670,8 @@ def append_dte_timbre(ticket: bytearray, data: dict[str, Any], columns: int = 8,
             return
         except Exception as exc:
             print(f"[TIMBRE] png escpos fallback: {exc}")
+    elif img is not None:
+        print(f"[TIMBRE] png admin {img.width}px > {raster_width}px: se genera PDF417 local (reescalar lo hace ilegible)")
 
     append_pdf417(ticket, resolve_ted(data), columns=columns, raster_width=raster_width)
 
@@ -1113,8 +1121,35 @@ def print_ticket():
 # Detecta la balanza en la red local, graba la config y la expone vía HTTP.
 # No interfiere con la impresión (canal completamente separado).
 
-BALANZA_IP      = os.environ.get("MYPOS_BALANZA_IP", "192.168.0.130")
-BALANZA_PORTS   = [10000, 8000, 4000, 9100]
+def _normalizar_ip(ip: str) -> str:
+    parts = str(ip or "").strip().split(".")
+    if len(parts) != 4:
+        return str(ip or "").strip()
+    try:
+        return ".".join(str(int(part)) for part in parts)
+    except ValueError:
+        return str(ip or "").strip()
+
+
+def _balanza_ports() -> list[int]:
+    raw = os.environ.get("MYPOS_BALANZA_PORTS", "")
+    ports: list[int] = []
+    for token in raw.split(","):
+        try:
+            port = int(token.strip())
+        except ValueError:
+            continue
+        if 0 < port < 65536 and port not in ports:
+            ports.append(port)
+
+    for port in (10000, 8000, 4000, 9100):
+        if port not in ports:
+            ports.append(port)
+    return ports
+
+
+BALANZA_IP      = _normalizar_ip(os.environ.get("MYPOS_BALANZA_IP", "192.168.0.130"))
+BALANZA_PORTS   = _balanza_ports()
 BALANZA_TIMEOUT = 4
 BALANZA_CFG     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "balanza_config.json")
 BALANZA_CACHE_TTL = 60  # segundos entre re-diagnósticos automáticos
@@ -1150,6 +1185,136 @@ def _detectar_puerto(ip: str) -> int | None:
         except Exception:
             continue
     return None
+
+
+def _balanza_tramas_rcth(rcth: int) -> list[bytes]:
+    n4 = str(rcth).zfill(4)
+    n6 = str(rcth).zfill(6)
+    commands = [f"RD{n4}", f"RCTH{n4}", f"R{n4}", f"RD{n6}"]
+    frames: list[bytes] = []
+    for command in commands:
+        frames.append(("\x02" + command + "\x03").encode("ascii"))
+        frames.append((command + "\r\n").encode("ascii"))
+    return frames
+
+
+def _leer_socket_completo(sock: socket.socket, timeout: float = 3.0) -> bytes:
+    response = b""
+    sock.settimeout(timeout)
+    try:
+        while True:
+            chunk = sock.recv(2048)
+            if not chunk:
+                break
+            response += chunk
+            if len(response) >= 65536:
+                break
+    except socket.timeout:
+        pass
+    return response
+
+
+def _decode_balanza_text(raw: bytes) -> str:
+    for encoding in ("utf-8", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1", errors="replace")
+
+
+def _numero_balanza(value: str, decimals: int | None = None) -> float:
+    clean = re.sub(r"[^\d,.\-]", "", value or "")
+    if clean.count(",") == 1 and clean.count(".") == 0:
+        clean = clean.replace(",", ".")
+    elif clean.count(",") > 0 and clean.count(".") > 0:
+        clean = clean.replace(".", "").replace(",", ".")
+    if clean in ("", "-", ".", "-."):
+        return 0.0
+    numeric = float(clean)
+    if decimals is not None and "." not in clean and "," not in value:
+        numeric = numeric / (10 ** decimals)
+    return numeric
+
+
+def _money_balanza(value: str) -> int:
+    clean = re.sub(r"[^\d]", "", value or "")
+    return int(clean) if clean else 0
+
+
+def _lineas_balanza(raw: bytes) -> list[str]:
+    decoded = _decode_balanza_text(raw)
+    normalized = re.sub(r"[\x00-\x09\x0b-\x1f\x7f]+", "\n", decoded)
+    lines = []
+    for line in normalized.replace("\r", "\n").split("\n"):
+        clean = re.sub(r"\s+", " ", line).strip(" \t|;,#")
+        if clean:
+            lines.append(clean)
+    return lines
+
+
+def _parsear_linea_rcth(line: str) -> dict | None:
+    upper = line.upper()
+    if upper in {"OK", "ACK"} or any(token in upper for token in ("TOTAL GENERAL", "ERROR", "HEADER", "FOOTER")):
+        return None
+
+    labeled_name = re.search(r"(?:NOM(?:BRE)?|DESC(?:RIPCION)?|ITEM|PLU)\s*[:=]\s*([^|;,]+)", line, re.I)
+    labeled_weight = re.search(r"(?:PESO|WEIGHT|WT)\s*[:=]\s*([0-9]+(?:[.,][0-9]+)?)", line, re.I)
+    labeled_unit = re.search(r"(?:PRECIO(?:_UNIT)?|UNIT|PRICE)\s*[:=]\s*([0-9][0-9.,]*)", line, re.I)
+    labeled_subtotal = re.search(r"(?:TOTAL|SUBTOTAL|IMPORTE|AMOUNT)\s*[:=]\s*([0-9][0-9.,]*)", line, re.I)
+    if labeled_name and labeled_subtotal:
+        peso_kg = _numero_balanza(labeled_weight.group(1)) if labeled_weight else None
+        precio_unit = _money_balanza(labeled_unit.group(1)) if labeled_unit else None
+        return {
+            "nombre": labeled_name.group(1).strip()[:80] or "Item balanza",
+            "peso_kg": round(peso_kg, 3) if peso_kg and peso_kg > 0 else None,
+            "precio_unit": precio_unit if precio_unit and precio_unit > 0 else None,
+            "subtotal": _money_balanza(labeled_subtotal.group(1)),
+        }
+
+    parts = [p.strip() for p in re.split(r"[|;,]\s*", line) if p.strip()]
+    if len(parts) >= 4:
+        numeric_indexes = [idx for idx, part in enumerate(parts) if re.search(r"\d", part)]
+        if len(numeric_indexes) >= 3:
+            subtotal = _money_balanza(parts[numeric_indexes[-1]])
+            precio_unit = _money_balanza(parts[numeric_indexes[-2]])
+            peso_kg = _numero_balanza(parts[numeric_indexes[-3]])
+            nombre = " ".join(parts[:numeric_indexes[0]]).strip() or parts[0]
+            if subtotal > 0:
+                return {
+                    "nombre": nombre[:80] or "Item balanza",
+                    "peso_kg": round(peso_kg, 3) if peso_kg > 0 else None,
+                    "precio_unit": precio_unit if precio_unit > 0 else None,
+                    "subtotal": subtotal,
+                }
+
+    matches = list(re.finditer(r"-?\d+(?:[.,]\d+)?", line))
+    if len(matches) < 2:
+        return None
+
+    subtotal = _money_balanza(matches[-1].group(0))
+    if subtotal <= 0:
+        return None
+
+    precio_unit = _money_balanza(matches[-2].group(0))
+    peso_kg = None
+    if len(matches) >= 3:
+        peso_kg = _numero_balanza(matches[-3].group(0))
+        if peso_kg > 100:
+            peso_kg = _numero_balanza(matches[-3].group(0), decimals=3)
+
+    nombre = line[:matches[0].start()].strip(" -:|;,")
+    if not nombre:
+        nombre = " ".join(part for part in re.split(r"\s+", line)[:3] if not re.search(r"\d", part)).strip()
+    if not nombre:
+        nombre = "Item balanza"
+
+    return {
+        "nombre": nombre[:80],
+        "peso_kg": round(peso_kg, 3) if peso_kg and peso_kg > 0 else None,
+        "precio_unit": precio_unit if precio_unit > 0 else None,
+        "subtotal": subtotal,
+    }
 
 
 def _estado_balanza(forzar: bool = False) -> dict:
@@ -1188,42 +1353,76 @@ def _estado_balanza(forzar: bool = False) -> dict:
 
 def _parsear_respuesta_rcth(raw: bytes) -> list:
     """
-    PENDIENTE: implementar cuando se capture el protocolo Teraoka con Wireshark.
-    Formato esperado: [{"nombre": "Lomo Liso", "peso_kg": 1.144, "precio_unit": 17000, "subtotal": 19450}]
-    Por ahora devuelve lista vacía y el fallback usa el total del EAN-13.
+    Parser tolerante de recibos DIGI/Teraoka.
+    Formato de salida: [{"nombre": "Lomo Liso", "peso_kg": 1.144, "precio_unit": 17000, "subtotal": 19450}]
+    Si la respuesta real no calza, el POS usa el total del EAN-13 como respaldo.
     """
-    return []
+    items = []
+    seen: set[tuple[str, int, float | None]] = set()
+    for line in _lineas_balanza(raw):
+        item = _parsear_linea_rcth(line)
+        if not item or item["subtotal"] <= 0:
+            continue
+        key = (item["nombre"].upper(), int(item["subtotal"]), item.get("peso_kg"))
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(item)
+    return items
 
 
 def _consultar_rcth(rcth: int, ip: str, puerto: int) -> dict:
     """Envía trama Teraoka y lee la respuesta de la balanza."""
-    try:
-        s = socket.create_connection((ip, puerto), timeout=BALANZA_TIMEOUT)
-        trama = f"\x02RD{str(rcth).zfill(4)}\x03".encode()
-        s.sendall(trama)
+    errores: list[str] = []
+    mejor_respuesta = b""
+    mejor_trama = b""
 
-        respuesta = b""
-        s.settimeout(3)
+    for trama in _balanza_tramas_rcth(rcth):
         try:
-            while True:
-                chunk = s.recv(512)
-                if not chunk:
-                    break
-                respuesta += chunk
-                if b"\x03" in respuesta:
-                    break
-        except socket.timeout:
-            pass
-        s.close()
+            with socket.create_connection((ip, puerto), timeout=BALANZA_TIMEOUT) as s:
+                s.sendall(trama)
+                respuesta = _leer_socket_completo(s)
+        except Exception as exc:
+            errores.append(f"{trama.hex()}: {exc}")
+            continue
 
+        if not respuesta:
+            errores.append(f"{trama.hex()}: sin respuesta")
+            continue
+
+        items = _parsear_respuesta_rcth(respuesta)
+        if items:
+            return {
+                "ok": True,
+                "rcth": rcth,
+                "trama_hex": trama.hex(),
+                "raw_hex": respuesta.hex(),
+                "raw_text": _decode_balanza_text(respuesta),
+                "items": items,
+            }
+
+        if len(respuesta) > len(mejor_respuesta):
+            mejor_respuesta = respuesta
+            mejor_trama = trama
+
+    if mejor_respuesta:
         return {
             "ok": True,
             "rcth": rcth,
-            "raw_hex": respuesta.hex(),
-            "items": _parsear_respuesta_rcth(respuesta),
+            "trama_hex": mejor_trama.hex(),
+            "raw_hex": mejor_respuesta.hex(),
+            "raw_text": _decode_balanza_text(mejor_respuesta),
+            "items": [],
+            "warning": "La balanza respondio, pero no se pudo interpretar el detalle del recibo.",
         }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc), "rcth": rcth, "items": []}
+
+    return {
+        "ok": False,
+        "error": "No hubo respuesta valida de la balanza",
+        "errores": errores[-5:],
+        "rcth": rcth,
+        "items": [],
+    }
 
 
 @app.get("/balanza/estado")
