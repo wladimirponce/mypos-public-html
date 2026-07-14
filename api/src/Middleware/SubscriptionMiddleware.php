@@ -7,6 +7,7 @@ namespace Mypos\Middleware;
 use Mypos\Core\Auth;
 use Mypos\Core\HttpException;
 use Mypos\Config\Database;
+use Mypos\Support\AppConfig;
 use PDO;
 
 final class SubscriptionMiddleware
@@ -15,7 +16,16 @@ final class SubscriptionMiddleware
     {
         // Require authentication first
         $claims = (new AuthMiddleware())->handle();
-        
+
+        // Exención de cobro para el operador de plataforma (dueño de MyPOS):
+        // entra sin que se le exija suscripción vigente. Se identifica por el
+        // email del token contra PLATFORM_OWNER_EMAILS (mismo allowlist que los
+        // links de precio especial).
+        $email = (string) ($claims['email'] ?? '');
+        if ($email !== '' && AppConfig::isPlatformOwnerEmail($email)) {
+            return $claims;
+        }
+
         $empresaId = Auth::empresaId();
         
         if (!$empresaId) {
