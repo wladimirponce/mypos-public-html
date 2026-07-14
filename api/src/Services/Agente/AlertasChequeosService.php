@@ -242,23 +242,35 @@ final class AlertasChequeosService
         $stmt->execute([':empresa_id' => $empresaId]);
 
         $items = [];
-        $vistos = [];
+        $servidos = [];        // (producto:destino) que ya recibió su sugerencia
+        $restanteOrigen = [];  // (producto:origen) => excedente aún disponible
         foreach ($stmt->fetchAll() as $r) {
             // Una sugerencia por (producto, destino): la de mayor excedente (orden).
-            $k = $r['producto_id'] . ':' . $r['destino_id'];
-            if (isset($vistos[$k])) {
+            $destKey = $r['producto_id'] . ':' . $r['destino_id'];
+            if (isset($servidos[$destKey])) {
                 continue;
             }
-            $vistos[$k] = true;
 
-            $mover = min((float) $r['necesidad'], (float) $r['excedente']);
+            // El excedente de un origen no puede re-asignarse entre varios
+            // destinos: se descuenta a medida que se sugiere mover desde él.
+            $origKey = $r['producto_id'] . ':' . $r['origen_id'];
+            if (!array_key_exists($origKey, $restanteOrigen)) {
+                $restanteOrigen[$origKey] = (float) $r['excedente'];
+            }
+
+            $mover = min((float) $r['necesidad'], $restanteOrigen[$origKey]);
             if ($mover <= 0) {
+                // Origen agotado: otro origen del mismo destino podría cubrirlo
+                // en una fila posterior, así que NO marcamos el destino servido.
                 continue;
             }
+            $restanteOrigen[$origKey] -= $mover;
+            $servidos[$destKey] = true;
+
             $moverTxt = rtrim(rtrim(number_format($mover, 2, ',', '.'), '0'), ',');
 
             $items[] = [
-                'clave'   => 'transf:' . $k,
+                'clave'   => 'transf:' . $destKey,
                 'texto'   => sprintf(
                     '%s: mover %s u de %s → %s (déficit en destino, excedente en origen)',
                     $r['producto'],
