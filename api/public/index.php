@@ -64,7 +64,10 @@ use Mypos\Controllers\StockController;
 use Mypos\Controllers\SyncController;
 use Mypos\Controllers\UploadController;
 use Mypos\Controllers\VentaController;
+use Mypos\Controllers\ValeCreditoController;
+use Mypos\Controllers\DevolucionController;
 use Mypos\Controllers\SuscripcionController;
+use Mypos\Controllers\MercadoPagoController;
 use Mypos\Core\HttpException;
 use Mypos\Core\Request;
 use Mypos\Core\Response;
@@ -306,6 +309,11 @@ $router->get('/api/v1/public/boleta/pdf', [$publicController, 'boletaPdf']);
 $onboardingController = new OnboardingController();
 $router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);
 
+// Webhook de MercadoPago (público, sin autenticación — la seguridad es la firma
+// x-signature + la consulta de la order con el token propio de la empresa).
+$mercadoPagoController = new MercadoPagoController();
+$router->post('/api/v1/public/webhooks/mercadopago', [$mercadoPagoController, 'webhook']);
+
 $crmController = new \Mypos\Controllers\CrmController();
 $router->get('/api/v1/crm/leads',                          [$crmController, 'index']);
 $router->get('/api/v1/crm/count',                          [$crmController, 'count']);
@@ -347,6 +355,13 @@ $router->get('/api/v1/suscripciones/paypal-return', [$suscripcionController, 'pa
 $router->get('/api/v1/suscripciones/status', [$suscripcionController, 'status']);
 $router->get('/api/v1/suscripciones/order-status', [$suscripcionController, 'orderStatus']);
 $router->get('/api/v1/suscripciones/payment-config', [$suscripcionController, 'paymentConfig']);
+
+// Links de precio especial (promo). resolve es público; el resto es del dueño de plataforma.
+$promoLinkController = new \Mypos\Controllers\PromoLinkController();
+$router->get('/api/v1/promos/resolve',        [$promoLinkController, 'resolve']);
+$router->get('/api/v1/promos',                [$promoLinkController, 'index']);
+$router->post('/api/v1/promos',               [$promoLinkController, 'store']);
+$router->put('/api/v1/promos/{id}/estado',    [$promoLinkController, 'toggle']);
 
 $permissionController = new PermissionController();
 $router->get('/api/v1/permisos/mis-permisos', [$permissionController, 'myPermissions']);
@@ -414,6 +429,32 @@ $creditoController = new CreditoController();
 $router->get('/api/v1/creditos/clientes', protectedRoute([$creditoController, 'index'], 'creditos.ver'));
 $router->get('/api/v1/creditos/clientes/{id}', protectedRoute([$creditoController, 'show'], 'creditos.ver'));
 $router->post('/api/v1/creditos/clientes/{id}/pagos', protectedRoute([$creditoController, 'pay'], 'creditos.pagar'));
+$router->post('/api/v1/creditos/abonos', protectedRoute([$creditoController, 'abonoLibre'], 'creditos.pagar'));
+$router->get('/api/v1/creditos/antiguedad', protectedRoute([$creditoController, 'antiguedad'], 'creditos.ver'));
+
+$devolucionController = new DevolucionController();
+$router->get('/api/v1/devoluciones', protectedRoute([$devolucionController, 'index'], 'devoluciones.ver'));
+$router->post('/api/v1/devoluciones', protectedRoute([$devolucionController, 'store'], 'devoluciones.crear'));
+$router->get('/api/v1/devoluciones/venta/{venta_id}', protectedRoute([$devolucionController, 'resumenVenta'], 'devoluciones.ver'));
+$router->get('/api/v1/devoluciones/{id}', protectedRoute([$devolucionController, 'show'], 'devoluciones.ver'));
+
+$valeCreditoController = new ValeCreditoController();
+$router->get('/api/v1/vales', protectedRoute([$valeCreditoController, 'index'], 'vales.ver'));
+$router->post('/api/v1/vales', protectedRoute([$valeCreditoController, 'store'], 'vales.emitir'));
+$router->get('/api/v1/vales/codigo/{codigo}', protectedRoute([$valeCreditoController, 'porCodigo'], 'vales.ver'));
+$router->get('/api/v1/vales/{id}', protectedRoute([$valeCreditoController, 'show'], 'vales.ver'));
+$router->post('/api/v1/vales/{id}/anular', protectedRoute([$valeCreditoController, 'anular'], 'vales.anular'));
+
+// MercadoPago Point: configuración (credenciales + terminales) y cobro en terminal.
+// $mercadoPagoController ya fue instanciado junto al webhook público (arriba).
+$router->get('/api/v1/mercadopago/config', protectedRoute([$mercadoPagoController, 'getConfig'], 'mercadopago.ver'));
+$router->put('/api/v1/mercadopago/config', protectedRoute([$mercadoPagoController, 'putConfig'], 'mercadopago.configurar'));
+$router->get('/api/v1/mercadopago/terminales', protectedRoute([$mercadoPagoController, 'indexTerminales'], 'mercadopago.ver'));
+$router->post('/api/v1/mercadopago/terminales', protectedRoute([$mercadoPagoController, 'storeTerminal'], 'mercadopago.configurar'));
+$router->put('/api/v1/mercadopago/terminales/{id}', protectedRoute([$mercadoPagoController, 'updateTerminal'], 'mercadopago.configurar'));
+$router->put('/api/v1/mercadopago/terminales/{id}/estado', protectedRoute([$mercadoPagoController, 'estadoTerminal'], 'mercadopago.configurar'));
+$router->post('/api/v1/mercadopago/cobros', protectedRoute([$mercadoPagoController, 'iniciarCobro'], 'mercadopago.cobrar'));
+$router->get('/api/v1/mercadopago/cobros/{id}', protectedRoute([$mercadoPagoController, 'estadoCobro'], 'mercadopago.cobrar'));
 
 $auditoriaController = new AuditoriaController();
 $router->get('/api/v1/auditoria', protectedRoute([$auditoriaController, 'index'], 'auditoria.ver'));
@@ -629,6 +670,7 @@ $router->post('/api/v1/cotizaciones/{id}/enviar',         protectedRoute([$cotiz
 $router->post('/api/v1/cotizaciones/{id}/aprobar',        protectedRoute([$cotizacionController, 'aprobar'],   'cotizaciones.aprobar'));
 $router->post('/api/v1/cotizaciones/{id}/rechazar',       protectedRoute([$cotizacionController, 'rechazar'],  'cotizaciones.aprobar'));
 $router->post('/api/v1/cotizaciones/{id}/convertir',      protectedRoute([$cotizacionController, 'convertir'], 'cotizaciones.convertir'));
+$router->post('/api/v1/cotizaciones/{id}/duplicar',       protectedRoute([$cotizacionController, 'duplicar'],  'cotizaciones.crear'));
 
 $compraInteligenteController = new CompraInteligenteController();
 $router->get('/api/v1/compras-inteligentes/sugerencias', protectedRoute([$compraInteligenteController, 'sugerencias'], 'compras_inteligentes.ver'));
@@ -735,6 +777,7 @@ $router->get('/api/v1/libros/ventas/resumen-tipo-documento', protectedRoute([$li
 $router->get('/api/v1/libros/compras/resumen-proveedor', protectedRoute([$libroController, 'comprasResumenProveedor'], 'libros.compras.ver'));
 
 $reporteController = new ReporteController();
+$router->get('/api/v1/reportes/salud-financiera', protectedRoute([$reporteController, 'saludFinanciera'], 'reportes.ver'));
 $router->get('/api/v1/reportes/resumen-ventas', protectedRoute([$reporteController, 'resumenVentas'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-dia', protectedRoute([$reporteController, 'ventasPorDia'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-metodo-pago', protectedRoute([$reporteController, 'ventasPorMetodoPago'], 'reportes.ver'));

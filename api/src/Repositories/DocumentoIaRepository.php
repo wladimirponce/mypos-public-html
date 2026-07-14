@@ -221,15 +221,19 @@ final class DocumentoIaRepository
                 empresa_id, documento_ia_id, producto_id, linea, codigo_detectado, codigo_barra_detectado,
                 nombre_detectado, cantidad_detectada, costo_unitario_detectado,
                 total_detectado, cantidad_normalizada, costo_unitario_normalizado, total_normalizado,
-                cantidad, costo_unitario, total, confianza, metodo_match, requiere_revision, confirmado
+                cantidad, costo_unitario, total, confianza, metodo_match, requiere_revision, confirmado,
+                numero_lote_detectado, fecha_vencimiento_detectada
              ) VALUES (
                 :empresa_id, :documento_ia_id, :producto_id, :linea, :codigo_detectado, :codigo_barra_detectado,
                 :nombre_detectado, :cantidad_detectada, :costo_unitario_detectado,
                 :total_detectado, :cantidad_normalizada, :costo_unitario_normalizado, :total_normalizado,
-                :cantidad, :costo_unitario, :total, :confianza, :metodo_match, :requiere_revision, :confirmado
+                :cantidad, :costo_unitario, :total, :confianza, :metodo_match, :requiere_revision, :confirmado,
+                :numero_lote_detectado, :fecha_vencimiento_detectada
              )'
         );
         $data['codigo_barra_detectado'] = $data['codigo_barra_detectado'] ?? null;
+        $data['numero_lote_detectado'] = $data['numero_lote_detectado'] ?? null;
+        $data['fecha_vencimiento_detectada'] = $data['fecha_vencimiento_detectada'] ?? null;
         $data['cantidad_normalizada'] = $data['cantidad_normalizada'] ?? $data['cantidad_detectada'];
         $data['costo_unitario_normalizado'] = $data['costo_unitario_normalizado'] ?? $data['costo_unitario_detectado'];
         $data['total_normalizado'] = $data['total_normalizado'] ?? $data['total_detectado'];

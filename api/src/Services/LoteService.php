@@ -124,10 +124,43 @@ final class LoteService
             $diasAlerta = 30;
         }
 
+        $alertas = array_map(
+            fn (array $row) => $this->conSugerenciaDescuento($row),
+            $this->repository->alertasVencimiento($empresaId, $diasAlerta)
+        );
+
         return [
             'dias_alerta' => $diasAlerta,
-            'alertas'     => $this->repository->alertasVencimiento($empresaId, $diasAlerta),
+            'alertas'     => $alertas,
         ];
+    }
+
+    /**
+     * Descuento sugerido (P4) según cercanía al vencimiento. Cuanto más cerca,
+     * mayor el descuento para liquidar el stock antes de que se pierda (merma).
+     */
+    public static function descuentoSugeridoPct(int $diasParaVencer): int
+    {
+        if ($diasParaVencer <= 3)  return 40; // incluye vencidos (dias negativos)
+        if ($diasParaVencer <= 7)  return 30;
+        if ($diasParaVencer <= 15) return 20;
+        if ($diasParaVencer <= 30) return 10;
+        return 0;
+    }
+
+    /** Enriquece una fila de alerta de vencimiento con la promo sugerida. */
+    private function conSugerenciaDescuento(array $row): array
+    {
+        $dias   = (int) ($row['dias_para_vencer'] ?? 0);
+        $precio = (int) ($row['precio_venta'] ?? 0);
+        $pct    = self::descuentoSugeridoPct($dias);
+
+        $row['descuento_sugerido_pct'] = $pct;
+        $row['precio_promo_sugerido']  = ($pct > 0 && $precio > 0)
+            ? (int) round($precio * (1 - $pct / 100))
+            : null;
+
+        return $row;
     }
 
     /**

@@ -63,6 +63,227 @@ final class AlertasChequeosService
         return $items;
     }
 
+    /**
+     * Guardián del margen (P2): productos con margen objetivo configurado cuyo
+     * margen REAL vigente cayó por debajo del objetivo (típicamente porque subió
+     * el costo y no se actualizó el precio), pero que AÚN dan ganancia (la
+     * pérdida total la cubre precioPerdida). Sugiere el precio corregido.
+     *
+     * Param: umbral_pp = caída mínima en puntos porcentuales para avisar (def 5).
+     */
+    public function margenComprometido(int $empresaId, array $params): array
+    {
+        $umbralPp = (float) ($params['umbral_pp'] ?? 5);
+        if ($umbralPp <= 0) {
+            $umbralPp = 5;
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT id, nombre, precio_venta, tipo_margen,
+                    margen_ganancia,
+                    COALESCE(NULLIF(costo_actual, 0), precio_costo) AS costo
+             FROM productos
+             WHERE empresa_id = :empresa_id
+               AND activo = 1
+               AND margen_ganancia IS NOT NULL AND margen_ganancia > 0
+               AND COALESCE(NULLIF(costo_actual, 0), precio_costo) > 0
+               AND precio_venta > COALESCE(NULLIF(costo_actual, 0), precio_costo)'
+        );
+        $stmt->execute([':empresa_id' => $empresaId]);
+
+        $candidatos = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $costo  = (int) $row['costo'];
+            $venta  = (int) $row['precio_venta'];
+            $target = (float) $row['margen_ganancia'];
+            $tipo   = \Mypos\Support\PrecioCalculator::normalizarTipo($row['tipo_margen'] ?? null);
+
+            // Margen/markup REAL vigente, en la misma unidad que el objetivo.
+            $actual = $tipo === 'margen'
+                ? (($venta - $costo) / $venta) * 100   // margen bruto sobre venta
+                : (($venta - $costo) / $costo) * 100;  // markup sobre costo
+
+            $caida = $target - $actual;
+            if ($caida < $umbralPp) {
+                continue;
+            }
+
+            $sugerido = \Mypos\Support\PrecioCalculator::sugerido($costo, $target, $tipo);
+            if ($sugerido <= $venta) {
+                continue; // nada que subir
+            }
+
+            $candidatos[] = [
+                'caida'    => $caida,
+                'clave'    => 'margen:' . $row['id'] . ':' . $venta . ':' . $costo,
+                'texto'    => sprintf(
+                    '%s: %s objetivo %s%%, actual %s%% — sube a $%s (hoy $%s)',
+                    $row['nombre'],
+                    $tipo === 'margen' ? 'margen' : 'markup',
+                    rtrim(rtrim(number_format($target, 1, ',', '.'), '0'), ','),
+                    rtrim(rtrim(number_format($actual, 1, ',', '.'), '0'), ','),
+                    number_format($sugerido, 0, ',', '.'),
+                    number_format($venta, 0, ',', '.')
+                ),
+                'detalle'  => [
+                    'producto_id'      => (int) $row['id'],
+                    'tipo_margen'      => $tipo,
+                    'margen_objetivo'  => $target,
+                    'margen_actual'    => round($actual, 2),
+                    'costo'            => $costo,
+                    'precio_venta'     => $venta,
+                    'precio_sugerido'  => $sugerido,
+                ],
+            ];
+        }
+
+        // Mayor caída primero; máximo 30 para no saturar el aviso.
+        usort($candidatos, static fn ($a, $b) => $b['caida'] <=> $a['caida']);
+        $candidatos = array_slice($candidatos, 0, 30);
+
+        return array_map(static fn ($c) => [
+            'clave'   => $c['clave'],
+            'texto'   => $c['texto'],
+            'detalle' => $c['detalle'],
+        ], $candidatos);
+    }
+
+    /**
+     * Lotes por vencer (P4): productos con fecha de vencimiento cercana y stock
+     * disponible. Recomienda un descuento/promo para liquidarlos antes de que se
+     * pierdan (merma). Param: dias_alerta = ventana en días (def 15).
+     */
+    public function lotesPorVencer(int $empresaId, array $params): array
+    {
+        $dias = (int) ($params['dias_alerta'] ?? 15);
+        if ($dias <= 0 || $dias > 365) {
+            $dias = 15;
+        }
+
+        $loteService = new \Mypos\Services\LoteService(new \Mypos\Repositories\LoteRepository($this->db));
+        $alertas = $loteService->alertasVencimiento($empresaId, $dias)['alertas'];
+
+        $items = [];
+        foreach ($alertas as $row) {
+            $pct = (int) ($row['descuento_sugerido_pct'] ?? 0);
+            if ($pct <= 0) {
+                continue; // aún no urgente; solo avisamos lo accionable
+            }
+
+            $diasVencer = (int) ($row['dias_para_vencer'] ?? 0);
+            $stock      = rtrim(rtrim(number_format((float) $row['stock_total'], 2, ',', '.'), '0'), ',');
+            $venceTexto = $diasVencer < 0
+                ? 'VENCIDO hace ' . abs($diasVencer) . 'd'
+                : 'vence en ' . $diasVencer . 'd';
+            $promo = $row['precio_promo_sugerido'] !== null
+                ? sprintf(' — promo -%d%% a $%s', $pct, number_format((int) $row['precio_promo_sugerido'], 0, ',', '.'))
+                : sprintf(' — aplica -%d%%', $pct);
+
+            $items[] = [
+                'clave'   => 'lote:' . $row['lote_id'] . ':' . ($row['fecha_vencimiento'] ?? '') . ':' . $pct,
+                'texto'   => sprintf(
+                    '%s (lote %s): %s, %s u%s',
+                    $row['producto_nombre'],
+                    $row['numero_lote'],
+                    $venceTexto,
+                    $stock,
+                    $promo
+                ),
+                'detalle' => [
+                    'producto_id'            => (int) $row['producto_id'],
+                    'lote_id'                => (int) $row['lote_id'],
+                    'numero_lote'            => $row['numero_lote'],
+                    'fecha_vencimiento'      => $row['fecha_vencimiento'],
+                    'dias_para_vencer'       => $diasVencer,
+                    'stock_total'            => (float) $row['stock_total'],
+                    'descuento_sugerido_pct' => $pct,
+                    'precio_promo_sugerido'  => $row['precio_promo_sugerido'],
+                ],
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Transferencias sugeridas (P7): productos con una ubicación en déficit
+     * (bajo su punto de reorden/mínimo) mientras OTRA ubicación de la misma
+     * empresa tiene excedente (sobre su stock máximo). Sugiere el traslado
+     * interno para balancear sin comprar. Param: max_listado (def 15).
+     */
+    public function transferenciasSugeridas(int $empresaId, array $params): array
+    {
+        $max = max(1, (int) ($params['max_listado'] ?? 15));
+
+        $stmt = $this->db->prepare(
+            'SELECT p.nombre AS producto, sd.producto_id,
+                    ud.id AS destino_id, ud.nombre AS destino,
+                    us.id AS origen_id,  us.nombre AS origen,
+                    (COALESCE(sd.punto_reorden, sd.stock_minimo) - (sd.cantidad - COALESCE(sd.reservado,0))) AS necesidad,
+                    ((ss.cantidad - COALESCE(ss.reservado,0)) - COALESCE(ss.stock_maximo, ss.punto_reorden, ss.stock_minimo)) AS excedente
+             FROM stock_ubicacion sd
+             INNER JOIN stock_ubicacion ss
+                     ON ss.empresa_id = sd.empresa_id
+                    AND ss.producto_id = sd.producto_id
+                    AND ss.ubicacion_id <> sd.ubicacion_id
+             INNER JOIN productos p
+                     ON p.id = sd.producto_id AND p.empresa_id = sd.empresa_id AND p.activo = 1
+             INNER JOIN ubicaciones_stock ud
+                     ON ud.id = sd.ubicacion_id AND ud.empresa_id = sd.empresa_id AND ud.activo = 1
+             INNER JOIN ubicaciones_stock us
+                     ON us.id = ss.ubicacion_id AND us.empresa_id = ss.empresa_id AND us.activo = 1
+             WHERE sd.empresa_id = :empresa_id
+               AND COALESCE(sd.punto_reorden, sd.stock_minimo) > 0
+               AND (sd.cantidad - COALESCE(sd.reservado,0)) < COALESCE(sd.punto_reorden, sd.stock_minimo)
+               AND ((ss.cantidad - COALESCE(ss.reservado,0)) - COALESCE(ss.stock_maximo, ss.punto_reorden, ss.stock_minimo)) > 0
+             ORDER BY necesidad DESC, excedente DESC
+             LIMIT 200'
+        );
+        $stmt->execute([':empresa_id' => $empresaId]);
+
+        $items = [];
+        $vistos = [];
+        foreach ($stmt->fetchAll() as $r) {
+            // Una sugerencia por (producto, destino): la de mayor excedente (orden).
+            $k = $r['producto_id'] . ':' . $r['destino_id'];
+            if (isset($vistos[$k])) {
+                continue;
+            }
+            $vistos[$k] = true;
+
+            $mover = min((float) $r['necesidad'], (float) $r['excedente']);
+            if ($mover <= 0) {
+                continue;
+            }
+            $moverTxt = rtrim(rtrim(number_format($mover, 2, ',', '.'), '0'), ',');
+
+            $items[] = [
+                'clave'   => 'transf:' . $k,
+                'texto'   => sprintf(
+                    '%s: mover %s u de %s → %s (déficit en destino, excedente en origen)',
+                    $r['producto'],
+                    $moverTxt,
+                    $r['origen'],
+                    $r['destino']
+                ),
+                'detalle' => [
+                    'producto_id'   => (int) $r['producto_id'],
+                    'origen_id'     => (int) $r['origen_id'],
+                    'destino_id'    => (int) $r['destino_id'],
+                    'cantidad'      => $mover,
+                    'necesidad'     => (float) $r['necesidad'],
+                    'excedente'     => (float) $r['excedente'],
+                ],
+            ];
+
+            if (count($items) >= $max) {
+                break;
+            }
+        }
+
+        return $items;
+    }
+
     /** Digest diario de productos en o bajo su stock minimo por ubicacion. */
     public function stockCritico(int $empresaId, array $params): array
     {

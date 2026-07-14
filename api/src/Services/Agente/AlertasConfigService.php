@@ -19,7 +19,10 @@ final class AlertasConfigService
     /** Tipos de alerta y sus parametros por defecto. */
     public const DEFAULTS = [
         'precio_perdida'   => ['activo' => true],
+        'margen_comprometido' => ['activo' => true, 'umbral_pp' => 5],
         'stock_critico'    => ['activo' => true, 'max_listado' => 15],
+        'lotes_por_vencer' => ['activo' => true, 'dias_alerta' => 15],
+        'transferencias_sugeridas' => ['activo' => true, 'max_listado' => 15],
         'cierre_pendiente' => ['activo' => true],
         'caja_abierta'     => ['activo' => true, 'horas_max' => 16],
         'ventas_caida'     => ['activo' => true, 'umbral_pct' => 50],

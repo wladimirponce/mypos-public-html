@@ -16,8 +16,8 @@ final class ProductoRepository
     {
         $sql = 'SELECT p.id, p.empresa_id, p.rubro_id, p.centro_costo_id, p.codigo, p.sku,
                        p.nombre, p.descripcion, p.unidad_medida, p.precio_costo,
-                       p.costo_actual, p.precio_venta, p.margen_ganancia, p.controla_stock, p.stock_minimo,
-                       p.es_producto_peso, p.precio_por_kg,
+                       p.costo_actual, p.precio_venta, p.margen_ganancia, p.tipo_margen, p.controla_stock, p.stock_minimo,
+                       p.es_producto_peso, p.precio_por_kg, p.venta_restringida,
                        p.permite_descuento, p.permite_comision, p.activo,
                        r.nombre AS rubro, cc.nombre AS centro_costo,
                        pi.id AS imagen_principal_id,
@@ -110,8 +110,8 @@ final class ProductoRepository
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.rubro_id, p.centro_costo_id, p.codigo, p.sku,
                     p.nombre, p.descripcion, p.unidad_medida, p.precio_costo,
-                    p.costo_actual, p.precio_venta, p.margen_ganancia, p.controla_stock, p.stock_minimo,
-                    p.es_producto_peso, p.precio_por_kg,
+                    p.costo_actual, p.precio_venta, p.margen_ganancia, p.tipo_margen, p.controla_stock, p.stock_minimo,
+                    p.es_producto_peso, p.precio_por_kg, p.venta_restringida,
                     p.permite_descuento, p.permite_comision, p.activo,
                     r.nombre AS rubro, cc.nombre AS centro_costo,
                     pi.id AS imagen_principal_id,
@@ -154,12 +154,12 @@ final class ProductoRepository
         $statement = $this->connection->prepare(
             'INSERT INTO productos (
                 empresa_id, rubro_id, centro_costo_id, codigo, sku, nombre, descripcion,
-                unidad_medida, precio_costo, costo_actual, precio_venta, margen_ganancia, controla_stock,
-                stock_minimo, permite_descuento, permite_comision, activo
+                unidad_medida, precio_costo, costo_actual, precio_venta, margen_ganancia, tipo_margen, controla_stock,
+                stock_minimo, permite_descuento, permite_comision, venta_restringida, activo
              ) VALUES (
                 :empresa_id, :rubro_id, :centro_costo_id, :codigo, :sku, :nombre, :descripcion,
-                :unidad_medida, :precio_costo, :costo_actual, :precio_venta, :margen_ganancia, :controla_stock,
-                :stock_minimo, :permite_descuento, :permite_comision, :activo
+                :unidad_medida, :precio_costo, :costo_actual, :precio_venta, :margen_ganancia, :tipo_margen, :controla_stock,
+                :stock_minimo, :permite_descuento, :permite_comision, :venta_restringida, :activo
              )'
         );
         $statement->execute($this->productParams($data));
@@ -185,10 +185,12 @@ final class ProductoRepository
                  costo_actual = :costo_actual,
                  precio_venta = :precio_venta,
                  margen_ganancia = :margen_ganancia,
+                 tipo_margen = :tipo_margen,
                  controla_stock = :controla_stock,
                  stock_minimo = :stock_minimo,
                  permite_descuento = :permite_descuento,
                  permite_comision = :permite_comision,
+                 venta_restringida = :venta_restringida,
                  activo = :activo,
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = :id AND empresa_id = :empresa_id'
@@ -570,7 +572,7 @@ final class ProductoRepository
 
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.codigo, p.nombre, p.descripcion, p.precio_venta, p.controla_stock,
-                    p.es_producto_peso, p.precio_por_kg,
+                    p.es_producto_peso, p.precio_por_kg, p.venta_restringida,
                     r.nombre AS rubro, cc.nombre AS centro_costo, pcb.codigo_barra AS codigo_barra_usado,
                     pi.imagen_url AS imagen_principal,
                     a.id AS imagen_principal_archivo_id,
@@ -662,7 +664,7 @@ final class ProductoRepository
     public function findParaMargen(int $empresaId, int $productoId): ?array
     {
         $statement = $this->connection->prepare(
-            'SELECT id, nombre, costo_actual, precio_venta, margen_ganancia
+            'SELECT id, nombre, costo_actual, precio_venta, margen_ganancia, tipo_margen
              FROM productos
              WHERE id = :id AND empresa_id = :empresa_id
              LIMIT 1'
@@ -710,12 +712,21 @@ final class ProductoRepository
             'margen_ganancia' => isset($data['margen_ganancia']) && $data['margen_ganancia'] !== '' && $data['margen_ganancia'] !== null
                 ? round((float) $data['margen_ganancia'], 2)
                 : null,
+            'tipo_margen' => \Mypos\Support\PrecioCalculator::normalizarTipo($data['tipo_margen'] ?? null),
             'controla_stock' => (int) ($data['controla_stock'] ?? 1),
             'stock_minimo' => (string) ($data['stock_minimo'] ?? '0.000'),
             'permite_descuento' => (int) ($data['permite_descuento'] ?? 1),
             'permite_comision' => (int) ($data['permite_comision'] ?? 1),
+            'venta_restringida' => $this->ventaRestringida($data['venta_restringida'] ?? null),
             'activo' => (int) ($data['activo'] ?? 1),
         ];
+    }
+
+    private function ventaRestringida(mixed $value): string
+    {
+        $restriccion = strtoupper(trim((string) $value));
+
+        return in_array($restriccion, ['ALCOHOL', 'TABACO'], true) ? $restriccion : 'NINGUNA';
     }
 
     private function discountParams(int $productoId, array $data): array

@@ -33,6 +33,15 @@ final class AuthService
         $planId = PlanCatalog::normalize((string) ($data['plan_id'] ?? 'mypos-start'));
         $requiresEmailVerification = $this->requiresEmailVerification();
 
+        // Link de precio especial (opcional). Se valida ANTES de crear nada: un
+        // código inválido/expirado corta el registro con un error claro. El plan
+        // del link manda sobre el ?plan= del formulario.
+        $promoService = new PromoLinkService();
+        $promoLink = $promoService->validarParaRegistro($data['promo_codigo'] ?? null);
+        if ($promoLink !== null) {
+            $planId = PlanCatalog::normalize((string) $promoLink['plan_id']);
+        }
+
         // Validaciones básicas
         if ($rutEmpresa === '' || $razonSocial === '' || $nombreUsuario === '' || $email === '' || $password === '') {
             throw new HttpException('Todos los campos son obligatorios', 422);
@@ -122,13 +131,22 @@ final class AuthService
             // 6. Activar primer mes gratis (Free Trial). Aplica al plan elegido en el
             //    registro; del segundo mes en adelante se paga la cuota del plan (pago
             //    manual vía Flow/PayPal, validado por SubscriptionMiddleware al vencer).
+            // Precio especial recurrente si vino por link de promoción: se estampa
+            // en la suscripción y el cobro mensual lo usará hasta que se cambie a mano.
+            $precioEspecial = $promoLink !== null ? (int) $promoLink['precio_clp'] : null;
+            $promoCodigo = $promoLink !== null ? (string) $promoLink['codigo'] : null;
+
             $statement = $connection->prepare(
-                'INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado)
-                 VALUES (:empresa_id, :plan_id, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), "activa")'
+                'INSERT INTO empresas_suscripcion
+                    (empresa_id, plan_id, precio_especial_clp, promo_codigo, fecha_inicio, fecha_fin, estado)
+                 VALUES
+                    (:empresa_id, :plan_id, :precio_especial_clp, :promo_codigo, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), "activa")'
             );
             $statement->execute([
                 'empresa_id' => $empresaId,
                 'plan_id' => $planId,
+                'precio_especial_clp' => $precioEspecial,
+                'promo_codigo' => $promoCodigo,
             ]);
 
             if (!$requiresEmailVerification) {
@@ -136,6 +154,15 @@ final class AuthService
             }
 
             $connection->commit();
+
+            // Contabiliza el registro efectivo en el link de promoción (best-effort).
+            if ($promoLink !== null) {
+                try {
+                    $promoService->marcarUso((int) $promoLink['id']);
+                } catch (\Throwable $e) {
+                    error_log('[PromoLink] no se pudo contabilizar uso: ' . $e->getMessage());
+                }
+            }
 
             // Enviar correo de verificación
         } catch (\Throwable $exception) {
@@ -354,6 +381,7 @@ final class AuthService
             'id' => (int) $user['id'],
             'nombre' => (string) $user['nombre'],
             'email' => (string) $user['email'],
+            'is_platform_owner' => \Mypos\Support\AppConfig::isPlatformOwnerEmail((string) $user['email']),
         ];
     }
 

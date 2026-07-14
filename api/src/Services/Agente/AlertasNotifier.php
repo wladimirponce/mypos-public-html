@@ -28,7 +28,10 @@ final class AlertasNotifier
     /** Horas de gracia del dedupe por tipo de alerta. */
     private const GRACE_HORAS = [
         'precio_perdida'   => 20,
+        'margen_comprometido' => 20,
         'stock_critico'    => 20,
+        'lotes_por_vencer' => 20,
+        'transferencias_sugeridas' => 20,
         'cierre_pendiente' => 8,   // permite el refuerzo de la manana siguiente
         'caja_abierta'     => 8,   // re-avisa cada 8 h mientras siga abierta
         'ventas_caida'     => 4,   // permite el segundo aviso de la tarde
@@ -40,7 +43,10 @@ final class AlertasNotifier
 
     private const TITULOS = [
         'precio_perdida'   => '💸 Precios a pérdida',
+        'margen_comprometido' => '📉 Margen bajo el objetivo',
         'stock_critico'    => '📦 Stock crítico',
+        'lotes_por_vencer' => '⏳ Lotes por vencer (promo sugerida)',
+        'transferencias_sugeridas' => '🔀 Transferencias entre sucursales sugeridas',
         'cierre_pendiente' => '🗓️ Cierres de caja pendientes',
         'caja_abierta'     => '🕐 Cajas abiertas demasiado tiempo',
         'ventas_caida'     => '📉 Ventas bajo lo normal',

@@ -197,6 +197,73 @@ final class ReporteService
         ];
     }
 
+    /**
+     * Salud financiera del inventario (P8/P9): capital inmovilizado y stock
+     * muerto, con un resumen en lenguaje de dueño (sin balances ni tecnicismos).
+     */
+    public function saludFinanciera(array $filters): array
+    {
+        $empresaId = (int) ($filters['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+        $dias  = isset($filters['dias']) && is_numeric($filters['dias']) ? max(1, (int) $filters['dias']) : 90;
+        $limit = isset($filters['limit']) && is_numeric($filters['limit']) ? max(1, (int) $filters['limit']) : 20;
+
+        $resumen = $this->repository->capitalInmovilizadoResumen($empresaId, $dias);
+        $muertosRaw = $this->repository->stockMuertoTop($empresaId, $dias, $limit);
+
+        $hoy = new DateTimeImmutable('today');
+        $muertos = array_map(function (array $r) use ($hoy): array {
+            $diasSinVenta = null;
+            if (!empty($r['ultima_venta'])) {
+                $diasSinVenta = (int) $hoy->diff(new DateTimeImmutable((string) $r['ultima_venta']))->days;
+            }
+            return [
+                'producto_id'    => (int) $r['id'],
+                'codigo'         => (string) $r['codigo'],
+                'nombre'         => (string) $r['nombre'],
+                'stock'          => (float) $r['stock'],
+                'costo'          => (int) round((float) $r['costo']),
+                'valor'          => (int) round((float) $r['valor']),
+                'ultima_venta'   => $r['ultima_venta'] ?? null,
+                'dias_sin_venta' => $diasSinVenta, // null = nunca se ha vendido
+            ];
+        }, $muertosRaw);
+
+        $valorTotal  = $resumen['valor_inventario_total'];
+        $valorMuerto = $resumen['valor_stock_muerto'];
+        $pctMuerto   = $valorTotal > 0 ? round($valorMuerto / $valorTotal * 100, 1) : 0.0;
+
+        // Lenguaje de dueño (P9): frases directas, sin jerga contable.
+        $fmt = static fn (int $n): string => '$' . number_format($n, 0, ',', '.');
+        $mensajes = [
+            sprintf('Tienes %s en mercadería guardada en tus bodegas y estantes.', $fmt($valorTotal)),
+        ];
+        if ($valorMuerto > 0) {
+            $mensajes[] = sprintf(
+                'De ese total, %s (%s%%) está "durmiendo": %d producto(s) sin una sola venta en los últimos %d días. Ese dinero podría usarse para pagar cuentas o reponer lo que sí rota.',
+                $fmt($valorMuerto),
+                rtrim(rtrim(number_format($pctMuerto, 1, ',', '.'), '0'), ','),
+                $resumen['items_muertos'],
+                $dias
+            );
+        } else {
+            $mensajes[] = 'Buenas noticias: no hay stock muerto en el período analizado.';
+        }
+
+        return [
+            'dias_sin_venta_umbral'  => $dias,
+            'valor_inventario_total' => $valorTotal,
+            'valor_stock_muerto'     => $valorMuerto,
+            'pct_stock_muerto'       => $pctMuerto,
+            'items_total'            => $resumen['items_total'],
+            'items_muertos'          => $resumen['items_muertos'],
+            'mensajes'               => $mensajes,
+            'stock_muerto'           => $muertos,
+        ];
+    }
+
     private function comparativoPeriodoAnterior(int $empresaId, ?int $sucursalId, string $from, string $to): array
     {
         $start = new DateTimeImmutable($from);

@@ -72,7 +72,9 @@ final class ConfiguracionRepository
                     alerta_stock_bajo_default, alerta_folios_bajos_default,
                     dias_alerta_vencimiento_caf, ia_documentos_habilitada,
                     documentos_tributarios_habilitados, modo_offline_habilitado,
-                    notif_email_activo, notif_whatsapp_activo
+                    notif_email_activo, notif_whatsapp_activo,
+                    control_edad_activo, control_horario_alcohol_activo,
+                    alcohol_hora_inicio, alcohol_hora_fin, alcohol_hora_fin_finde
              FROM empresa_configuracion_operativa
              WHERE empresa_id = :empresa_id
              LIMIT 1'
@@ -137,14 +139,18 @@ final class ConfiguracionRepository
                 tipo_documento_default, metodo_pago_default_id, alerta_stock_bajo_default,
                 alerta_folios_bajos_default, dias_alerta_vencimiento_caf,
                 ia_documentos_habilitada, documentos_tributarios_habilitados, modo_offline_habilitado,
-                notif_email_activo, notif_whatsapp_activo
+                notif_email_activo, notif_whatsapp_activo,
+                control_edad_activo, control_horario_alcohol_activo,
+                alcohol_hora_inicio, alcohol_hora_fin, alcohol_hora_fin_finde
              ) VALUES (
                 :empresa_id, :permitir_stock_negativo, :exigir_caja_abierta_para_vender,
                 :permitir_venta_sin_cliente, :permitir_credito_clientes, :exigir_cliente_en_factura,
                 :tipo_documento_default, :metodo_pago_default_id, :alerta_stock_bajo_default,
                 :alerta_folios_bajos_default, :dias_alerta_vencimiento_caf,
                 :ia_documentos_habilitada, :documentos_tributarios_habilitados, :modo_offline_habilitado,
-                :notif_email_activo, :notif_whatsapp_activo
+                :notif_email_activo, :notif_whatsapp_activo,
+                :control_edad_activo, :control_horario_alcohol_activo,
+                :alcohol_hora_inicio, :alcohol_hora_fin, :alcohol_hora_fin_finde
              )
              ON DUPLICATE KEY UPDATE
                 permitir_stock_negativo = VALUES(permitir_stock_negativo),
@@ -162,6 +168,11 @@ final class ConfiguracionRepository
                 modo_offline_habilitado = VALUES(modo_offline_habilitado),
                 notif_email_activo = VALUES(notif_email_activo),
                 notif_whatsapp_activo = VALUES(notif_whatsapp_activo),
+                control_edad_activo = VALUES(control_edad_activo),
+                control_horario_alcohol_activo = VALUES(control_horario_alcohol_activo),
+                alcohol_hora_inicio = VALUES(alcohol_hora_inicio),
+                alcohol_hora_fin = VALUES(alcohol_hora_fin),
+                alcohol_hora_fin_finde = VALUES(alcohol_hora_fin_finde),
                 updated_at = CURRENT_TIMESTAMP'
         );
         $statement->execute($data);

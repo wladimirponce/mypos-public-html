@@ -38,6 +38,8 @@ Estructura:
       "cantidad_detectada": 0,
       "costo_unitario_detectado": 0,
       "total_detectado": 0,
+      "numero_lote_detectado": null,
+      "fecha_vencimiento_detectada": null,
       "confianza": 0
     }
   ],
@@ -49,6 +51,8 @@ Reglas:
 - Fechas YYYY-MM-DD si es posible.
 - RUT chileno como string.
 - Codigos EAN/UPC numericos de 8 a 14 digitos van en codigo_barra_detectado, no en codigo_detectado.
+- numero_lote_detectado: numero/codigo de lote impreso junto al producto (ej. "LOTE: A1234", "L. 2026-05"); null si no aparece.
+- fecha_vencimiento_detectada: fecha de vencimiento/caducidad del producto en YYYY-MM-DD (ej. "VENCE 05/2026" => "2026-05-31", "EXP 2026-05-20" => "2026-05-20"); null si no aparece.
 - Si no encuentra items, items = [].
 - confianza entre 0 y 1.
 PROMPT;
@@ -237,8 +241,21 @@ PROMPT;
             'cantidad_detectada' => is_numeric($item['cantidad_detectada'] ?? null) ? round((float) $item['cantidad_detectada'], 3) : 0,
             'costo_unitario_detectado' => $this->intAtLeast($item['costo_unitario_detectado'] ?? 0),
             'total_detectado' => $this->intAtLeast($item['total_detectado'] ?? 0),
+            'numero_lote_detectado' => $this->nullableString($item['numero_lote_detectado'] ?? null),
+            'fecha_vencimiento_detectada' => $this->isoDateOrNull($item['fecha_vencimiento_detectada'] ?? null),
             'confianza' => $this->confidence($item['confianza'] ?? 0),
         ];
+    }
+
+    /** Acepta solo fechas ISO YYYY-MM-DD válidas; cualquier otra cosa => null. */
+    private function isoDateOrNull(mixed $value): ?string
+    {
+        $s = $this->nullableString($value);
+        if ($s === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $s)) {
+            return null;
+        }
+        [$y, $m, $d] = array_map('intval', explode('-', $s));
+        return checkdate($m, $d, $y) ? $s : null;
     }
 
     private function intAtLeast(mixed $value): int

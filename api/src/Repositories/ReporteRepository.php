@@ -295,4 +295,81 @@ final class ReporteRepository
 
         return $params;
     }
+
+    /**
+     * Resumen de capital inmovilizado y stock muerto (P8). "Muerto" = producto
+     * con stock > 0 y SIN ventas en los últimos $dias días. Valor = stock ×
+     * costo actual (o precio_costo si no hay costo).
+     *
+     * @return array{items_total:int, valor_inventario_total:int, items_muertos:int, valor_stock_muerto:int}
+     */
+    public function capitalInmovilizadoResumen(int $empresaId, int $dias): array
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT COUNT(*) AS items_total,
+                    COALESCE(SUM(valor), 0)                              AS valor_inventario_total,
+                    COALESCE(SUM(muerto), 0)                             AS items_muertos,
+                    COALESCE(SUM(CASE WHEN muerto = 1 THEN valor ELSE 0 END), 0) AS valor_stock_muerto
+             FROM (
+                SELECT SUM(su.cantidad) * COALESCE(NULLIF(p.costo_actual, 0), p.precio_costo) AS valor,
+                       CASE WHEN NOT EXISTS (
+                            SELECT 1 FROM stock_movimientos sm
+                             WHERE sm.empresa_id = p.empresa_id AND sm.producto_id = p.id
+                               AND sm.tipo_movimiento = \'VENTA\' AND sm.cantidad < 0
+                               AND sm.created_at >= DATE_SUB(CURRENT_DATE, INTERVAL :dias DAY)
+                       ) THEN 1 ELSE 0 END AS muerto
+                FROM productos p
+                INNER JOIN stock_ubicacion su
+                        ON su.producto_id = p.id AND su.empresa_id = p.empresa_id
+                WHERE p.empresa_id = :empresa_id AND p.activo = 1
+                GROUP BY p.id
+                HAVING SUM(su.cantidad) > 0
+             ) t'
+        );
+        $stmt->execute(['dias' => max(1, $dias), 'empresa_id' => $empresaId]);
+        $row = $stmt->fetch();
+
+        return [
+            'items_total'            => (int) ($row['items_total'] ?? 0),
+            'valor_inventario_total' => (int) round((float) ($row['valor_inventario_total'] ?? 0)),
+            'items_muertos'          => (int) ($row['items_muertos'] ?? 0),
+            'valor_stock_muerto'     => (int) round((float) ($row['valor_stock_muerto'] ?? 0)),
+        ];
+    }
+
+    /**
+     * Top productos de stock muerto (sin ventas en $dias) por valor inmovilizado.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function stockMuertoTop(int $empresaId, int $dias, int $limit): array
+    {
+        $limit = max(1, min(200, $limit));
+        $stmt = $this->connection->prepare(
+            'SELECT p.id, p.codigo, p.nombre,
+                    SUM(su.cantidad) AS stock,
+                    COALESCE(NULLIF(p.costo_actual, 0), p.precio_costo) AS costo,
+                    SUM(su.cantidad) * COALESCE(NULLIF(p.costo_actual, 0), p.precio_costo) AS valor,
+                    (SELECT MAX(sm.created_at) FROM stock_movimientos sm
+                      WHERE sm.empresa_id = p.empresa_id AND sm.producto_id = p.id
+                        AND sm.tipo_movimiento = \'VENTA\' AND sm.cantidad < 0) AS ultima_venta
+             FROM productos p
+             INNER JOIN stock_ubicacion su
+                     ON su.producto_id = p.id AND su.empresa_id = p.empresa_id
+             WHERE p.empresa_id = :empresa_id AND p.activo = 1
+               AND NOT EXISTS (
+                    SELECT 1 FROM stock_movimientos sm
+                     WHERE sm.empresa_id = p.empresa_id AND sm.producto_id = p.id
+                       AND sm.tipo_movimiento = \'VENTA\' AND sm.cantidad < 0
+                       AND sm.created_at >= DATE_SUB(CURRENT_DATE, INTERVAL :dias DAY)
+               )
+             GROUP BY p.id
+             HAVING stock > 0
+             ORDER BY valor DESC
+             LIMIT ' . $limit
+        );
+        $stmt->execute(['empresa_id' => $empresaId, 'dias' => max(1, $dias)]);
+
+        return $stmt->fetchAll();
+    }
 }

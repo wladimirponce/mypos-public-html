@@ -87,6 +87,11 @@ final class ConfiguracionService
             'modo_offline_habilitado' => $this->bool($payload, 'modo_offline_habilitado'),
             'notif_email_activo' => $this->bool($payload, 'notif_email_activo'),
             'notif_whatsapp_activo' => $this->bool($payload, 'notif_whatsapp_activo'),
+            'control_edad_activo' => $this->bool($payload, 'control_edad_activo'),
+            'control_horario_alcohol_activo' => $this->bool($payload, 'control_horario_alcohol_activo'),
+            'alcohol_hora_inicio' => $this->hora($payload['alcohol_hora_inicio'] ?? '09:00', 'alcohol_hora_inicio'),
+            'alcohol_hora_fin' => $this->hora($payload['alcohol_hora_fin'] ?? '01:00', 'alcohol_hora_fin'),
+            'alcohol_hora_fin_finde' => $this->hora($payload['alcohol_hora_fin_finde'] ?? '03:00', 'alcohol_hora_fin_finde'),
         ];
         $this->repository->upsertOperacionConfig($data);
         $current = $this->operacion($empresaId);
@@ -198,8 +203,16 @@ final class ConfiguracionService
             'exigir_cliente_en_factura', 'ia_documentos_habilitada',
             'documentos_tributarios_habilitados', 'modo_offline_habilitado',
             'notif_email_activo', 'notif_whatsapp_activo',
+            'control_edad_activo', 'control_horario_alcohol_activo',
         ] as $field) {
             $row[$field] = (bool) (int) ($row[$field] ?? 0);
+        }
+        foreach ([
+            'alcohol_hora_inicio' => '09:00:00',
+            'alcohol_hora_fin' => '01:00:00',
+            'alcohol_hora_fin_finde' => '03:00:00',
+        ] as $field => $default) {
+            $row[$field] = substr((string) ($row[$field] ?? $default), 0, 5);
         }
         $row['alerta_stock_bajo_default'] = number_format((float) $row['alerta_stock_bajo_default'], 3, '.', '');
         $row['alerta_folios_bajos_default'] = (int) $row['alerta_folios_bajos_default'];
@@ -242,6 +255,11 @@ final class ConfiguracionService
             'notif_email_activo' => 0,
             'notif_whatsapp_activo' => 0,
             'modo_offline_habilitado' => 0,
+            'control_edad_activo' => 1,
+            'control_horario_alcohol_activo' => 0,
+            'alcohol_hora_inicio' => '09:00:00',
+            'alcohol_hora_fin' => '01:00:00',
+            'alcohol_hora_fin_finde' => '03:00:00',
         ];
     }
 
@@ -327,6 +345,16 @@ final class ConfiguracionService
         }
 
         return $type;
+    }
+
+    private function hora(mixed $value, string $field): string
+    {
+        $text = trim((string) $value);
+        if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $text)) {
+            throw new HttpException('Error de validacion', 422, [$field => ["El campo {$field} debe tener formato HH:MM"]]);
+        }
+
+        return strlen($text) === 5 ? $text . ':00' : $text;
     }
 
     private function quantity(mixed $value): string

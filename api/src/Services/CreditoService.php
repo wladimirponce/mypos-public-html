@@ -181,6 +181,163 @@ final class CreditoService
         }
     }
 
+    /**
+     * Abono libre ("libreta de fiado"): el cliente abona un monto sin elegir
+     * documento; se distribuye FIFO entre sus créditos abiertos (los más
+     * antiguos primero). Cada aplicación crea un pago real en creditos_pagos
+     * para que reportes y cierres no cambien.
+     */
+    public function abonarLibre(int $userId, array $payload): array
+    {
+        $empresaId = $this->positiveInt($payload, 'empresa_id');
+        $clienteId = $this->positiveInt($payload, 'cliente_id');
+        $amount = $this->positiveMoney($payload['monto'] ?? 0, 'monto');
+        $methodId = $this->positiveInt($payload, 'metodo_pago_id');
+        $openingId = isset($payload['caja_apertura_id']) && $payload['caja_apertura_id'] !== ''
+            ? (int) $payload['caja_apertura_id']
+            : null;
+        $connection = $this->repository->connection();
+
+        try {
+            $connection->beginTransaction();
+
+            $client = $this->repository->detalleCliente($empresaId, $clienteId);
+            if ($client === null) {
+                throw new HttpException('Cliente no encontrado', 404);
+            }
+            if ($this->repository->metodoPagoActivo($methodId) === null) {
+                throw new HttpException('Metodo de pago no existe o esta inactivo', 422);
+            }
+
+            $credits = $this->repository->creditosPendientesClienteForUpdate($empresaId, $clienteId);
+            $totalDeuda = array_sum(array_map(static fn (array $c): int => (int) $c['saldo_pendiente'], $credits));
+            if ($totalDeuda <= 0) {
+                throw new HttpException('El cliente no tiene deuda pendiente', 422);
+            }
+            if ($amount > $totalDeuda) {
+                throw new HttpException(
+                    "El abono ({$amount}) supera la deuda pendiente del cliente ({$totalDeuda})",
+                    422,
+                    ['monto' => ['El abono no puede superar la deuda total']]
+                );
+            }
+
+            $sucursalId = (int) ($credits[0]['sucursal_id'] ?? 0);
+            if ($openingId !== null && $this->repository->cajaAbierta($empresaId, $sucursalId, $openingId) === null) {
+                // La caja del cajero puede ser de otra sucursal que la del crédito:
+                // validar solo que exista abierta en la empresa.
+                $statement = $connection->prepare(
+                    'SELECT sucursal_id FROM caja_aperturas
+                     WHERE id = :id AND empresa_id = :empresa_id AND estado = \'ABIERTA\' LIMIT 1'
+                );
+                $statement->execute(['id' => $openingId, 'empresa_id' => $empresaId]);
+                $opening = $statement->fetch();
+                if (!is_array($opening)) {
+                    throw new HttpException('Caja apertura no existe o no esta abierta', 422);
+                }
+                $sucursalId = (int) $opening['sucursal_id'];
+            }
+
+            $abonoId = $this->repository->insertarAbono([
+                'empresa_id' => $empresaId,
+                'sucursal_id' => $sucursalId > 0 ? $sucursalId : null,
+                'cliente_id' => $clienteId,
+                'usuario_id' => $userId,
+                'caja_apertura_id' => $openingId,
+                'metodo_pago_id' => $methodId,
+                'monto' => $amount,
+                'observacion' => $this->nullable($payload['observacion'] ?? null),
+            ]);
+
+            $restante = $amount;
+            $aplicaciones = [];
+            foreach ($credits as $credit) {
+                if ($restante <= 0) {
+                    break;
+                }
+                $saldo = (int) $credit['saldo_pendiente'];
+                $aplicar = min($saldo, $restante);
+
+                $pagoId = $this->repository->insertarPago([
+                    'empresa_id' => $empresaId,
+                    'sucursal_id' => (int) $credit['sucursal_id'],
+                    'credito_cliente_id' => (int) $credit['id'],
+                    'cliente_id' => $clienteId,
+                    'usuario_id' => $userId,
+                    'caja_apertura_id' => $openingId,
+                    'metodo_pago_id' => $methodId,
+                    'monto' => $aplicar,
+                    'observacion' => 'Abono libre #' . $abonoId,
+                ]);
+
+                $paid = (int) $credit['monto_pagado'] + $aplicar;
+                $balance = (int) $credit['monto_original'] - $paid;
+                $state = $balance === 0 ? 'PAGADO' : 'PARCIAL';
+                $this->repository->actualizarSaldo((int) $credit['id'], $paid, $balance, $state);
+
+                $this->repository->insertarAbonoAplicacion([
+                    'empresa_id' => $empresaId,
+                    'abono_id' => $abonoId,
+                    'credito_cliente_id' => (int) $credit['id'],
+                    'pago_id' => $pagoId,
+                    'monto' => $aplicar,
+                ]);
+
+                $aplicaciones[] = [
+                    'credito_cliente_id' => (int) $credit['id'],
+                    'venta_id' => (int) $credit['venta_id'],
+                    'monto_aplicado' => $aplicar,
+                    'saldo_restante' => $balance,
+                    'estado' => $state,
+                ];
+                $restante -= $aplicar;
+            }
+
+            AuditoriaService::registrarEvento([
+                'empresa_id' => $empresaId,
+                'sucursal_id' => $sucursalId > 0 ? $sucursalId : null,
+                'usuario_id' => $userId,
+                'modulo' => 'creditos',
+                'accion' => 'abono_libre',
+                'entidad' => 'credito_abonos',
+                'entidad_id' => $abonoId,
+                'descripcion' => 'Abono libre distribuido FIFO',
+                'datos_nuevos' => [
+                    'cliente_id' => $clienteId,
+                    'monto' => $amount,
+                    'documentos_afectados' => count($aplicaciones),
+                    'deuda_restante' => $totalDeuda - $amount,
+                ],
+            ], $connection);
+
+            $connection->commit();
+
+            return [
+                'abono_id' => $abonoId,
+                'cliente_id' => $clienteId,
+                'monto' => $amount,
+                'deuda_anterior' => $totalDeuda,
+                'deuda_restante' => $totalDeuda - $amount,
+                'aplicaciones' => $aplicaciones,
+            ];
+        } catch (Throwable $exception) {
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    /** Reporte de antigüedad de deuda por cliente (0-30 / 31-60 / 61+ días). */
+    public function antiguedad(int $empresaId): array
+    {
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        return ['clientes' => $this->repository->antiguedadDeuda($empresaId)];
+    }
+
     public function anularPendientePorVenta(int $empresaId, int $ventaId): void
     {
         $this->repository->marcarAnuladoPorVenta($empresaId, $ventaId);

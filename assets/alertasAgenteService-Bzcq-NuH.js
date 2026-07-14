@@ -1,0 +1,1 @@
+import{ac as a,am as t}from"./index-BMkj2LB4.js";const s={get(e){return a.get(t.agenteAlertas.config,{params:{empresa_id:e}})},update(e,r){return a.put(t.agenteAlertas.config,{empresa_id:e,...r})}};export{s as a};

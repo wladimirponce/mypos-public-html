@@ -196,6 +196,79 @@ final class CreditoRepository
         $statement->execute(['id' => $creditId, 'monto_pagado' => $paid, 'saldo_pendiente' => $balance, 'estado' => $state]);
     }
 
+    /** Créditos abiertos del cliente, más antiguos primero (FIFO), bloqueados para abono. */
+    public function creditosPendientesClienteForUpdate(int $empresaId, int $clienteId): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT id, sucursal_id, cliente_id, venta_id, monto_original, monto_pagado,
+                    saldo_pendiente, estado, fecha_credito
+             FROM creditos_clientes
+             WHERE empresa_id = :empresa_id
+               AND cliente_id = :cliente_id
+               AND estado IN (\'PENDIENTE\', \'PARCIAL\')
+             ORDER BY fecha_credito ASC, id ASC
+             FOR UPDATE'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'cliente_id' => $clienteId]);
+
+        return $statement->fetchAll();
+    }
+
+    public function insertarAbono(array $data): int
+    {
+        $statement = $this->connection->prepare(
+            'INSERT INTO credito_abonos (
+                empresa_id, sucursal_id, cliente_id, usuario_id, caja_apertura_id,
+                metodo_pago_id, monto, observacion
+             ) VALUES (
+                :empresa_id, :sucursal_id, :cliente_id, :usuario_id, :caja_apertura_id,
+                :metodo_pago_id, :monto, :observacion
+             )'
+        );
+        $statement->execute($data);
+
+        return (int) $this->connection->lastInsertId();
+    }
+
+    public function insertarAbonoAplicacion(array $data): void
+    {
+        $statement = $this->connection->prepare(
+            'INSERT INTO credito_abono_aplicaciones (
+                empresa_id, abono_id, credito_cliente_id, pago_id, monto
+             ) VALUES (
+                :empresa_id, :abono_id, :credito_cliente_id, :pago_id, :monto
+             )'
+        );
+        $statement->execute($data);
+    }
+
+    /** Deuda vigente por cliente en tramos de antigüedad (0-30 / 31-60 / 61+ días). */
+    public function antiguedadDeuda(int $empresaId): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT cc.cliente_id, c.nombre AS cliente_nombre, c.rut AS cliente_rut,
+                    c.limite_credito,
+                    COALESCE(SUM(cc.saldo_pendiente), 0) AS deuda_total,
+                    COALESCE(SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(cc.fecha_credito)) <= 30
+                        THEN cc.saldo_pendiente ELSE 0 END), 0) AS tramo_0_30,
+                    COALESCE(SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(cc.fecha_credito)) BETWEEN 31 AND 60
+                        THEN cc.saldo_pendiente ELSE 0 END), 0) AS tramo_31_60,
+                    COALESCE(SUM(CASE WHEN DATEDIFF(CURDATE(), DATE(cc.fecha_credito)) > 60
+                        THEN cc.saldo_pendiente ELSE 0 END), 0) AS tramo_61_mas,
+                    MIN(DATE(cc.fecha_credito)) AS credito_mas_antiguo
+             FROM creditos_clientes cc
+             INNER JOIN clientes c ON c.id = cc.cliente_id
+             WHERE cc.empresa_id = :empresa_id
+               AND cc.estado IN (\'PENDIENTE\', \'PARCIAL\')
+             GROUP BY cc.cliente_id, c.nombre, c.rut, c.limite_credito
+             ORDER BY deuda_total DESC
+             LIMIT 500'
+        );
+        $statement->execute(['empresa_id' => $empresaId]);
+
+        return $statement->fetchAll();
+    }
+
     public function marcarAnuladoPorVenta(int $empresaId, int $ventaId): void
     {
         $statement = $this->connection->prepare(

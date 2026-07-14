@@ -36,6 +36,18 @@ final class CreditoController
         $this->respond(fn (int $userId): array => $this->service->pagar($userId, (int) $params['id'], Request::json()), 'Pago de credito registrado correctamente');
     }
 
+    /** POST /api/v1/creditos/abonos — abono libre distribuido FIFO entre los créditos del cliente. */
+    public function abonoLibre(): void
+    {
+        $this->respond(fn (int $userId): array => $this->service->abonarLibre($userId, Request::json()), 'Abono registrado y distribuido correctamente');
+    }
+
+    /** GET /api/v1/creditos/antiguedad — deuda por cliente en tramos de antigüedad. */
+    public function antiguedad(): void
+    {
+        $this->respond(fn (): array => $this->service->antiguedad((int) ($_GET['empresa_id'] ?? 0)));
+    }
+
     private function respond(callable $callback, ?string $message = null): void
     {
         try {

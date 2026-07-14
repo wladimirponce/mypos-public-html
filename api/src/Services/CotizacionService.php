@@ -84,6 +84,61 @@ final class CotizacionService
         }
     }
 
+    /**
+     * Duplica una cotización como nuevo BORRADOR: mismos ítems, cliente y
+     * condiciones, con fecha de emisión de hoy y la vigencia original.
+     * Útil para re-cotizar una vencida o rechazada sin digitar de nuevo.
+     */
+    public function duplicar(int $userId, int $id, int $empresaId): array
+    {
+        if ($empresaId <= 0 || $id <= 0) {
+            throw new HttpException('Parámetros inválidos', 422);
+        }
+
+        $original = $this->repository->find($empresaId, $id);
+        if ($original === null) {
+            throw new HttpException('Cotización no encontrada', 404);
+        }
+
+        $items = array_map(static fn (array $item): array => [
+            'producto_id' => $item['producto_id'] ?? null,
+            'codigo' => $item['codigo'] ?? null,
+            'nombre' => (string) ($item['nombre'] ?? ''),
+            'cantidad' => (float) ($item['cantidad'] ?? 1),
+            'precio_unitario' => (int) ($item['precio_unitario'] ?? 0),
+            'descuento_porcentaje' => (float) ($item['descuento_porcentaje'] ?? 0),
+            'observacion' => $item['observacion'] ?? null,
+        ], $this->repository->items($id));
+
+        if ($items === []) {
+            throw new HttpException('La cotización original no tiene ítems', 422);
+        }
+
+        $nueva = $this->crear($userId, [
+            'empresa_id' => $empresaId,
+            'sucursal_id' => (int) $original['sucursal_id'],
+            'cliente_id' => $original['cliente_id'] ?? null,
+            'validez_dias' => (int) ($original['validez_dias'] ?? 30),
+            'moneda' => $original['moneda'] ?? 'CLP',
+            'observacion' => $original['observacion'] ?? null,
+            'condiciones' => $original['condiciones'] ?? null,
+            'items' => $items,
+        ]);
+
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'usuario_id' => $userId,
+            'modulo' => 'cotizaciones',
+            'accion' => 'duplicar',
+            'entidad' => 'cotizaciones',
+            'entidad_id' => (int) $nueva['cotizacion_id'],
+            'descripcion' => 'Cotización duplicada',
+            'metadata' => ['cotizacion_origen_id' => $id],
+        ]);
+
+        return $nueva + ['cotizacion_origen_id' => $id];
+    }
+
     public function listar(int $empresaId, array $filters): array
     {
         if ($empresaId <= 0) {

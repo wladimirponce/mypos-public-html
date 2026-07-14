@@ -12,6 +12,7 @@ use Mypos\Repositories\LoteRepository;
 use Mypos\Repositories\ProductoRepository;
 use Mypos\Repositories\ProveedorRepository;
 use Mypos\Repositories\StockRepository;
+use Mypos\Support\PrecioCalculator;
 use Throwable;
 
 final class CompraService
@@ -324,9 +325,17 @@ final class CompraService
                 continue;
             }
 
-            // Si el item trae numero_lote, registrar via LoteService (que internamente
-            // llama a StockService y actualiza tambien stock_lotes_ubicacion).
-            if (($item['numero_lote'] ?? null) !== null) {
+            // Si el item trae numero_lote O fecha de vencimiento, registrar via
+            // LoteService (que internamente llama a StockService y actualiza
+            // stock_lotes_ubicacion). Cuando el OCR detecta vencimiento pero no
+            // hay número de lote impreso, se sintetiza un lote por fecha
+            // ("VTO-AAAA-MM-DD") para no perder la trazabilidad de vencimiento.
+            $numeroLote = $item['numero_lote'] ?? null;
+            $fechaVenc  = $item['fecha_vencimiento'] ?? null;
+            if ($numeroLote === null && $fechaVenc !== null) {
+                $numeroLote = 'VTO-' . $fechaVenc;
+            }
+            if ($numeroLote !== null) {
                 $loteService = new LoteService(
                     new \Mypos\Repositories\LoteRepository($connection)
                 );
@@ -334,8 +343,8 @@ final class CompraService
                     'empresa_id'        => $empresaId,
                     'sucursal_id'       => $sucursalId,
                     'producto_id'       => (int) $item['producto_id'],
-                    'numero_lote'       => $item['numero_lote'],
-                    'fecha_vencimiento' => $item['fecha_vencimiento'] ?? null,
+                    'numero_lote'       => $numeroLote,
+                    'fecha_vencimiento' => $fechaVenc,
                     'fecha_fabricacion' => $item['fecha_fabricacion'] ?? null,
                     'cantidad'          => $item['cantidad'],
                     'costo_unitario'    => (int) $item['costo_unitario'],
@@ -434,14 +443,16 @@ final class CompraService
             }
 
             $margen = (float) $producto['margen_ganancia'];
+            $tipoMargen = PrecioCalculator::normalizarTipo($producto['tipo_margen'] ?? null);
             $propuestas[] = [
                 'producto_id'         => $productoId,
                 'nombre'              => $producto['nombre'],
                 'margen_ganancia'     => $margen,
+                'tipo_margen'         => $tipoMargen,
                 'costo_anterior'      => $costoAnterior,
                 'costo_nuevo'         => $costoNuevo,
                 'precio_venta_actual' => (int) $producto['precio_venta'],
-                'precio_venta_sugerido' => (int) round($costoNuevo * (1 + $margen / 100)),
+                'precio_venta_sugerido' => PrecioCalculator::sugerido($costoNuevo, $margen, $tipoMargen),
             ];
         }
 
@@ -479,6 +490,9 @@ final class CompraService
             'iva' => $item['iva'],
             'impuesto_total' => $item['iva'],
             'total' => $item['total'],
+            'numero_lote' => $item['numero_lote'] ?? null,
+            'fecha_vencimiento' => $item['fecha_vencimiento'] ?? null,
+            'fecha_fabricacion' => $item['fecha_fabricacion'] ?? null,
         ];
     }
 

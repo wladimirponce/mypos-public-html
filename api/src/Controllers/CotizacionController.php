@@ -96,6 +96,13 @@ final class CotizacionController
         }, 'Cotización rechazada');
     }
 
+    public function duplicar(array $params): void
+    {
+        $this->respond(function (int $userId) use ($params): array {
+            return $this->service->duplicar($userId, (int) $params['id'], $this->getEmpresaId());
+        }, 'Cotización duplicada como borrador');
+    }
+
     public function convertir(array $params): void
     {
         $this->respond(function (int $userId) use ($params): array {

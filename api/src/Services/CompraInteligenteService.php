@@ -223,6 +223,23 @@ final class CompraInteligenteService
             $row['dias_cobertura_sugerida'] = null;
         }
 
+        // --- Punto de reorden sugerido (P6): consumo × (lead time + seguridad) ---
+        // Usa el plazo de entrega del proveedor sugerido; si no hay dato, asume 3
+        // días. El colchón de seguridad cubre variabilidad de demanda/entrega.
+        $leadTime = isset($row['plazo_entrega_dias']) && (int) $row['plazo_entrega_dias'] > 0
+            ? (int) $row['plazo_entrega_dias']
+            : 3;
+        $diasSeguridad = max(2, (int) ceil($leadTime * 0.5));
+        $row['lead_time_dias']         = $leadTime;
+        $row['dias_inventario_optimo'] = $leadTime + $diasSeguridad;
+        $row['punto_reorden_sugerido'] = $consumoDiario > 0
+            ? (int) ceil($consumoDiario * ($leadTime + $diasSeguridad))
+            : null;
+        // Quiebre inminente: el stock actual se agota antes de que llegue la
+        // reposición (cobertura actual <= plazo de entrega).
+        $row['quiebre_inminente'] = $consumoDiario > 0
+            && ($row['cantidad_actual'] / $consumoDiario) <= $leadTime;
+
         // --- Traslados posibles ---
         $necesidad = (float) $row['deficit'];
         $traslados = $necesidad > 0

@@ -30,7 +30,7 @@ final class VentaRepository
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.codigo, p.sku, p.nombre, p.descripcion, p.precio_venta,
                     p.precio_costo, p.costo_actual, p.controla_stock,
-                    p.es_producto_peso, p.precio_por_kg, p.requiere_lote
+                    p.es_producto_peso, p.precio_por_kg, p.requiere_lote, p.venta_restringida
              FROM productos p
              WHERE p.id = :id AND p.empresa_id = :empresa_id AND p.activo = 1
              LIMIT 1'
@@ -57,7 +57,7 @@ final class VentaRepository
         $statement = $this->connection->prepare(
             'SELECT p.id, p.empresa_id, p.codigo, p.sku, p.nombre, p.precio_venta,
                     p.precio_costo, p.costo_actual, p.controla_stock,
-                    p.es_producto_peso, p.precio_por_kg, p.requiere_lote,
+                    p.es_producto_peso, p.precio_por_kg, p.requiere_lote, p.venta_restringida,
                     pcb.codigo_barra AS codigo_barra_usado
              FROM productos p
              LEFT JOIN productos_codigos_barra pcb ON pcb.producto_id = p.id
@@ -213,17 +213,18 @@ final class VentaRepository
         $data['sync_estado'] = $data['sync_estado'] ?? 'SYNC_OK';
         $data['created_offline_at'] = $data['created_offline_at'] ?? null;
         $data['sync_status'] = $data['origen'] === 'OFFLINE' ? 'SYNCED' : 'SYNCED';
+        $data['edad_verificada'] = (int) ($data['edad_verificada'] ?? 0);
 
         $statement = $this->connection->prepare(
             'INSERT INTO ventas (
                 empresa_id, sucursal_id, caja_id, apertura_id, caja_apertura_id, usuario_id, cliente_id,
                 uuid, uuid_offline, dispositivo_id, sync_evento_id, origen, sync_estado, created_offline_at, sync_status,
-                tipo_venta, condicion_pago, subtotal, descuento_total, impuesto_total, total,
+                tipo_venta, condicion_pago, edad_verificada, subtotal, descuento_total, impuesto_total, total,
                 margen_total, comision_total
              ) VALUES (
                 :empresa_id, :sucursal_id, :caja_id, :apertura_id, :caja_apertura_id, :usuario_id, :cliente_id,
                 :uuid, :uuid_offline, :dispositivo_id, :sync_evento_id, :origen, :sync_estado, :created_offline_at, :sync_status,
-                :tipo_venta, :condicion_pago, :subtotal, :descuento_total, :impuesto_total, :total,
+                :tipo_venta, :condicion_pago, :edad_verificada, :subtotal, :descuento_total, :impuesto_total, :total,
                 :margen_total, :comision_total
              )'
         );

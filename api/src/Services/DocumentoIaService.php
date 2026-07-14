@@ -451,6 +451,10 @@ final class DocumentoIaService
                 'neto' => $net,
                 'iva' => 0,
                 'total' => $net,
+                // Lote/vencimiento detectados por el OCR: viajan a la compra para
+                // que al confirmarla se cree el lote con su fecha de vencimiento.
+                'numero_lote' => $this->nullableString($detail['numero_lote_detectado'] ?? null),
+                'fecha_vencimiento' => $this->dateOrNull($detail['fecha_vencimiento_detectada'] ?? null),
             ];
         }
 
@@ -590,6 +594,8 @@ final class DocumentoIaService
             'metodo_match' => $productId !== null ? 'CODIGO' : 'SIN_MATCH',
             'requiere_revision' => $confirmed === 1 ? 0 : 1,
             'confirmado' => $confirmed,
+            'numero_lote_detectado' => $this->nullableString($item['numero_lote_detectado'] ?? null),
+            'fecha_vencimiento_detectada' => $this->dateOrNull($item['fecha_vencimiento_detectada'] ?? null),
         ];
     }
 

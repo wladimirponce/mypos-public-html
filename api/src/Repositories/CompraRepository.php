@@ -72,10 +72,12 @@ final class CompraRepository
         $statement = $this->connection->prepare(
             'INSERT INTO compra_detalles (
                 empresa_id, compra_id, producto_id, linea, codigo_producto, codigo_barra_usado,
-                nombre_producto, cantidad, costo_unitario, neto, iva, impuesto_total, total
+                nombre_producto, cantidad, costo_unitario, neto, iva, impuesto_total, total,
+                numero_lote, fecha_vencimiento, fecha_fabricacion
              ) VALUES (
                 :empresa_id, :compra_id, :producto_id, :linea, :codigo_producto, :codigo_barra_usado,
-                :nombre_producto, :cantidad, :costo_unitario, :neto, :iva, :impuesto_total, :total
+                :nombre_producto, :cantidad, :costo_unitario, :neto, :iva, :impuesto_total, :total,
+                :numero_lote, :fecha_vencimiento, :fecha_fabricacion
              )'
         );
         $statement->execute($data);
@@ -125,7 +127,8 @@ final class CompraRepository
         $statement = $this->connection->prepare(
             'SELECT id, empresa_id, compra_id, producto_id, linea, codigo_producto,
                     codigo_barra_usado, nombre_producto, cantidad, costo_unitario,
-                    neto, iva, impuesto_total, total
+                    neto, iva, impuesto_total, total,
+                    numero_lote, fecha_vencimiento, fecha_fabricacion
              FROM compra_detalles
              WHERE empresa_id = :empresa_id AND compra_id = :compra_id
              ORDER BY linea'

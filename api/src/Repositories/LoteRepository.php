@@ -168,6 +168,7 @@ final class LoteRepository
         $stmt = $this->connection->prepare(
             'SELECT sl.id AS lote_id, sl.numero_lote, sl.fecha_vencimiento,
                     sl.producto_id, p.codigo AS producto_codigo, p.nombre AS producto_nombre,
+                    p.precio_venta,
                     COALESCE(SUM(lu.cantidad), 0.000) AS stock_total,
                     DATEDIFF(sl.fecha_vencimiento, CURDATE()) AS dias_para_vencer
              FROM stock_lotes sl

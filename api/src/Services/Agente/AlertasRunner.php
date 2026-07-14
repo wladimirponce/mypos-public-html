@@ -27,7 +27,10 @@ final class AlertasRunner
         'caja_abierta'     => ['intervalo_min' => 55,   'ventanas' => null],
         'folios_bajos'     => ['intervalo_min' => 350,  'ventanas' => null],
         'stock_critico'    => ['intervalo_min' => 350,  'ventanas' => [[8, 21]]],
+        'lotes_por_vencer' => ['intervalo_min' => 1300, 'ventanas' => [[8, 12]]],
+        'transferencias_sugeridas' => ['intervalo_min' => 1300, 'ventanas' => [[8, 12]]],
         'precio_perdida'   => ['intervalo_min' => 1300, 'ventanas' => [[8, 12]]],
+        'margen_comprometido' => ['intervalo_min' => 1300, 'ventanas' => [[8, 12]]],
         'cierre_pendiente' => ['intervalo_min' => 230,  'ventanas' => [[8, 10], [22, 24]]],
         'ventas_caida'     => ['intervalo_min' => 230,  'ventanas' => [[14, 16], [19, 21]]],
         'suscripcion'      => ['intervalo_min' => 1300, 'ventanas' => [[9, 13]]],
@@ -149,7 +152,10 @@ final class AlertasRunner
     {
         return match ($tipo) {
             'precio_perdida' => $this->chequeos->precioPerdida($empresaId, $params),
+            'margen_comprometido' => $this->chequeos->margenComprometido($empresaId, $params),
             'stock_critico' => $this->chequeos->stockCritico($empresaId, $params),
+            'lotes_por_vencer' => $this->chequeos->lotesPorVencer($empresaId, $params),
+            'transferencias_sugeridas' => $this->chequeos->transferenciasSugeridas($empresaId, $params),
             // De noche revisa el dia en curso; en la manana refuerza con ayer.
             'cierre_pendiente' => $this->chequeos->cierrePendiente(
                 $empresaId,

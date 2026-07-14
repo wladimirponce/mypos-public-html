@@ -74,6 +74,8 @@ final class VentaService
         }
 
         $preparedItems = $this->prepareItems($empresaId, $items);
+        // Venta restringida (alcohol/tabaco): horario legal + confirmación de cédula.
+        $edadVerificada = (new VentaRestringidaService())->validar($config, $preparedItems, $payload);
         $preparedPayments = is_array($payments) && $payments !== [] ? $this->preparePayments($payments) : [];
         $totals = $this->sumTotals($preparedItems);
         $paymentTotal = array_sum(array_column($preparedPayments, 'monto'));
@@ -119,6 +121,7 @@ final class VentaService
                 'cliente_id' => $clientId,
                 'tipo_venta' => $tipoVenta,
                 'condicion_pago' => $paymentCondition,
+                'edad_verificada' => $edadVerificada ? 1 : 0,
                 'subtotal' => $totals['subtotal'],
                 'descuento_total' => $totals['descuento_total'],
                 'impuesto_total' => $totals['impuesto_total'],
@@ -191,7 +194,30 @@ final class VentaService
                 }
             }
 
+            $valeService = new ValeCreditoService();
             foreach ($preparedPayments as $payment) {
+                // Pago con VALE: la referencia es el código del vale; el canje
+                // descuenta saldo dentro de esta misma transacción (FOR UPDATE).
+                if ($payment['metodo_pago_codigo'] === 'VALE') {
+                    $valeCodigo = trim((string) ($payment['referencia'] ?? ''));
+                    if ($valeCodigo === '') {
+                        throw new HttpException('El pago con vale requiere el codigo del vale en referencia', 422);
+                    }
+                    $valeService->canjearEnVenta($connection, $userId, $empresaId, $valeCodigo, (int) $payment['monto'], $saleId);
+                }
+
+                // Pago con MercadoPago Point: la referencia es el external_reference del
+                // intento ya APROBADO en la terminal. Se valida (monto, estado, no
+                // reutilizado) y se marca consumido dentro de esta misma transacción.
+                if ($payment['metodo_pago_codigo'] === 'MP_POINT') {
+                    $mpReferencia = trim((string) ($payment['referencia'] ?? ''));
+                    if ($mpReferencia === '') {
+                        throw new HttpException('El pago MercadoPago requiere la referencia del cobro (external_reference)', 422);
+                    }
+                    (new MercadoPagoService())
+                        ->confirmarPagoParaVenta($connection, $empresaId, $mpReferencia, (int) $payment['monto'], $saleId);
+                }
+
                 $this->repository->insertPayment([
                     'empresa_id' => $empresaId,
                     'venta_id' => $saleId,
@@ -252,6 +278,7 @@ final class VentaService
                     'venta_id' => $saleId,
                     'tipo_venta' => $tipoVenta,
                     'condicion_pago' => $paymentCondition,
+                    'edad_verificada' => $edadVerificada,
                     'cliente_id' => $clientId,
                     'caja_apertura_id' => $cashOpening['id'] ?? null,
                     'credito_cliente_id' => $creditId,
@@ -470,6 +497,7 @@ final class VentaService
                 'comision_vendedor' => $commission,
                 'impuestos_detalle' => $taxes['detalle'],
                 'controla_stock' => (int) $product['controla_stock'],
+                'venta_restringida' => strtoupper((string) ($product['venta_restringida'] ?? 'NINGUNA')),
                 'lote_id' => isset($item['lote_id']) && (int) $item['lote_id'] > 0
                     ? (int) $item['lote_id'] : null,
             ];

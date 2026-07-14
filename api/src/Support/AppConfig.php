@@ -21,6 +21,27 @@ final class AppConfig
         return (string) Env::get('APP_URL', 'http://localhost:8082');
     }
 
+    /**
+     * Correos del/los dueños de plataforma (operadores de MyPOS) autorizados a
+     * gestionar links de precio especial. Configurable por env
+     * PLATFORM_OWNER_EMAILS (separados por coma). Sin él, nadie puede crearlos.
+     *
+     * @return list<string> en minúsculas
+     */
+    public static function platformOwnerEmails(): array
+    {
+        $emails = Env::array('PLATFORM_OWNER_EMAILS', ['wladimirponce@gmail.com']);
+        return array_values(array_filter(array_map(
+            static fn ($e) => strtolower(trim((string) $e)),
+            $emails
+        )));
+    }
+
+    public static function isPlatformOwnerEmail(string $email): bool
+    {
+        return in_array(strtolower(trim($email)), self::platformOwnerEmails(), true);
+    }
+
     public static function apiBaseUrl(): string
     {
         return (string) Env::get('API_BASE_URL', self::appUrl());

@@ -76,7 +76,16 @@ class SuscripcionService
         
         $baseMonto = $gateway === 'flow' ? $plan['price_clp'] : $plan['price_usd'];
         $moneda = $gateway === 'flow' ? 'CLP' : 'USD';
-        
+
+        // Precio especial recurrente (link de promoción): reemplaza el precio de
+        // catálogo del plan de forma indefinida. Definido en CLP, aplica a Flow.
+        if ($gateway === 'flow') {
+            $sub = $this->repository->getSubscriptionStatus($empresaId);
+            if ($sub !== null && !empty($sub['precio_especial_clp'])) {
+                $baseMonto = (int) $sub['precio_especial_clp'];
+            }
+        }
+
         $montoExtraUsers = 0;
         if ($planId === 'mypos-escala' && $extraUsers > 0) {
             $montoExtraUsers = $gateway === 'flow' ? ($extraUsers * 5938) : ($extraUsers * 6.25);

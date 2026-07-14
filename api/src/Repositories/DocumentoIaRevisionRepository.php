@@ -50,7 +50,8 @@ final class DocumentoIaRevisionRepository
                     dd.cantidad_detectada, dd.costo_unitario_detectado, dd.total_detectado,
                     dd.cantidad_normalizada, dd.costo_unitario_normalizado, dd.total_normalizado,
                     dd.cantidad, dd.costo_unitario, dd.total, dd.confianza, dd.metodo_match,
-                    dd.requiere_revision, dd.alertas_json, dd.confirmado
+                    dd.requiere_revision, dd.alertas_json, dd.confirmado,
+                    dd.numero_lote_detectado, dd.fecha_vencimiento_detectada
              FROM documentos_ia_detalles dd
              LEFT JOIN productos pr ON pr.id = dd.producto_id AND pr.empresa_id = dd.empresa_id
              WHERE dd.empresa_id = :empresa_id AND dd.documento_ia_id = :documento_ia_id
@@ -130,17 +131,19 @@ final class DocumentoIaRevisionRepository
                 nombre_detectado, cantidad_detectada, costo_unitario_detectado, total_detectado,
                 cantidad_normalizada, costo_unitario_normalizado, total_normalizado,
                 cantidad, costo_unitario, total, confianza, metodo_match, requiere_revision,
-                alertas_json, confirmado
+                alertas_json, confirmado, numero_lote_detectado, fecha_vencimiento_detectada
              ) VALUES (
                 :empresa_id, :documento_ia_id, :producto_id, :linea, :codigo_detectado, :codigo_barra_detectado,
                 :nombre_detectado, :cantidad_detectada, :costo_unitario_detectado, :total_detectado,
                 :cantidad_normalizada, :costo_unitario_normalizado, :total_normalizado,
                 :cantidad, :costo_unitario, :total, :confianza, :metodo_match, :requiere_revision,
-                :alertas_json, :confirmado
+                :alertas_json, :confirmado, :numero_lote_detectado, :fecha_vencimiento_detectada
              )'
         );
 
         foreach ($details as $detail) {
+            $detail['numero_lote_detectado'] = $detail['numero_lote_detectado'] ?? null;
+            $detail['fecha_vencimiento_detectada'] = $detail['fecha_vencimiento_detectada'] ?? null;
             $insert->execute($detail);
         }
     }
