@@ -18,6 +18,10 @@ date_default_timezone_set('America/Santiago');
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
+require_once __DIR__ . '/autoload.php';
+use App\Core\Database;
+use App\Services\AdminSecurity;
+
 if (file_exists(__DIR__ . '/openssl_legacy.cnf')) {
     putenv('OPENSSL_CONF=' . __DIR__ . '/openssl_legacy.cnf');
 }
@@ -31,17 +35,15 @@ if (empty($_SESSION['admin_id'])) {
 }
 $adminNombre = $_SESSION['admin_nombre'] ?? 'Admin';
 $adminRol    = $_SESSION['admin_rol']    ?? 'operador';
+AdminSecurity::validatePostCsrf();
 // —————————————————————————————————————————————————————————————————————————————
-
-require_once __DIR__ . '/autoload.php';
-use App\Core\Database;
 
 ob_start();
 
 // —— Lógica de Cambio de Empresa ——
 // (Ya no existe la opción "0/Legacy": solo se cambia entre empresas reales)
-if (isset($_GET['switch_empresa'])) {
-    $newId = (int)$_GET['switch_empresa'];
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['admin_action'] ?? '') === 'switch_empresa') {
+    $newId = (int)($_POST['switch_empresa'] ?? 0);
     if ($newId > 0) {
         try {
             $dbSwitch = Database::getInstance();
@@ -61,14 +63,17 @@ if (isset($_GET['switch_empresa'])) {
         }
     }
     // Redirigir para limpiar URL
-    header("Location: dashboard.php?module=" . ($_GET['module'] ?? 'empresas'));
+    $targetModule = (string) ($_POST['target_module'] ?? 'empresas');
+    header("Location: dashboard.php?module=" . rawurlencode($targetModule));
     exit;
 }
 
 // —— Módulo activo ——
-$module = $_GET['module'] ?? 'empresas';
+$defaultModule = $adminRol === 'superadmin' ? 'empresas' : 'emision';
+$module = $_GET['module'] ?? $defaultModule;
 $allowed = ['clientes_mypos','emision','consultas','historial','libros','rcof_auditoria','agente_consultas','empresas','config','certificacion','cafs','pos_urgencia','dispositivos','whatsapp','ventas_reset','promos',];
-if (!in_array($module, $allowed)) $module = 'empresas';
+if (!in_array($module, $allowed)) $module = $defaultModule;
+AdminSecurity::requireModuleAccess($module);
 
 // —— Intentar conexión DB (opcional, no bloquea) ——
 $dbOk = false;
@@ -76,6 +81,7 @@ $empresas = [];
 try {
     $db = Database::getInstance();
     $dbOk = true;
+    AdminSecurity::guard($db);
 
     $empresas = $db->query("SELECT e.id, e.rut, e.razon_social, COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default, e.activo FROM empresas e LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id WHERE e.activo = 1 ORDER BY e.razon_social")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -86,6 +92,8 @@ try {
         unset($_SESSION['active_empresa_id']);
     }
 } catch (Exception $e) {
+    http_response_code(503);
+    exit('Panel temporalmente no disponible: no fue posible revalidar la sesion.');
     // DB no disponible — modo degradado de SOLO LECTURA sobre constantes.
     // El selector NUNCA muestra "Legacy"; muestra la última empresa conocida.
 }
@@ -187,7 +195,11 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <div style="padding: 10px 20px;">
             <label style="font-size: 0.62rem; color: var(--c-sidebar-text); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; display: block; margin-bottom: 6px; opacity: 0.6;">Cambiar Empresa</label>
             <?php if ($dbOk && !empty($empresas)): ?>
-            <select class="empresa-selector" onchange="if(this.value){location.href='dashboard.php?module=<?= $module ?>&switch_empresa=' + this.value}">
+            <form method="POST" action="dashboard.php?module=<?= htmlspecialchars($module) ?>" id="empresa-switch-form">
+            <input type="hidden" name="admin_csrf_token" value="<?= htmlspecialchars(AdminSecurity::csrfToken(), ENT_QUOTES, 'UTF-8') ?>">
+            <input type="hidden" name="admin_action" value="switch_empresa">
+            <input type="hidden" name="target_module" value="<?= htmlspecialchars($module, ENT_QUOTES, 'UTF-8') ?>">
+            <select name="switch_empresa" class="empresa-selector" onchange="if(this.value){this.form.submit()}">
                 <option value="" <?= empty($_SESSION['active_empresa_id']) ? 'selected' : '' ?>>Seleccione una empresa</option>
                 <?php foreach ($empresas as $emp): ?>
                     <option value="<?= $emp['id'] ?>" <?= (isset($_SESSION['active_empresa_id']) && $_SESSION['active_empresa_id'] == $emp['id']) ? 'selected' : '' ?>>
@@ -195,6 +207,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
                     </option>
                 <?php endforeach; ?>
             </select>
+            </form>
             <?php else: ?>
             <select class="empresa-selector" disabled>
                 <option selected>Sin empresas registradas</option>
@@ -366,6 +379,28 @@ $pageSubtitle = $titles[$module][1] ?? '';
 <script src="https://cdn.jsdelivr.net/npm/bwip-js"></script>
 <script src="jscript.js?v=<?= filemtime(__DIR__ . '/jscript.js') ?>"></script>
 <script>
+const adminCsrfToken = <?= json_encode(AdminSecurity::csrfToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+document.querySelectorAll('form').forEach(form => {
+    if ((form.method || '').toLowerCase() !== 'post' || form.querySelector('input[name="admin_csrf_token"]')) return;
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'admin_csrf_token';
+    input.value = adminCsrfToken;
+    form.appendChild(input);
+});
+
+function switchAdminEmpresa(empresaId, targetModule) {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = 'dashboard.php?module=' + encodeURIComponent(targetModule);
+    const values = {admin_csrf_token: adminCsrfToken, admin_action: 'switch_empresa', switch_empresa: empresaId, target_module: targetModule};
+    Object.entries(values).forEach(([name, value]) => {
+        const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = String(value); form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
+}
+
 // Cerrar sidebar en móvil al hacer clic fuera
 document.addEventListener('click', e => {
     const sb = document.getElementById('sidebar');

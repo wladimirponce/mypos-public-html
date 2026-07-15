@@ -132,6 +132,8 @@ Las empresas con historial operativo no se eliminan físicamente desde el dashbo
 
 El listado oculta las empresas inactivas por defecto y permite mostrarlas temporalmente con el botón **Ver inactivas**.
 
+El tablero **Clientes MyPOS** aplica el mismo filtro: solo muestra clientes activos por defecto y permite consultar los inactivos de forma opcional.
+
 En `Clientes MyPOS`, la columna **Monto mensual** edita el valor recurrente real guardado en `empresas_suscripcion.precio_especial_clp`. Los próximos cobros Flow usan ese monto en lugar del precio de catálogo del plan.
 
 El módulo `modules/saas.php` permite administrar la suscripción y las funcionalidades habilitadas por empresa. Usa `SaaSRepository` para gestionar:
@@ -166,6 +168,10 @@ El módulo `modules/saas.php` permite administrar la suscripción y las funciona
 | `backup_cron.php`  | diario     | Backup de la base de datos                   |
 
 ---
+
+## Seguridad del panel
+
+El panel centraliza sesión, CSRF, RBAC y política de contraseñas en `App\Services\AdminSecurity`. Las sesiones expiran, revalidan cuenta/rol contra BD y fallan cerradas si esa validación no es posible. Todo cambio de estado usa POST con token CSRF. Ver `docs/08-seguridad-panel.md`.
 
 ## Reglas para agentes IA
 

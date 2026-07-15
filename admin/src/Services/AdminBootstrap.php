@@ -36,6 +36,7 @@ class AdminBootstrap
         if ($email === '' || $password === '') {
             return;
         }
+        AdminSecurity::validatePassword($password);
 
         // Crear el superadmin solo si NO existe. Nunca se sobrescribe la
         // contraseña de una cuenta existente: el antiguo ON DUPLICATE KEY

@@ -258,30 +258,7 @@ final class AuthService
             throw new HttpException('Usuario inactivo', 403);
         }
 
-        $now = time();
-        $token = Auth::issueToken([
-            'user_id' => (int) $user['id'],
-            'email' => (string) $user['email'],
-            'iat' => $now,
-            'exp' => $now + 28800,
-        ]);
-
-        $this->repository->updateLastLogin((int) $user['id']);
-        AuditoriaService::registrarEvento([
-            'usuario_id' => (int) $user['id'],
-            'modulo' => 'auth',
-            'accion' => 'login_exitoso',
-            'entidad' => 'usuarios',
-            'entidad_id' => (int) $user['id'],
-            'descripcion' => 'Login correcto',
-            'metadata' => ['email' => (string) $user['email']],
-        ]);
-
-        return [
-            'token' => $token,
-            'user' => $this->publicUser($user),
-            'empresas' => $this->repository->empresasByUserId((int) $user['id']),
-        ];
+        return $this->issueLoginResponse($user);
     }
 
     /**
@@ -344,6 +321,17 @@ final class AuthService
         ]);
     }
 
+    /** @return array<string, mixed> */
+    public function resumeSession(int $userId): array
+    {
+        $user = $this->repository->findUserById($userId);
+        if ($user === null || (int) $user['activo'] !== 1) {
+            throw new HttpException('Usuario inactivo o inexistente', 401);
+        }
+
+        return $this->issueLoginResponse($user, false);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -399,26 +387,32 @@ final class AuthService
      * @param array<string, mixed> $user
      * @return array<string, mixed>
      */
-    private function issueLoginResponse(array $user): array
+    private function issueLoginResponse(array $user, bool $recordLogin = true): array
     {
         $now = time();
+        $ttl = AuthSessionService::enabled() ? 600 : 28800;
         $token = Auth::issueToken([
             'user_id' => (int) $user['id'],
+            'sub' => (string) $user['id'],
             'email' => (string) $user['email'],
+            'jti' => bin2hex(random_bytes(16)),
             'iat' => $now,
-            'exp' => $now + 28800,
+            'nbf' => $now,
+            'exp' => $now + $ttl,
         ]);
 
-        $this->repository->updateLastLogin((int) $user['id']);
-        AuditoriaService::registrarEvento([
-            'usuario_id' => (int) $user['id'],
-            'modulo' => 'auth',
-            'accion' => 'login_exitoso',
-            'entidad' => 'usuarios',
-            'entidad_id' => (int) $user['id'],
-            'descripcion' => 'Login correcto',
-            'metadata' => ['email' => (string) $user['email']],
-        ]);
+        if ($recordLogin) {
+            $this->repository->updateLastLogin((int) $user['id']);
+            AuditoriaService::registrarEvento([
+                'usuario_id' => (int) $user['id'],
+                'modulo' => 'auth',
+                'accion' => 'login_exitoso',
+                'entidad' => 'usuarios',
+                'entidad_id' => (int) $user['id'],
+                'descripcion' => 'Login correcto',
+                'metadata' => ['email' => (string) $user['email']],
+            ]);
+        }
 
         return [
             'token' => $token,

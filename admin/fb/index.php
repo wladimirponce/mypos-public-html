@@ -54,7 +54,6 @@ function fbValidateApiKey(): bool
 {
     $keyHeader = $_SERVER['HTTP_X_API_KEY']
               ?? $_SERVER['HTTP_AUTHORIZATION']
-              ?? $_GET['api_key']
               ?? '';
 
     $keyHeader = trim(str_ireplace('Bearer ', '', $keyHeader));

@@ -25,8 +25,10 @@ if (!empty($_SESSION['admin_id'])) {
 require_once __DIR__ . '/autoload.php';
 use App\Core\Database;
 use App\Services\AdminBootstrap;
+use App\Services\AdminSecurity;
 
 $error = '';
+AdminSecurity::validatePostCsrf();
 
 // --- Anti-fuerza-bruta del login (lockout por IP, basado en archivo) ---
 $throttleMax    = 5;     // intentos fallidos permitidos por ventana
@@ -94,10 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($user && password_verify($password, $user['password_hash'])) {
                 // Login exitoso
                 $clearThrottle();
-                session_regenerate_id(true);
-                $_SESSION['admin_id']     = (int)$user['id'];
-                $_SESSION['admin_nombre'] = $user['nombre'];
-                $_SESSION['admin_rol']    = $user['rol'];
+                AdminSecurity::initializeAuthenticatedSession($user);
 
                 // Actualizar último login
                 $db->prepare("UPDATE admin_usuario SET ultimo_login = NOW() WHERE id = :id")
@@ -223,6 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?php endif; ?>
 
     <form method="POST" action="">
+        <input type="hidden" name="admin_csrf_token" value="<?= htmlspecialchars(AdminSecurity::csrfToken(), ENT_QUOTES, 'UTF-8') ?>">
         <label for="email">Correo electrónico</label>
         <input type="email" id="email" name="email"
                value="<?= htmlspecialchars($_POST['email'] ?? '') ?>"

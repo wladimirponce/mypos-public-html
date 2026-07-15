@@ -9,10 +9,10 @@ Despues de subir:
 
 1. Copia public_html/api/.env.example como public_html/api/.env.
 2. Edita DB_HOST, DB_DATABASE, DB_USERNAME, DB_PASSWORD y JWT_SECRET.
-3. Abre temporalmente https://www.mypos.cl/api/instalar.php.
-4. Elimina public_html/api/public/instalar.php al terminar.
-5. Prueba https://www.mypos.cl.
-6. Configura cPanel Setup Python App:
+3. Aplica las migraciones pendientes desde phpMyAdmin/cPanel antes de reemplazar el runtime.
+   El paquete productivo no incluye un instalador web.
+4. Prueba https://www.mypos.cl.
+5. Configura cPanel Setup Python App:
    - Application root: /home/TU_USUARIO/public_html/agent
    - Application URL: /agent
    - Startup file: passenger_wsgi.py

@@ -515,9 +515,11 @@ final class ProductoService
         $tempFile = null;
         $fotoNombre = '';
 
+        // Contencion de seguridad: una URL aportada por el usuario se conserva
+        // como referencia, pero el servidor no la descarga hasta disponer de un
+        // cliente HTTP con allowlist y proteccion SSRF.
         if ($sourceUrl && (str_starts_with($sourceUrl, 'http://') || str_starts_with($sourceUrl, 'https://'))) {
-            $tempFile = $this->descargarImagenExterna($sourceUrl);
-            $fotoNombre = basename(parse_url($sourceUrl, PHP_URL_PATH) ?: 'foto.jpg');
+            return;
         } else {
             $fotoNombre = $codigoBarra . '.jpg';
             $fotoPath = dirname(__DIR__, 5) . DIRECTORY_SEPARATOR . 'fotos' . DIRECTORY_SEPARATOR . $fotoNombre;
@@ -537,29 +539,13 @@ final class ProductoService
 
         if (!is_dir($absoluteDir) && !mkdir($absoluteDir, 0775, true) && !is_dir($absoluteDir)) {
             error_log("No se pudo crear el directorio de almacenamiento para la foto: " . $absoluteDir);
-            if ($sourceUrl && (str_starts_with($sourceUrl, 'http://') || str_starts_with($sourceUrl, 'https://'))) {
-                if (file_exists($tempFile)) {
-                    unlink($tempFile);
-                }
-            }
             return;
         }
 
         $targetPath = $absoluteDir . DIRECTORY_SEPARATOR . $name;
         if (!copy($tempFile, $targetPath)) {
             error_log("No se pudo copiar la foto de " . $tempFile . " a " . $targetPath);
-            if ($sourceUrl && (str_starts_with($sourceUrl, 'http://') || str_starts_with($sourceUrl, 'https://'))) {
-                if (file_exists($tempFile)) {
-                    unlink($tempFile);
-                }
-            }
             return;
-        }
-
-        if ($sourceUrl && (str_starts_with($sourceUrl, 'http://') || str_starts_with($sourceUrl, 'https://'))) {
-            if (file_exists($tempFile)) {
-                unlink($tempFile);
-            }
         }
 
         $size = filesize($targetPath);
@@ -616,26 +602,6 @@ final class ProductoService
             'imagen_url' => $rutaRelativa,
             'titulo' => 'Imagen asociada por código de barra: ' . $codigoBarra,
         ]);
-    }
-
-    private function descargarImagenExterna(string $url): ?string
-    {
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        $data = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-        if ($httpCode === 200 && $data !== false) {
-            $tmpPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'download_' . uniqid() . '.jpg';
-            file_put_contents($tmpPath, $data);
-            return $tmpPath;
-        }
-
-        return null;
     }
 
     private function guard(callable $callback): int

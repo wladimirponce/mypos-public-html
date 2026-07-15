@@ -30,7 +30,8 @@ final class AppConfig
      */
     public static function platformOwnerEmails(): array
     {
-        $emails = Env::array('PLATFORM_OWNER_EMAILS', ['wladimirponce@gmail.com']);
+        // Fail closed: omitir la variable no concede privilegios a nadie.
+        $emails = Env::array('PLATFORM_OWNER_EMAILS', []);
         return array_values(array_filter(array_map(
             static fn ($e) => strtolower(trim((string) $e)),
             $emails

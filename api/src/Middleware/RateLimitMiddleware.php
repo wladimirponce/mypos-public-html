@@ -17,10 +17,16 @@ final class RateLimitMiddleware
         }
 
         $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-        $isLogin = $path === '/api/v1/auth/login';
-        $max = $isLogin ? AppConfig::rateLimitLoginMaxRequests() : AppConfig::rateLimitMaxRequests();
-        $window = $isLogin ? AppConfig::rateLimitLoginWindowSeconds() : AppConfig::rateLimitWindowSeconds();
-        $key = $this->key($path, $isLogin);
+        $isAuthSensitive = in_array($path, [
+            '/api/v1/auth/login',
+            '/api/v1/auth/register',
+            '/api/v1/auth/refresh',
+            '/api/v1/auth/resend-verification',
+            '/api/v1/auth/verify-email',
+        ], true);
+        $max = $isAuthSensitive ? AppConfig::rateLimitLoginMaxRequests() : AppConfig::rateLimitMaxRequests();
+        $window = $isAuthSensitive ? AppConfig::rateLimitLoginWindowSeconds() : AppConfig::rateLimitWindowSeconds();
+        $key = $this->key($path, $isAuthSensitive);
         $file = $this->filePath($key);
         $now = time();
         $data = $this->read($file);
@@ -40,7 +46,7 @@ final class RateLimitMiddleware
         SafeLogger::warning('Rate limit exceeded', [
             'path' => $path,
             'ip' => $_SERVER['REMOTE_ADDR'] ?? null,
-            'login' => $isLogin,
+            'auth_sensitive' => $isAuthSensitive,
         ]);
 
         Response::error(
@@ -50,13 +56,13 @@ final class RateLimitMiddleware
         );
     }
 
-    private function key(string $path, bool $isLogin): string
+    private function key(string $path, bool $isAuthSensitive): string
     {
         $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
         $authorization = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-        $subject = $authorization !== '' && !$isLogin ? hash('sha256', $authorization) : $ip;
+        $subject = $authorization !== '' && !$isAuthSensitive ? hash('sha256', $authorization) : $ip;
 
-        return hash('sha256', $subject . '|' . $path . '|' . ($isLogin ? 'login' : 'global'));
+        return hash('sha256', $subject . '|' . $path . '|' . ($isAuthSensitive ? 'auth' : 'global'));
     }
 
     private function filePath(string $key): string

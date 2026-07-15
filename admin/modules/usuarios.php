@@ -21,12 +21,14 @@ $msg = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     if ($_POST['accion'] === 'crear') {
         try {
+            $password = (string) ($_POST['password'] ?? '');
+            \App\Services\AdminSecurity::validatePassword($password);
             $repo->crearUsuario([
                 'empresa_id' => $empresaId,
                 'sucursal_id' => !empty($_POST['sucursal_id']) ? (int)$_POST['sucursal_id'] : null,
                 'nombre' => trim($_POST['nombre']),
                 'email' => trim($_POST['email']),
-                'password' => trim($_POST['password']),
+                'password' => $password,
                 'rol' => trim($_POST['rol'])
             ]);
             $msg = '<div class="d-alert success">Usuario creado exitosamente.</div>';
@@ -141,7 +143,7 @@ foreach ($rolesDb as $r) {
                     </div>
                     <div class="mb-3">
                         <label>Contraseña</label>
-                        <input type="password" name="password" class="form-control" required>
+                        <input type="password" name="password" class="form-control" minlength="12" maxlength="128" autocomplete="new-password" required>
                     </div>
                     <div class="mb-3">
                         <label>Rol Inicial</label>

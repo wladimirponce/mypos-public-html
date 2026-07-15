@@ -250,6 +250,9 @@ if (isset($_POST['action']) && $_POST['action'] === 'forzar_pago_manual' && $dbO
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+$showInactive = isset($_GET['show_inactive']) && $_GET['show_inactive'] === '1';
+$clientesWhere = $showInactive ? '' : 'WHERE e.activo = 1';
+
 $clientes = $db->query(
     "SELECT
         e.id,
@@ -287,6 +290,7 @@ $clientes = $db->query(
         WHERE fecha_emision >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         GROUP BY empresa_id
      ) doc ON doc.empresa_id = e.id
+     {$clientesWhere}
      ORDER BY e.id DESC"
 )->fetchAll(PDO::FETCH_ASSOC);
 
@@ -372,6 +376,12 @@ function montoMensualCliente(array $cliente): int
     <div class="d-card-header">
         <i class="bi bi-buildings"></i> Clientes MyPOS y estado DTE
         <span class="d-badge info" style="margin-left:auto"><?= $enPrueba ?> en prueba</span>
+        <a href="dashboard.php?module=clientes_mypos<?= $showInactive ? '' : '&show_inactive=1' ?>"
+           class="d-btn d-btn-sm d-btn-outline"
+           title="<?= $showInactive ? 'Ocultar clientes inactivos' : 'Mostrar clientes inactivos' ?>">
+            <i class="bi bi-eye<?= $showInactive ? '-slash' : '' ?>"></i>
+            <?= $showInactive ? 'Ocultar inactivos' : 'Ver inactivos' ?>
+        </a>
     </div>
     <div class="d-card-body" style="padding:0">
         <?php if (!$clientes): ?>
@@ -456,11 +466,11 @@ function montoMensualCliente(array $cliente): int
                                     <?php if (!$hasSii): ?>
                                         <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=empresas">Crear ficha SII</a>
                                     <?php elseif (!$hasCert): ?>
-                                        <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=config&switch_empresa=<?= (int)$cliente['sii_empresa_id'] ?>">Certificado</a>
+                                        <button type="button" class="d-btn d-btn-sm d-btn-primary" onclick="switchAdminEmpresa(<?= (int)$cliente['sii_empresa_id'] ?>, 'config')">Certificado</button>
                                     <?php elseif (!$hasFolios): ?>
-                                        <a class="d-btn d-btn-sm d-btn-primary" href="dashboard.php?module=cafs&switch_empresa=<?= (int)$cliente['sii_empresa_id'] ?>">Cargar CAF</a>
+                                        <button type="button" class="d-btn d-btn-sm d-btn-primary" onclick="switchAdminEmpresa(<?= (int)$cliente['sii_empresa_id'] ?>, 'cafs')">Cargar CAF</button>
                                     <?php else: ?>
-                                        <a class="d-btn d-btn-sm d-btn-secondary" href="dashboard.php?module=emision&switch_empresa=<?= (int)$cliente['sii_empresa_id'] ?>">Prueba DTE</a>
+                                        <button type="button" class="d-btn d-btn-sm d-btn-secondary" onclick="switchAdminEmpresa(<?= (int)$cliente['sii_empresa_id'] ?>, 'emision')">Prueba DTE</button>
                                     <?php endif; ?>
                                     <form method="POST" style="display:flex;gap:4px;align-items:center"
                                           onsubmit="return confirm('¿Registrar pago manual para <?= htmlspecialchars(addslashes((string)($cliente['razon_social'] ?: $cliente['nombre_fantasia']))) ?>?')">

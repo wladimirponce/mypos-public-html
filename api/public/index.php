@@ -296,6 +296,7 @@ $router->get('/api/health/db', static function (): void {
 $authController = new AuthController();
 $router->post('/api/v1/auth/register', [$authController, 'register']);
 $router->post('/api/v1/auth/login', [$authController, 'login']);
+$router->post('/api/v1/auth/refresh', [$authController, 'refresh']);
 $router->get('/api/v1/auth/me', [$authController, 'me']);
 $router->post('/api/v1/auth/logout', [$authController, 'logout']);
 $router->post('/api/v1/auth/verify-email', [$authController, 'verifyEmail']);

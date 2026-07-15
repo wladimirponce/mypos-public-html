@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mypos\Middleware;
 
 use Mypos\Support\AppConfig;
+use Mypos\Services\AuthSessionService;
 
 final class CorsMiddleware
 {
@@ -19,6 +20,9 @@ final class CorsMiddleware
             header('Access-Control-Allow-Headers: Authorization, Content-Type, X-Requested-With');
             header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
             header('Access-Control-Max-Age: 600');
+            if (AuthSessionService::enabled()) {
+                header('Access-Control-Allow-Credentials: true');
+            }
         }
 
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
