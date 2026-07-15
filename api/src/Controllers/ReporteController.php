@@ -57,7 +57,36 @@ final class ReporteController
 
     public function saludFinanciera(): void
     {
-        $this->respond(fn (): array => $this->service->saludFinanciera($_GET));
+        $this->respond(function (): array {
+            $data = $this->service->saludFinanciera($_GET);
+
+            // Provisión de impuestos del mes en curso: reutiliza el cálculo F29
+            // (no hay lógica tributaria nueva) para avisar cuánto apartar. Es
+            // best-effort: si falla, la salud financiera se devuelve igual.
+            try {
+                $empresaId = (int) ($_GET['empresa_id'] ?? 0);
+                if ($empresaId > 0) {
+                    $periodo = date('Y-m');
+                    $f29 = (new \Mypos\Services\F29Service())->calcular(\Mypos\Core\Auth::id(), [
+                        'empresa_id' => $empresaId,
+                        'periodo'    => $periodo,
+                    ]);
+                    $provision = max(0, (int) ($f29['total_a_pagar'] ?? 0));
+                    $data['provision_impuestos_mes'] = $provision;
+                    $data['periodo_impuestos']       = $periodo;
+                    if ($provision > 0) {
+                        $data['mensajes'][] = sprintf(
+                            'Aparta %s para los impuestos de este mes (IVA + PPM estimados con las ventas y compras cargadas hasta hoy). Ese dinero es del SII, no lo gastes en otra cosa.',
+                            '$' . number_format($provision, 0, ',', '.')
+                        );
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Sin provisión si el F29 del período aún no se puede calcular.
+            }
+
+            return $data;
+        });
     }
 
     private function respond(callable $callback): void

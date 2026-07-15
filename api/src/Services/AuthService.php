@@ -40,6 +40,9 @@ final class AuthService
         $promoLink = $promoService->validarParaRegistro($data['promo_codigo'] ?? null);
         if ($promoLink !== null) {
             $planId = PlanCatalog::normalize((string) $promoLink['plan_id']);
+            // El link comercial es un alta directa: la cuenta queda autenticada
+            // para poder llevar al cliente al pago sin pasos intermedios.
+            $requiresEmailVerification = false;
         }
 
         // Validaciones básicas
@@ -100,6 +103,11 @@ final class AuthService
                 'activo' => 1
             ]);
             $empresaId = (int) $empresa['id'];
+            if ($promoLink !== null) {
+                // CAF, emisor y datos operativos se completan luego, desde
+                // Configuracion. No forman parte del checkout promocional.
+                $empresaService->completarOnboarding($empresaId);
+            }
 
             // 3. Crear Sucursal (Casa Matriz)
             $sucursal = $empresaService->crearSucursal($empresaId, [
@@ -136,11 +144,13 @@ final class AuthService
             $precioEspecial = $promoLink !== null ? (int) $promoLink['precio_clp'] : null;
             $promoCodigo = $promoLink !== null ? (string) $promoLink['codigo'] : null;
 
+            $subscriptionValues = $promoLink !== null
+                ? '(:empresa_id, :plan_id, :precio_especial_clp, :promo_codigo, NOW(), NOW(), "vencida")'
+                : '(:empresa_id, :plan_id, :precio_especial_clp, :promo_codigo, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), "activa")';
             $statement = $connection->prepare(
                 'INSERT INTO empresas_suscripcion
                     (empresa_id, plan_id, precio_especial_clp, promo_codigo, fecha_inicio, fecha_fin, estado)
-                 VALUES
-                    (:empresa_id, :plan_id, :precio_especial_clp, :promo_codigo, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), "activa")'
+                 VALUES ' . $subscriptionValues
             );
             $statement->execute([
                 'empresa_id' => $empresaId,

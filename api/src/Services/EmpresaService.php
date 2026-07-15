@@ -126,6 +126,12 @@ final class EmpresaService
         $this->repository->deleteEmpresa($id);
     }
 
+    public function completarOnboarding(int $id): void
+    {
+        $this->obtenerEmpresa($id);
+        $this->repository->markOnboardingCompleted($id);
+    }
+
     public function listarSucursales(int $empresaId): array
     {
         $this->obtenerEmpresa($empresaId);

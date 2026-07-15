@@ -145,6 +145,14 @@ final class EmpresaRepository
         $statement->execute(['id' => $id]);
     }
 
+    public function markOnboardingCompleted(int $id): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE empresas SET onboarding_completado = 1 WHERE id = :id'
+        );
+        $statement->execute(['id' => $id]);
+    }
+
     public function listSucursales(int $empresaId): array
     {
         $statement = $this->connection->prepare(
