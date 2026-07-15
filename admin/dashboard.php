@@ -67,7 +67,7 @@ if (isset($_GET['switch_empresa'])) {
 
 // —— Módulo activo ——
 $module = $_GET['module'] ?? 'empresas';
-$allowed = ['clientes_mypos','emision','consultas','historial','libros','rcof_auditoria','agente_consultas','empresas','config','certificacion','cafs','pos_urgencia','dispositivos','whatsapp','ventas_reset',];
+$allowed = ['clientes_mypos','emision','consultas','historial','libros','rcof_auditoria','agente_consultas','empresas','config','certificacion','cafs','pos_urgencia','dispositivos','whatsapp','ventas_reset','promos',];
 if (!in_array($module, $allowed)) $module = 'empresas';
 
 // —— Intentar conexión DB (opcional, no bloquea) ——
