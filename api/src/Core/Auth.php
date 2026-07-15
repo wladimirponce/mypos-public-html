@@ -61,6 +61,24 @@ final class Auth
         return $userId;
     }
 
+    /** Email del usuario autenticado (del token), o null si no hay token válido. */
+    public static function email(): ?string
+    {
+        $token = self::bearerToken();
+        if ($token === null) {
+            return null;
+        }
+
+        try {
+            $claims = self::decodeToken($token);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $email = $claims['email'] ?? null;
+        return is_string($email) && $email !== '' ? $email : null;
+    }
+
     /**
      * @param array<string, mixed> $claims
      */

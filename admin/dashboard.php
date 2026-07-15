@@ -123,6 +123,7 @@ $titles = [
     'certificacion' => ['Certificación SII', 'Pool de pruebas (Solo No-Prod)'],
     'whatsapp'      => ['WhatsApp Business', 'Asignación de números por empresa'],
     'ventas_reset'  => ['Resetear Ventas', 'Eliminar ventas de prueba sin tocar folios'],
+    'promos'        => ['Links de precio', 'Precios especiales para captar clientes'],
 ];
 
 $pageTitle = $titles[$module][0] ?? 'Dashboard';
@@ -212,6 +213,9 @@ $pageSubtitle = $titles[$module][1] ?? '';
             </a>
             <a href="dashboard.php?module=clientes_mypos" class="dash-nav-item <?= $module === 'clientes_mypos' ? 'active' : '' ?>">
                 <i class="bi bi-clipboard2-pulse"></i> Clientes MyPOS
+            </a>
+            <a href="dashboard.php?module=promos" class="dash-nav-item <?= $module === 'promos' ? 'active' : '' ?>">
+                <i class="bi bi-tag"></i> Links de precio
             </a>
             <a href="dashboard.php?module=whatsapp" class="dash-nav-item <?= $module === 'whatsapp' ? 'active' : '' ?>"
                style="color:#25d366;">
@@ -345,7 +349,7 @@ $pageSubtitle = $titles[$module][1] ?? '';
         <div class="dash-content">
             <?php
             $moduleFile = __DIR__ . "/modules/{$module}.php";
-            $globalModules = ['clientes_mypos', 'empresas', 'whatsapp', 'rcof_auditoria', 'agente_consultas', 'ventas_reset'];
+            $globalModules = ['clientes_mypos', 'empresas', 'whatsapp', 'rcof_auditoria', 'agente_consultas', 'ventas_reset', 'promos'];
             if (!$globalContext && !in_array($module, $globalModules, true)) {
                 echo '<div class="d-alert warning"><i class="bi bi-building-exclamation"></i> Seleccione una empresa para acceder a este modulo.</div>';
             } elseif (file_exists($moduleFile)) {

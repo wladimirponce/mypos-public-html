@@ -92,7 +92,18 @@ class SuscripcionController
                 throw new HttpException('empresa_id obligatorio', 422);
             }
 
-            return $this->service->getCurrentStatus($empresaId);
+            $status = $this->service->getCurrentStatus($empresaId);
+
+            // El operador de plataforma (dueño de MyPOS) no paga suscripción:
+            // se reporta como activo/exento para que el frontend no lo mande al
+            // muro de billing. Mismo allowlist PLATFORM_OWNER_EMAILS.
+            $email = Auth::email();
+            if ($email !== null && \Mypos\Support\AppConfig::isPlatformOwnerEmail($email)) {
+                $status['estado'] = 'activa';
+                $status['exenta'] = true;
+            }
+
+            return $status;
         });
     }
 
