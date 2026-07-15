@@ -90,22 +90,7 @@ final class AuthController
     {
         $this->respond(function (): array {
             $payload = Request::json();
-            $token = trim((string) ($payload['token'] ?? ''));
-
-            if ($token === '') {
-                throw new HttpException('Token de verificación obligatorio', 422);
-            }
-
-            $repository = new AuthRepository(Database::connection());
-            $user = $repository->findUserByVerificationToken($token);
-
-            if ($user === null) {
-                throw new HttpException('El enlace de verificación no es válido o ya ha expirado.', 404);
-            }
-
-            $repository->verifyUserEmail((int) $user['id']);
-
-            return ['success' => true, 'message' => 'Correo verificado exitosamente.'];
+            return $this->service->verifyEmail((string) ($payload['token'] ?? ''));
         }, 'Correo verificado correctamente');
     }
 

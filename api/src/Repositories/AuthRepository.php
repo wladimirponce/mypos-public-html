@@ -15,15 +15,23 @@ final class AuthRepository
     public function createUser(string $nombre, string $email, string $passwordHash, ?string $emailVerificationToken = null): int
     {
         $statement = $this->connection->prepare(
-            'INSERT INTO usuarios (nombre, email, password_hash, activo, email_verificado, email_verification_token)
-             VALUES (:nombre, :email, :password_hash, 1, 0, :email_verification_token)'
+            'INSERT INTO usuarios
+                (nombre, email, password_hash, activo, email_verificado,
+                 email_verification_token, email_verification_token_hash,
+                 email_verification_expires_at, email_verification_sent_at)
+             VALUES
+                (:nombre, :email, :password_hash, 1, 0,
+                 NULL, :email_verification_token_hash,
+                 DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 24 HOUR), CURRENT_TIMESTAMP)'
         );
 
         $statement->execute([
             'nombre' => $nombre,
             'email' => $email,
             'password_hash' => $passwordHash,
-            'email_verification_token' => $emailVerificationToken,
+            'email_verification_token_hash' => $emailVerificationToken !== null
+                ? hash('sha256', $emailVerificationToken)
+                : null,
         ]);
 
         return (int) $this->connection->lastInsertId();
@@ -35,7 +43,8 @@ final class AuthRepository
     public function findUserByEmail(string $email): ?array
     {
         $statement = $this->connection->prepare(
-            'SELECT id, nombre, email, password_hash, activo, email_verificado, email_verification_token
+            'SELECT id, nombre, email, password_hash, activo, email_verificado,
+                    email_verification_expires_at, email_verification_sent_at
              FROM usuarios
              WHERE email = :email
              LIMIT 1'
@@ -53,7 +62,8 @@ final class AuthRepository
     public function findUserById(int $userId): ?array
     {
         $statement = $this->connection->prepare(
-            'SELECT id, nombre, email, activo, email_verificado, email_verification_token
+            'SELECT id, nombre, email, activo, email_verificado,
+                    email_verification_expires_at, email_verification_sent_at
              FROM usuarios
              WHERE id = :id
              LIMIT 1'
@@ -149,11 +159,29 @@ final class AuthRepository
 
     public function setUserVerificationToken(int $userId, ?string $token): void
     {
+        if ($token === null) {
+            $statement = $this->connection->prepare(
+                'UPDATE usuarios
+                 SET email_verification_token = NULL,
+                     email_verification_token_hash = NULL,
+                     email_verification_expires_at = NULL,
+                     email_verification_sent_at = NULL
+                 WHERE id = :id'
+            );
+            $statement->execute(['id' => $userId]);
+            return;
+        }
+
         $statement = $this->connection->prepare(
-            'UPDATE usuarios SET email_verification_token = :token WHERE id = :id'
+            'UPDATE usuarios
+             SET email_verification_token = NULL,
+                 email_verification_token_hash = :token_hash,
+                 email_verification_expires_at = DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 24 HOUR),
+                 email_verification_sent_at = CURRENT_TIMESTAMP
+             WHERE id = :id'
         );
         $statement->execute([
-            'token' => $token,
+            'token_hash' => hash('sha256', $token),
             'id' => $userId,
         ]);
     }
@@ -166,10 +194,12 @@ final class AuthRepository
         $statement = $this->connection->prepare(
             'SELECT id, nombre, email, activo, email_verificado
              FROM usuarios
-             WHERE email_verification_token = :token
+             WHERE email_verification_token_hash = :token_hash
+               AND email_verification_expires_at > CURRENT_TIMESTAMP
+               AND activo = 1
              LIMIT 1'
         );
-        $statement->execute(['token' => $token]);
+        $statement->execute(['token_hash' => hash('sha256', $token)]);
 
         $user = $statement->fetch();
 
@@ -180,7 +210,11 @@ final class AuthRepository
     {
         $statement = $this->connection->prepare(
             'UPDATE usuarios 
-             SET email_verificado = 1, email_verification_token = NULL 
+             SET email_verificado = 1,
+                 email_verification_token = NULL,
+                 email_verification_token_hash = NULL,
+                 email_verification_expires_at = NULL,
+                 email_verification_sent_at = NULL
              WHERE id = :id'
         );
         $statement->execute(['id' => $userId]);

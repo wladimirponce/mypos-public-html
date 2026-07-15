@@ -5,11 +5,11 @@
  * Nivel plataforma (no depende de la empresa activa). El operador crea un link
  * con un precio mensual custom; se lo envía a un prospecto, que se registra en
  * https://www.mypos.cl/register?plan=<plan>&promo=<codigo> y paga ese precio
- * de forma recurrente (hasta cambiarlo). Reutilizable sin límite, expiración
- * opcional.
+ * de forma recurrente (hasta cambiarlo). Puede limitarse por cantidad de usos
+ * y por fecha de expiración.
  *
  * Comparte la BD con el backend web: escribe en `suscripcion_promo_links` (la
- * misma tabla que crea la migración 075 y que el web lee al registrar/cobrar).
+ * misma tabla que asegura la migración 077 y que el web lee al registrar/cobrar).
  */
 
 if (!isset($db) || !$dbOk) {
@@ -28,26 +28,28 @@ $PLANES = [
     'mypos-escala' => ['nombre' => 'MyPOS Escala', 'normal' => 47588],
 ];
 
-// La tabla la crea la migración 075; la aseguramos aquí para que el módulo
-// funcione aunque aún no se haya corrido esa migración.
-$db->exec(
-    "CREATE TABLE IF NOT EXISTS `suscripcion_promo_links` (
-        `id`               INT AUTO_INCREMENT PRIMARY KEY,
-        `codigo`           VARCHAR(60)  NOT NULL,
-        `descripcion`      VARCHAR(180) NULL,
-        `plan_id`          VARCHAR(50)  NOT NULL,
-        `precio_clp`       INT UNSIGNED NOT NULL,
-        `moneda`           VARCHAR(3)   NOT NULL DEFAULT 'CLP',
-        `activo`           TINYINT(1)   NOT NULL DEFAULT 1,
-        `fecha_expiracion` DATE         NULL,
-        `usos`             INT UNSIGNED NOT NULL DEFAULT 0,
-        `creado_por`       BIGINT UNSIGNED NULL,
-        `creado_el`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        `actualizado_el`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY `uq_promo_codigo` (`codigo`),
-        KEY `idx_promo_activo` (`activo`, `fecha_expiracion`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
-);
+// El panel no modifica el esquema en tiempo de ejecucion. Esto evita que una
+// pantalla administrativa cree tablas incompletas o diferentes al backend.
+$schemaReady = false;
+try {
+    $schemaCheck = $db->query(
+        "SELECT COUNT(*)
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'suscripcion_promo_links'
+           AND COLUMN_NAME = 'max_usos'"
+    );
+    $schemaReady = (int) $schemaCheck->fetchColumn() === 1;
+} catch (Throwable $e) {
+    error_log('[Promos] no se pudo validar el esquema: ' . $e->getMessage());
+}
+
+if (!$schemaReady) {
+    echo '<div class="d-alert danger"><i class="bi bi-database-exclamation"></i> '
+        . 'Falta aplicar la migracion <strong>077_auth_public_tokens_hardening</strong>. '
+        . 'El modulo queda bloqueado para evitar datos inconsistentes.</div>';
+    return;
+}
 
 $msg = '';
 $err = '';
@@ -62,6 +64,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         $desc   = trim($_POST['descripcion'] ?? '');
         $codigo = strtoupper(trim($_POST['codigo'] ?? ''));
         $expira = trim($_POST['fecha_expiracion'] ?? '');
+        $maxUsosRaw = trim((string) ($_POST['max_usos'] ?? ''));
+        $maxUsos = $maxUsosRaw === '' ? null : (int) $maxUsosRaw;
 
         if (!isset($PLANES[$planId])) {
             $err = 'Plan no válido.';
@@ -69,6 +73,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             $err = 'El precio especial debe ser mayor a 0.';
         } elseif ($codigo !== '' && !preg_match('/^[A-Z0-9\-]{3,60}$/', $codigo)) {
             $err = 'El código solo admite letras, números y guiones (3–60).';
+        } elseif ($maxUsos !== null && $maxUsos <= 0) {
+            $err = 'El limite de usos debe ser mayor a 0.';
         } else {
             if ($codigo === '') {
                 do {
@@ -80,8 +86,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             try {
                 $stmt = $db->prepare(
                     'INSERT INTO suscripcion_promo_links
-                        (codigo, descripcion, plan_id, precio_clp, moneda, activo, fecha_expiracion)
-                     VALUES (?, ?, ?, ?, "CLP", 1, ?)'
+                        (codigo, descripcion, plan_id, precio_clp, moneda, activo, fecha_expiracion, max_usos)
+                     VALUES (?, ?, ?, ?, "CLP", 1, ?, ?)'
                 );
                 $stmt->execute([
                     $codigo,
@@ -89,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
                     $planId,
                     $precio,
                     $expira !== '' ? $expira : null,
+                    $maxUsos,
                 ]);
                 $msg = "Link creado: código <strong>{$codigo}</strong>.";
             } catch (PDOException $e) {
@@ -109,7 +116,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
 }
 
 // ——— Listado ————————————————————————————————————————————————————————————————
-$links = $db->query('SELECT * FROM suscripcion_promo_links ORDER BY creado_el DESC')
+$links = $db->query(
+    'SELECT id, codigo, descripcion, plan_id, precio_clp, moneda, activo,
+            fecha_expiracion, usos, max_usos, creado_el
+     FROM suscripcion_promo_links
+     ORDER BY creado_el DESC'
+)
             ->fetchAll(PDO::FETCH_ASSOC);
 
 $fmt = static fn (int $n): string => '$' . number_format($n, 0, ',', '.');
@@ -121,7 +133,7 @@ $fmt = static fn (int $n): string => '$' . number_format($n, 0, ',', '.');
 <div class="d-alert info">
     <i class="bi bi-info-circle"></i>
     Crea un link con precio mensual especial y envíaselo a un prospecto. Al registrarse con él,
-    paga ese precio cada mes (hasta que lo cambies). Reutilizable sin límite.
+    paga ese precio cada mes (hasta que lo cambies). Puedes limitar sus usos o dejarlo sin limite.
 </div>
 
 <!-- Crear -->
@@ -146,6 +158,9 @@ $fmt = static fn (int $n): string => '$' . number_format($n, 0, ',', '.');
         </label>
         <label>Expira (opcional)
             <input type="date" name="fecha_expiracion" class="form-control">
+        </label>
+        <label>Maximo de usos (opcional)
+            <input type="number" name="max_usos" min="1" step="1" class="form-control" placeholder="sin limite">
         </label>
     </div>
     <button type="submit" class="btn btn-primary" style="margin-top:12px;">
@@ -180,7 +195,9 @@ $fmt = static fn (int $n): string => '$' . number_format($n, 0, ',', '.');
                         <br><small style="color:#94a3b8;text-decoration:line-through;"><?= $fmt($normal) ?></small>
                     <?php endif; ?>
                 </td>
-                <td style="text-align:right;"><?= (int) $l['usos'] ?></td>
+                <td style="text-align:right;">
+                    <?= (int) $l['usos'] ?> / <?= $l['max_usos'] !== null ? (int) $l['max_usos'] : '∞' ?>
+                </td>
                 <td><?= $l['fecha_expiracion'] ? htmlspecialchars($l['fecha_expiracion']) : '—' ?></td>
                 <td>
                     <form method="POST" style="margin:0;">

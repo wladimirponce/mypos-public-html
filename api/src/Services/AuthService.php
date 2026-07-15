@@ -54,8 +54,11 @@ final class AuthService
             throw new HttpException('Formato de email inválido', 422, ['email' => ['Formato de email inválido']]);
         }
 
-        if (strlen($password) < 6) {
-            throw new HttpException('La contraseña debe tener al menos 6 caracteres', 422, ['password' => ['La contraseña debe tener al menos 6 caracteres']]);
+        if (strlen($password) < 12) {
+            throw new HttpException('La contraseña debe tener al menos 12 caracteres', 422, ['password' => ['La contraseña debe tener al menos 12 caracteres']]);
+        }
+        if (strlen($password) > 128) {
+            throw new HttpException('La contraseña no puede superar 128 caracteres', 422, ['password' => ['La contraseña no puede superar 128 caracteres']]);
         }
 
         // Verificar email existente
@@ -67,6 +70,8 @@ final class AuthService
                 throw new HttpException('El correo ya existe pero la contraseña no coincide. Ingrese su contraseña actual para agregar una nueva empresa.', 422, ['password' => ['Contraseña incorrecta']]);
             }
             $userId = (int) $existingUser['id'];
+            $requiresEmailVerification = $requiresEmailVerification
+                && (int) ($existingUser['email_verificado'] ?? 0) !== 1;
         }
 
         $connection = Database::connection();
@@ -82,7 +87,7 @@ final class AuthService
         try {
             $connection->beginTransaction();
 
-            $token = bin2hex(random_bytes(16));
+            $token = bin2hex(random_bytes(32));
             // 1. Crear Usuario si no existe
             if ($userId === 0) {
                 $passwordHash = password_hash($password, PASSWORD_DEFAULT);
@@ -159,18 +164,33 @@ final class AuthService
                 'promo_codigo' => $promoCodigo,
             ]);
 
+            // El cupo se reserva dentro de la misma transaccion que crea la
+            // empresa y su suscripcion. Si dos registros compiten por el ultimo
+            // uso, solo uno puede confirmar y el otro revierte completamente.
+            if ($promoLink !== null) {
+                $promoService->consumirUso((int) $promoLink['id']);
+            }
+
             if (!$requiresEmailVerification) {
                 $this->repository->verifyUserEmail($userId);
             }
 
             $connection->commit();
 
-            // Contabiliza el registro efectivo en el link de promoción (best-effort).
             if ($promoLink !== null) {
                 try {
-                    $promoService->marcarUso((int) $promoLink['id']);
+                    AuditoriaService::registrarEvento([
+                        'usuario_id' => $userId,
+                        'empresa_id' => $empresaId,
+                        'modulo' => 'auth',
+                        'accion' => 'promo_consumida',
+                        'entidad' => 'suscripcion_promo_links',
+                        'entidad_id' => (int) $promoLink['id'],
+                        'descripcion' => 'Registro completado con promocion',
+                        'metadata' => ['plan_id' => $planId],
+                    ]);
                 } catch (\Throwable $e) {
-                    error_log('[PromoLink] no se pudo contabilizar uso: ' . $e->getMessage());
+                    error_log('[PromoLink] no se pudo auditar el uso: ' . $e->getMessage());
                 }
             }
 
@@ -350,11 +370,15 @@ final class AuthService
             return ['sent' => true];
         }
 
-        $token = trim((string) ($user['email_verification_token'] ?? ''));
-        if ($token === '') {
-            $token = bin2hex(random_bytes(16));
-            $this->repository->setUserVerificationToken((int) $user['id'], $token);
+        $sentAt = strtotime((string) ($user['email_verification_sent_at'] ?? '')) ?: 0;
+        if ($sentAt > 0 && $sentAt > time() - 60) {
+            return ['sent' => true];
         }
+
+        // Nunca se recupera ni reutiliza el token anterior: en BD solo existe
+        // su hash y cada reenvio invalida el enlace previo.
+        $token = bin2hex(random_bytes(32));
+        $this->repository->setUserVerificationToken((int) $user['id'], $token);
 
         $empresas = $this->repository->empresasByUserId((int) $user['id']);
         $razonSocial = (string) ($empresas[0]['razon_social'] ?? $empresas[0]['nombre_fantasia'] ?? 'tu empresa');
@@ -367,6 +391,32 @@ final class AuthService
         );
 
         return ['sent' => true];
+    }
+
+    /** @return array{success: true, message: string} */
+    public function verifyEmail(string $token): array
+    {
+        $token = trim($token);
+        if ($token === '') {
+            throw new HttpException('Token de verificación obligatorio', 422);
+        }
+
+        $user = $this->repository->findUserByVerificationToken($token);
+        if ($user === null) {
+            throw new HttpException('El enlace de verificación no es válido o ya ha expirado.', 404);
+        }
+
+        $this->repository->verifyUserEmail((int) $user['id']);
+        AuditoriaService::registrarEvento([
+            'usuario_id' => (int) $user['id'],
+            'modulo' => 'auth',
+            'accion' => 'email_verificado',
+            'entidad' => 'usuarios',
+            'entidad_id' => (int) $user['id'],
+            'descripcion' => 'Correo verificado correctamente',
+        ]);
+
+        return ['success' => true, 'message' => 'Correo verificado exitosamente.'];
     }
 
     /**

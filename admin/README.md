@@ -134,6 +134,9 @@ El listado oculta las empresas inactivas por defecto y permite mostrarlas tempor
 
 El tablero **Clientes MyPOS** aplica el mismo filtro: solo muestra clientes activos por defecto y permite consultar los inactivos de forma opcional.
 
+El modulo **Links de precio** administra campañas de registro con fecha y cupo opcionales. Requiere
+la migracion SaaS `077_auth_public_tokens_hardening` y nunca crea tablas al abrir la pantalla.
+
 En `Clientes MyPOS`, la columna **Monto mensual** edita el valor recurrente real guardado en `empresas_suscripcion.precio_especial_clp`. Los próximos cobros Flow usan ese monto en lugar del precio de catálogo del plan.
 
 El módulo `modules/saas.php` permite administrar la suscripción y las funcionalidades habilitadas por empresa. Usa `SaaSRepository` para gestionar:

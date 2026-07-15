@@ -14,7 +14,7 @@ use Mypos\Support\PlanCatalog;
  * Links de precio especial para el registro.
  *
  * El dueño de plataforma crea un link con un precio mensual custom para un plan.
- * El link es reutilizable sin límite (con expiración opcional) y el precio es
+ * El link puede tener un limite de usos y expiracion opcional, y el precio es
  * recurrente: al registrarse se estampa en la suscripción de la empresa y se
  * cobra cada mes hasta que se cambie a mano.
  */
@@ -51,6 +51,14 @@ final class PromoLinkService
 
         $expiracion = trim((string) ($payload['fecha_expiracion'] ?? ''));
         $expiracion = $expiracion !== '' ? $expiracion : null;
+        if ($expiracion !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $expiracion)) {
+            throw new HttpException('Fecha de expiracion no valida', 422, ['fecha_expiracion' => ['formato']]);
+        }
+        $maxUsosRaw = $payload['max_usos'] ?? null;
+        $maxUsos = $maxUsosRaw === null || $maxUsosRaw === '' ? null : (int) $maxUsosRaw;
+        if ($maxUsos !== null && $maxUsos <= 0) {
+            throw new HttpException('El limite de usos debe ser mayor a 0', 422, ['max_usos' => ['invalido']]);
+        }
 
         $id = $this->repository->create([
             'codigo'           => $codigo,
@@ -60,6 +68,7 @@ final class PromoLinkService
             'moneda'           => 'CLP',
             'activo'           => 1,
             'fecha_expiracion' => $expiracion,
+            'max_usos'         => $maxUsos,
             'creado_por'       => $creadoPor,
         ]);
 
@@ -108,7 +117,7 @@ final class PromoLinkService
     /**
      * Valida un código y devuelve el link vigente (fila cruda) para el registro.
      * Devuelve null si el código está vacío (registro normal sin promo). No
-     * incrementa usos: eso se hace con marcarUso() tras confirmar el registro.
+     * consume usos: eso se hace dentro de la transaccion del registro.
      */
     public function validarParaRegistro(?string $codigo): ?array
     {
@@ -121,9 +130,11 @@ final class PromoLinkService
     }
 
     /** Contabiliza un registro efectivo hecho con este link. */
-    public function marcarUso(int $linkId): void
+    public function consumirUso(int $linkId): void
     {
-        $this->repository->incrementUsos($linkId);
+        if (!$this->repository->consumeUse($linkId)) {
+            throw new HttpException('La promocion ya no tiene usos disponibles', 409, ['codigo' => ['agotado']]);
+        }
     }
 
     private function linkVigenteOrFail(string $codigo): array
@@ -141,6 +152,10 @@ final class PromoLinkService
             throw new HttpException('El link de promoción expiró', 410, ['codigo' => ['expirado']]);
         }
 
+        if ($link['max_usos'] !== null && (int) $link['usos'] >= (int) $link['max_usos']) {
+            throw new HttpException('El link de promocion agoto sus usos', 410, ['codigo' => ['agotado']]);
+        }
+
         return $link;
     }
 
@@ -155,6 +170,7 @@ final class PromoLinkService
         $row['plan_nombre']       = $plan['nombre'];
         $row['activo']            = (int) $row['activo'];
         $row['usos']              = (int) $row['usos'];
+        $row['max_usos']          = $row['max_usos'] !== null ? (int) $row['max_usos'] : null;
         $row['url']               = $this->registerUrl((string) $row['plan_id'], (string) $row['codigo']);
 
         return $row;
