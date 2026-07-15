@@ -68,6 +68,7 @@ use Mypos\Controllers\ValeCreditoController;
 use Mypos\Controllers\DevolucionController;
 use Mypos\Controllers\SuscripcionController;
 use Mypos\Controllers\MercadoPagoController;
+use Mypos\Core\Auth;
 use Mypos\Core\HttpException;
 use Mypos\Core\Request;
 use Mypos\Core\Response;
@@ -251,6 +252,47 @@ function protectedAnyRoute(callable $handler, array $permissions): callable
     };
 }
 
+/**
+ * Protege operaciones que necesitan identidad y pertenencia al tenant, pero
+ * deben seguir disponibles con la suscripcion vencida (por ejemplo, pagarla).
+ */
+function tenantRoute(callable $handler): callable
+{
+    return static function (array $params = []) use ($handler): void {
+        $claims = (new AuthMiddleware())->handle();
+        $userId = (int) ($claims['user_id'] ?? 0);
+        $empresaId = Auth::empresaId() ?? 0;
+
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        (new TenantMiddleware())->handle($userId, $empresaId);
+
+        if ($params === []) {
+            $handler();
+            return;
+        }
+
+        $handler($params);
+    };
+}
+
+/** Protege una operacion global que solo requiere una sesion valida. */
+function authenticatedRoute(callable $handler): callable
+{
+    return static function (array $params = []) use ($handler): void {
+        (new AuthMiddleware())->handle();
+
+        if ($params === []) {
+            $handler();
+            return;
+        }
+
+        $handler($params);
+    };
+}
+
 $router->get('/health', static function (): void {
     Response::success([
         'status' => 'ok',
@@ -297,7 +339,7 @@ $authController = new AuthController();
 $router->post('/api/v1/auth/register', [$authController, 'register']);
 $router->post('/api/v1/auth/login', [$authController, 'login']);
 $router->post('/api/v1/auth/refresh', [$authController, 'refresh']);
-$router->get('/api/v1/auth/me', [$authController, 'me']);
+$router->get('/api/v1/auth/me', authenticatedRoute([$authController, 'me']));
 $router->post('/api/v1/auth/logout', [$authController, 'logout']);
 $router->post('/api/v1/auth/verify-email', [$authController, 'verifyEmail']);
 $router->post('/api/v1/auth/resend-verification', [$authController, 'resendVerificationEmail']);
@@ -308,7 +350,7 @@ $router->get('/api/v1/public/boleta', [$publicController, 'boleta']);
 $router->get('/api/v1/public/boleta/pdf', [$publicController, 'boletaPdf']);
 
 $onboardingController = new OnboardingController();
-$router->post('/api/v1/onboarding/simulate-payment', [$onboardingController, 'simulatePayment']);
+$router->post('/api/v1/onboarding/simulate-payment', authenticatedRoute([$onboardingController, 'simulatePayment']));
 
 // Webhook de MercadoPago (público, sin autenticación — la seguridad es la firma
 // x-signature + la consulta de la order con el token propio de la empresa).
@@ -316,84 +358,84 @@ $mercadoPagoController = new MercadoPagoController();
 $router->post('/api/v1/public/webhooks/mercadopago', [$mercadoPagoController, 'webhook']);
 
 $crmController = new \Mypos\Controllers\CrmController();
-$router->get('/api/v1/crm/leads',                          [$crmController, 'index']);
-$router->get('/api/v1/crm/count',                          [$crmController, 'count']);
-$router->get('/api/v1/crm/stats',                          [$crmController, 'stats']);
-$router->get('/api/v1/crm/leads/{id}/mensajes',            [$crmController, 'messages']);
-$router->get('/api/v1/crm/leads/{id}/cliente',             [$crmController, 'clienteInfo']);
-$router->get('/api/v1/crm/leads/{id}/tareas',              [$crmController, 'tareas']);
-$router->put('/api/v1/crm/leads/{id}',                     [$crmController, 'update']);
-$router->post('/api/v1/crm/leads/{id}/reply',              [$crmController, 'reply']);
-$router->post('/api/v1/crm/leads/{id}/convertir',          [$crmController, 'convertir']);
-$router->post('/api/v1/crm/leads/{id}/tareas',             [$crmController, 'crearTarea']);
-$router->put('/api/v1/crm/tareas/{tarea_id}/completar',    [$crmController, 'completarTarea']);
-$router->get('/api/v1/crm/agentes',                        [$crmController, 'agentes']);
-$router->get('/api/v1/crm/etapas',                         [$crmController, 'etapas']);
-$router->post('/api/v1/crm/etapas',                        [$crmController, 'saveEtapa']);
-$router->put('/api/v1/crm/etapas/{etapa_id}',              [$crmController, 'saveEtapa']);
-$router->get('/api/v1/crm/templates',                      [$crmController, 'templates']);
-$router->post('/api/v1/crm/templates/sync',                [$crmController, 'syncTemplates']);
-$router->post('/api/v1/crm/templates',                     [$crmController, 'saveTemplate']);
-$router->put('/api/v1/crm/templates/{id}',                 [$crmController, 'saveTemplate']);
-$router->post('/api/v1/crm/leads/{id}/template',           [$crmController, 'sendTemplate']);
-$router->get('/api/v1/crm/broadcast',                      [$crmController, 'broadcasts']);
-$router->post('/api/v1/crm/broadcast',                     [$crmController, 'createBroadcast']);
-$router->post('/api/v1/crm/conversations/iniciar',         [$crmController, 'iniciarConversacion']);
+$router->get('/api/v1/crm/leads',                          protectedRoute([$crmController, 'index'], 'crm.ver'));
+$router->get('/api/v1/crm/count',                          protectedRoute([$crmController, 'count'], 'crm.ver'));
+$router->get('/api/v1/crm/stats',                          protectedRoute([$crmController, 'stats'], 'crm.ver'));
+$router->get('/api/v1/crm/leads/{id}/mensajes',            protectedRoute([$crmController, 'messages'], 'crm.ver'));
+$router->get('/api/v1/crm/leads/{id}/cliente',             protectedRoute([$crmController, 'clienteInfo'], 'crm.ver'));
+$router->get('/api/v1/crm/leads/{id}/tareas',              protectedRoute([$crmController, 'tareas'], 'crm.ver'));
+$router->put('/api/v1/crm/leads/{id}',                     protectedRoute([$crmController, 'update'], 'crm.gestionar'));
+$router->post('/api/v1/crm/leads/{id}/reply',              protectedRoute([$crmController, 'reply'], 'crm.enviar'));
+$router->post('/api/v1/crm/leads/{id}/convertir',          protectedRoute([$crmController, 'convertir'], 'crm.gestionar'));
+$router->post('/api/v1/crm/leads/{id}/tareas',             protectedRoute([$crmController, 'crearTarea'], 'crm.gestionar'));
+$router->put('/api/v1/crm/tareas/{tarea_id}/completar',    protectedRoute([$crmController, 'completarTarea'], 'crm.gestionar'));
+$router->get('/api/v1/crm/agentes',                        protectedRoute([$crmController, 'agentes'], 'crm.ver'));
+$router->get('/api/v1/crm/etapas',                         protectedRoute([$crmController, 'etapas'], 'crm.ver'));
+$router->post('/api/v1/crm/etapas',                        protectedRoute([$crmController, 'saveEtapa'], 'crm.gestionar'));
+$router->put('/api/v1/crm/etapas/{etapa_id}',              protectedRoute([$crmController, 'saveEtapa'], 'crm.gestionar'));
+$router->get('/api/v1/crm/templates',                      protectedRoute([$crmController, 'templates'], 'crm.ver'));
+$router->post('/api/v1/crm/templates/sync',                protectedRoute([$crmController, 'syncTemplates'], 'crm.gestionar'));
+$router->post('/api/v1/crm/templates',                     protectedRoute([$crmController, 'saveTemplate'], 'crm.gestionar'));
+$router->put('/api/v1/crm/templates/{id}',                 protectedRoute([$crmController, 'saveTemplate'], 'crm.gestionar'));
+$router->post('/api/v1/crm/leads/{id}/template',           protectedRoute([$crmController, 'sendTemplate'], 'crm.enviar'));
+$router->get('/api/v1/crm/broadcast',                      protectedRoute([$crmController, 'broadcasts'], 'crm.ver'));
+$router->post('/api/v1/crm/broadcast',                     protectedRoute([$crmController, 'createBroadcast'], 'crm.enviar'));
+$router->post('/api/v1/crm/conversations/iniciar',         protectedRoute([$crmController, 'iniciarConversacion'], 'crm.gestionar'));
 
 $whatsappController = new \Mypos\Controllers\WhatsappController();
-$router->post('/api/v1/whatsapp/token', [$whatsappController, 'generateToken']);
-$router->get('/api/v1/whatsapp/status', [$whatsappController, 'status']);
+$router->post('/api/v1/whatsapp/token', authenticatedRoute([$whatsappController, 'generateToken']));
+$router->get('/api/v1/whatsapp/status', authenticatedRoute([$whatsappController, 'status']));
 
 $agentController = new AgentController();
-$router->post('/api/v1/agent/chat', [$agentController, 'chat']);
+$router->post('/api/v1/agent/chat', authenticatedRoute([$agentController, 'chat']));
 
 $suscripcionController = new SuscripcionController();
 $comunicacionVentasController = new ComunicacionVentasController();
-$router->post('/api/v1/suscripciones/order', [$suscripcionController, 'createOrder']);
+$router->post('/api/v1/suscripciones/order', tenantRoute([$suscripcionController, 'createOrder']));
 $router->post('/api/v1/suscripciones/flow-webhook', [$suscripcionController, 'flowWebhook']);
 $router->get('/api/v1/suscripciones/flow-return', [$suscripcionController, 'flowReturn']);
 $router->get('/api/v1/suscripciones/paypal-return', [$suscripcionController, 'paypalReturn']);
-$router->get('/api/v1/suscripciones/status', [$suscripcionController, 'status']);
-$router->get('/api/v1/suscripciones/order-status', [$suscripcionController, 'orderStatus']);
-$router->get('/api/v1/suscripciones/payment-config', [$suscripcionController, 'paymentConfig']);
+$router->get('/api/v1/suscripciones/status', tenantRoute([$suscripcionController, 'status']));
+$router->get('/api/v1/suscripciones/order-status', tenantRoute([$suscripcionController, 'orderStatus']));
+$router->get('/api/v1/suscripciones/payment-config', authenticatedRoute([$suscripcionController, 'paymentConfig']));
 
 // Links de precio especial (promo). resolve es público; el resto es del dueño de plataforma.
 $promoLinkController = new \Mypos\Controllers\PromoLinkController();
 $router->get('/api/v1/promos/resolve',        [$promoLinkController, 'resolve']);
-$router->get('/api/v1/promos',                [$promoLinkController, 'index']);
-$router->post('/api/v1/promos',               [$promoLinkController, 'store']);
-$router->put('/api/v1/promos/{id}/estado',    [$promoLinkController, 'toggle']);
+$router->get('/api/v1/promos',                authenticatedRoute([$promoLinkController, 'index']));
+$router->post('/api/v1/promos',               authenticatedRoute([$promoLinkController, 'store']));
+$router->put('/api/v1/promos/{id}/estado',    authenticatedRoute([$promoLinkController, 'toggle']));
 
 $permissionController = new PermissionController();
-$router->get('/api/v1/permisos/mis-permisos', [$permissionController, 'myPermissions']);
-$router->get('/api/v1/permisos', [$permissionController, 'permissions']);
-$router->get('/api/v1/roles', [$permissionController, 'roles']);
-$router->get('/api/v1/roles/{id}', [$permissionController, 'showRole']);
-$router->post('/api/v1/roles', [$permissionController, 'storeRole']);
-$router->put('/api/v1/roles/{id}', [$permissionController, 'updateRole']);
-$router->delete('/api/v1/roles/{id}', [$permissionController, 'destroyRole']);
-$router->get('/api/v1/roles/{id}/permisos', [$permissionController, 'rolePermissionsList']);
-$router->put('/api/v1/roles/{id}/permisos', [$permissionController, 'updateRolePermissions']);
+$router->get('/api/v1/permisos/mis-permisos', tenantRoute([$permissionController, 'myPermissions']));
+$router->get('/api/v1/permisos', tenantRoute([$permissionController, 'permissions']));
+$router->get('/api/v1/roles', tenantRoute([$permissionController, 'roles']));
+$router->get('/api/v1/roles/{id}', tenantRoute([$permissionController, 'showRole']));
+$router->post('/api/v1/roles', tenantRoute([$permissionController, 'storeRole']));
+$router->put('/api/v1/roles/{id}', tenantRoute([$permissionController, 'updateRole']));
+$router->delete('/api/v1/roles/{id}', tenantRoute([$permissionController, 'destroyRole']));
+$router->get('/api/v1/roles/{id}/permisos', tenantRoute([$permissionController, 'rolePermissionsList']));
+$router->put('/api/v1/roles/{id}/permisos', tenantRoute([$permissionController, 'updateRolePermissions']));
 
 $empresaController = new EmpresaController();
-$router->get('/api/v1/empresas', [$empresaController, 'index']);
-$router->get('/api/v1/empresas/{id}', [$empresaController, 'show']);
-$router->post('/api/v1/empresas', [$empresaController, 'store']);
-$router->put('/api/v1/empresas/{id}', [$empresaController, 'update']);
-$router->delete('/api/v1/empresas/{id}', [$empresaController, 'destroy']);
-$router->get('/api/v1/empresas/{id}/sucursales', [$empresaController, 'sucursales']);
-$router->post('/api/v1/empresas/{id}/sucursales', [$empresaController, 'storeSucursal']);
-$router->put('/api/v1/sucursales/{id}', [$empresaController, 'updateSucursal']);
-$router->delete('/api/v1/sucursales/{id}', [$empresaController, 'destroySucursal']);
-$router->get('/api/v1/empresas/{id}/cajas', [$empresaController, 'cajas']);
-$router->post('/api/v1/sucursales/{id}/cajas', [$empresaController, 'storeCaja']);
-$router->put('/api/v1/cajas/{id}', [$empresaController, 'updateCaja']);
-$router->delete('/api/v1/cajas/{id}', [$empresaController, 'destroyCaja']);
-$router->get('/api/v1/empresas/{id}/usuarios', [$empresaController, 'usuarios']);
-$router->get('/api/v1/usuarios/buscar', [$empresaController, 'buscarUsuariosGlobales']);
-$router->post('/api/v1/empresas/{id}/usuarios', [$empresaController, 'asociarUsuario']);
-$router->put('/api/v1/empresas/{id}/usuarios/{usuario_id}', [$empresaController, 'actualizarUsuarioEmpresa']);
-$router->delete('/api/v1/empresas/{id}/usuarios/{usuario_id}', [$empresaController, 'removerUsuarioEmpresa']);
+$router->get('/api/v1/empresas', authenticatedRoute([$empresaController, 'index']));
+$router->get('/api/v1/empresas/{id}', authenticatedRoute([$empresaController, 'show']));
+$router->post('/api/v1/empresas', authenticatedRoute([$empresaController, 'store']));
+$router->put('/api/v1/empresas/{id}', authenticatedRoute([$empresaController, 'update']));
+$router->delete('/api/v1/empresas/{id}', authenticatedRoute([$empresaController, 'destroy']));
+$router->get('/api/v1/empresas/{id}/sucursales', authenticatedRoute([$empresaController, 'sucursales']));
+$router->post('/api/v1/empresas/{id}/sucursales', authenticatedRoute([$empresaController, 'storeSucursal']));
+$router->put('/api/v1/sucursales/{id}', authenticatedRoute([$empresaController, 'updateSucursal']));
+$router->delete('/api/v1/sucursales/{id}', authenticatedRoute([$empresaController, 'destroySucursal']));
+$router->get('/api/v1/empresas/{id}/cajas', authenticatedRoute([$empresaController, 'cajas']));
+$router->post('/api/v1/sucursales/{id}/cajas', authenticatedRoute([$empresaController, 'storeCaja']));
+$router->put('/api/v1/cajas/{id}', authenticatedRoute([$empresaController, 'updateCaja']));
+$router->delete('/api/v1/cajas/{id}', authenticatedRoute([$empresaController, 'destroyCaja']));
+$router->get('/api/v1/empresas/{id}/usuarios', authenticatedRoute([$empresaController, 'usuarios']));
+$router->get('/api/v1/usuarios/buscar', authenticatedRoute([$empresaController, 'buscarUsuariosGlobales']));
+$router->post('/api/v1/empresas/{id}/usuarios', authenticatedRoute([$empresaController, 'asociarUsuario']));
+$router->put('/api/v1/empresas/{id}/usuarios/{usuario_id}', authenticatedRoute([$empresaController, 'actualizarUsuarioEmpresa']));
+$router->delete('/api/v1/empresas/{id}/usuarios/{usuario_id}', authenticatedRoute([$empresaController, 'removerUsuarioEmpresa']));
 
 $clienteController = new ClienteController();
 $router->get('/api/v1/clientes', protectedRoute([$clienteController, 'index'], 'clientes.ver'));
@@ -800,7 +842,7 @@ $router->post('/api/v1/agente/consulta-adhoc', protectedRoute([$agenteConsultaAd
 // controller, sin SubscriptionMiddleware: el log de aprendizaje no debe
 // perderse por suscripcion vencida).
 $agenteConsultasLogController = new AgenteConsultasLogController();
-$router->post('/api/v1/agente/consultas-log', [$agenteConsultasLogController, 'registrar']);
+$router->post('/api/v1/agente/consultas-log', tenantRoute([$agenteConsultasLogController, 'registrar']));
 
 // Exportaciones a Excel del agente IA (registry fijo de tipos, solo lectura;
 // el archivo se envía SOLO al correo registrado de la empresa).
@@ -811,7 +853,7 @@ $router->post('/api/v1/agente/exportar', protectedRoute([$agenteExportController
 // inline, sin SubscriptionMiddleware: el agente debe poder informar una
 // suscripcion vencida).
 $agentePerfilController = new AgentePerfilController();
-$router->get('/api/v1/agente/perfil-empresa', [$agentePerfilController, 'ver']);
+$router->get('/api/v1/agente/perfil-empresa', tenantRoute([$agentePerfilController, 'ver']));
 
 // Preferencias de alertas proactivas del agente (Configuración → Alertas).
 $agenteAlertasConfigController = new AgenteAlertasConfigController();

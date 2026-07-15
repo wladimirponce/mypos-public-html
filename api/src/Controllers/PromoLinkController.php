@@ -83,7 +83,7 @@ final class PromoLinkController
         $user = (new AuthRepository(Database::connection()))->findUserById($userId);
         $email = (string) ($user['email'] ?? '');
 
-        if ($email === '' || !AppConfig::isPlatformOwnerEmail($email)) {
+        if ($email === '' || (int) ($user['activo'] ?? 0) !== 1 || !AppConfig::isPlatformOwnerEmail($email)) {
             throw new HttpException('Acción reservada al operador de plataforma', 403);
         }
 

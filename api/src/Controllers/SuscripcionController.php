@@ -87,12 +87,13 @@ class SuscripcionController
     {
         $this->respond(function (): array {
             $empresaId = Auth::empresaId();
+            $usuarioId = Auth::id();
 
             if ($empresaId === null) {
                 throw new HttpException('empresa_id obligatorio', 422);
             }
 
-            $status = $this->service->getCurrentStatus($empresaId);
+            $status = $this->service->getCurrentStatus($empresaId, $usuarioId);
 
             // El operador de plataforma (dueño de MyPOS) no paga suscripción:
             // se reporta como activo/exento para que el frontend no lo mande al

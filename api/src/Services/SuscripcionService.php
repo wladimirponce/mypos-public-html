@@ -171,10 +171,14 @@ class SuscripcionService
         return $this->frontendUrl() . '/app/billing/return?gateway=paypal&status=success&order=' . urlencode((string) $orden['orden_numero']);
     }
 
-    public function getCurrentStatus(int $empresaId): array
+    public function getCurrentStatus(int $empresaId, int $usuarioId): array
     {
         if ($empresaId <= 0) {
             throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        if (!$this->authRepo->userHasEmpresaContext($usuarioId, $empresaId)) {
+            throw new HttpException('Usuario no pertenece a la empresa', 403);
         }
 
         $status = $this->repository->getSubscriptionStatus($empresaId);
