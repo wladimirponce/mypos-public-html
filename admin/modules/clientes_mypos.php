@@ -5,6 +5,8 @@
  */
 if (!defined('DTE_API_BOOTSTRAP_ONLY')) exit;
 
+use App\Services\MyposSubscriptionService;
+
 if (!$dbOk) {
     echo '<div class="d-alert danger"><i class="bi bi-database-x"></i> Sin conexion a base de datos.</div>';
     return;
@@ -37,6 +39,15 @@ $tableExists = static function (PDO $db, string $table): bool {
            AND TABLE_NAME = ?'
     );
     $stmt->execute([$table]);
+    return (int)$stmt->fetchColumn() > 0;
+};
+
+$columnExists = static function (PDO $db, string $table, string $column): bool {
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+    );
+    $stmt->execute([$table, $column]);
     return (int)$stmt->fetchColumn() > 0;
 };
 
@@ -78,6 +89,15 @@ if ($missingMyposTables) {
         . htmlspecialchars(implode(', ', $missingMyposTables))
         . '. El tablero necesita estas tablas de MyPOS para listar clientes.</div>';
     return;
+}
+
+$hasRecurringPriceColumn = $columnExists($db, 'empresas_suscripcion', 'precio_especial_clp');
+$precioEspecialSelect = $hasRecurringPriceColumn
+    ? 'es.precio_especial_clp'
+    : 'NULL AS precio_especial_clp';
+
+if (empty($_SESSION['clientes_mypos_csrf'])) {
+    $_SESSION['clientes_mypos_csrf'] = bin2hex(random_bytes(32));
 }
 
 if ($useSiiTables) {
@@ -158,6 +178,27 @@ if ($useSiiTables) {
 // ── Acción: Forzar Pago Manual ───────────────────────────────────────────────
 $pagoMsg = null;
 $pagoError = null;
+if (isset($_POST['action']) && $_POST['action'] === 'actualizar_monto_plan' && $dbOk) {
+    try {
+        if (!hash_equals((string)($_SESSION['clientes_mypos_csrf'] ?? ''), (string)($_POST['csrf_token'] ?? ''))) {
+            throw new Exception('La sesion del formulario expiro. Recarga la pagina e intenta nuevamente.');
+        }
+        if (!$hasRecurringPriceColumn) {
+            throw new Exception('Falta aplicar la migracion 075_promo_links en la base de datos.');
+        }
+        $empresaId = (int)($_POST['empresa_id'] ?? 0);
+        $montoClp = filter_var($_POST['monto_plan_clp'] ?? null, FILTER_VALIDATE_INT);
+        if ($montoClp === false) {
+            throw new Exception('Ingresa un monto mensual valido, sin puntos ni decimales.');
+        }
+        (new MyposSubscriptionService())->actualizarMontoRecurrente($empresaId, (int)$montoClp);
+        $pagoMsg = 'Monto mensual actualizado a $' . number_format((int)$montoClp, 0, ',', '.')
+            . '. Los proximos cobros usaran este valor.';
+    } catch (Throwable $e) {
+        $pagoError = $e->getMessage();
+    }
+}
+
 if (isset($_POST['action']) && $_POST['action'] === 'forzar_pago_manual' && $dbOk) {
     try {
         $empresaId = (int)($_POST['empresa_id'] ?? 0);
@@ -220,6 +261,7 @@ $clientes = $db->query(
         e.activo,
         COALESCE(eco.documentos_tributarios_habilitados, 0) AS dte_habilitado,
         es.plan_id,
+        {$precioEspecialSelect},
         es.estado AS suscripcion_estado,
         es.fecha_fin AS suscripcion_fin,
         COALESCE(p.pagos_completados, 0) AS pagos_completados,
@@ -276,10 +318,29 @@ function isTrialSubscription(array $cliente): bool
 
     return $fin > time() && $fin <= strtotime('+8 days');
 }
+
+function montoMensualCliente(array $cliente): int
+{
+    $especial = (int)($cliente['precio_especial_clp'] ?? 0);
+    if ($especial > 0) return $especial;
+
+    return match ((string)($cliente['plan_id'] ?? '')) {
+        'mypos-pro', 'multisucursal' => 30928,
+        'mypos-cadena' => 35688,
+        'mypos-escala' => 47588,
+        default => 23788,
+    };
+}
 ?>
 
 <?php if ($pagoMsg): ?>
     <div class="d-alert success"><i class="bi bi-check-circle"></i> <?= htmlspecialchars($pagoMsg) ?></div>
+<?php endif; ?>
+<?php if (!$hasRecurringPriceColumn): ?>
+    <div class="d-alert warning">
+        <i class="bi bi-exclamation-triangle"></i>
+        La edicion del monto mensual requiere aplicar la migracion <strong>075_promo_links</strong>.
+    </div>
 <?php endif; ?>
 <?php if ($pagoError): ?>
     <div class="d-alert danger"><i class="bi bi-exclamation-circle"></i> <?= htmlspecialchars($pagoError) ?></div>
@@ -324,6 +385,7 @@ function isTrialSubscription(array $cliente): bool
                     <tr>
                         <th>Cliente</th>
                         <th>Suscripcion</th>
+                        <th>Monto mensual</th>
                         <th>DTE MyPOS</th>
                         <th>Ficha SII</th>
                         <th>Certificado</th>
@@ -350,6 +412,30 @@ function isTrialSubscription(array $cliente): bool
                                 <span class="text-muted small"><?= htmlspecialchars($cliente['rut'] ?: 'Sin RUT') ?></span>
                             </td>
                             <td><?= $subscription ?></td>
+                            <td style="min-width:170px">
+                                <?php if (!empty($cliente['plan_id']) && $hasRecurringPriceColumn): ?>
+                                    <form method="POST" style="display:flex;gap:5px;align-items:center"
+                                          onsubmit="return confirm('¿Guardar este monto como cobro mensual recurrente?')">
+                                        <input type="hidden" name="action" value="actualizar_monto_plan">
+                                        <input type="hidden" name="empresa_id" value="<?= (int)$cliente['id'] ?>">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars((string)$_SESSION['clientes_mypos_csrf']) ?>">
+                                        <span style="font-weight:600">$</span>
+                                        <input type="number" name="monto_plan_clp" min="1" max="100000000" step="1" required
+                                               value="<?= montoMensualCliente($cliente) ?>"
+                                               placeholder="Monto CLP"
+                                               style="width:105px;padding:4px 6px;font-size:12px;border:1px solid var(--c-border,#ccc);border-radius:4px">
+                                        <button type="submit" class="d-btn d-btn-sm d-btn-primary" title="Guardar monto mensual">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                    </form>
+                                    <span class="text-muted small">
+                                        Plan: <?= htmlspecialchars((string)$cliente['plan_id']) ?>
+                                        <?= !empty($cliente['precio_especial_clp']) ? '· monto personalizado' : '· precio de catálogo' ?>
+                                    </span>
+                                <?php else: ?>
+                                    <span class="text-muted small">Sin suscripcion</span>
+                                <?php endif; ?>
+                            </td>
                             <td><?= ((int)$cliente['dte_habilitado'] === 1) ? clienteBadge('Habilitado', 'prod') : clienteBadge('Deshabilitado', 'warning') ?></td>
                             <td>
                                 <?= $hasSii ? clienteBadge((string)$cliente['ambiente_default'], $cliente['ambiente_default'] === 'produccion' ? 'prod' : 'cert') : clienteBadge('Falta ficha', 'danger') ?>
@@ -838,5 +924,3 @@ function esc(s) {
         .replace(/'/g, '&#039;');
 }
 </script>
-
-

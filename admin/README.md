@@ -128,6 +128,12 @@ Autenticación: header `X-API-KEY` con la clave de la empresa.
 
 ## Módulo SaaS
 
+Las empresas con historial operativo no se eliminan físicamente desde el dashboard. La acción de Empresas las desactiva o reactiva conservando CAF, folios, documentos, usuarios y auditoría.
+
+El listado oculta las empresas inactivas por defecto y permite mostrarlas temporalmente con el botón **Ver inactivas**.
+
+En `Clientes MyPOS`, la columna **Monto mensual** edita el valor recurrente real guardado en `empresas_suscripcion.precio_especial_clp`. Los próximos cobros Flow usan ese monto en lugar del precio de catálogo del plan.
+
 El módulo `modules/saas.php` permite administrar la suscripción y las funcionalidades habilitadas por empresa. Usa `SaaSRepository` para gestionar:
 
 - **Plan:** básico, estándar, premium

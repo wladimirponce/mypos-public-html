@@ -19,6 +19,20 @@ class EmpresaRepository extends BaseRepository
         $this->useSiiTables = false;
     }
 
+    public function setActive(int $empresaId, bool $active): void
+    {
+        $stmt = $this->db->prepare('UPDATE empresas SET activo = ? WHERE id = ?');
+        $stmt->execute([$active ? 1 : 0, $empresaId]);
+
+        if ($stmt->rowCount() === 0) {
+            $exists = $this->db->prepare('SELECT 1 FROM empresas WHERE id = ? LIMIT 1');
+            $exists->execute([$empresaId]);
+            if (!$exists->fetchColumn()) {
+                throw new Exception('Empresa no encontrada.');
+            }
+        }
+    }
+
     /**
      * Helper para mapear tipo DTE numérico a ENUM string de MyPOS
      */

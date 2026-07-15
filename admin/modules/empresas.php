@@ -1,13 +1,18 @@
 <?php
 /**
  * Módulo Empresas — Gestión Multi-Cliente
- * CRUD completo: crear / editar / eliminar empresas.
+ * Gestion segura: crear, editar, activar y desactivar empresas.
  */
+use App\Repositories\EmpresaRepository;
 $empMsg = '';
 $empError = '';
 $empNewKey = '';
 
 $useSiiTables = false;
+
+if (empty($_SESSION['empresas_csrf'])) {
+    $_SESSION['empresas_csrf'] = bin2hex(random_bytes(32));
+}
 
 /** Normaliza el campo acteco (texto "107300, 463020") a JSON array. */
 $actecoToJson = function (?string $raw): string {
@@ -23,32 +28,6 @@ $metadataJson = function () use ($actecoToJson): string {
         'numero_resolucion' => isset($_POST['num_resol']) && $_POST['num_resol'] !== '' ? trim((string)$_POST['num_resol']) : '',
         'fecha_resolucion' => isset($_POST['fecha_resol']) && $_POST['fecha_resol'] !== '' ? trim((string)$_POST['fecha_resol']) : '',
     ], JSON_UNESCAPED_UNICODE);
-};
-
-$deleteDirTree = function (string $dir): void {
-    if ($dir === '' || !is_dir($dir)) return;
-    $base = realpath(__DIR__ . '/..');
-    $real = realpath($dir);
-    if (!$base || !$real || strpos($real, $base) !== 0) return;
-    $items = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($real, FilesystemIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::CHILD_FIRST
-    );
-    foreach ($items as $item) {
-        $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
-    }
-    @rmdir($real);
-};
-
-$tableExists = function (string $table) use ($db): bool {
-    $stmt = $db->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
-    $stmt->execute([$table]);
-    return (int)$stmt->fetchColumn() > 0;
-};
-
-$tablesWithEmpresaId = function () use ($db): array {
-    $stmt = $db->query("SELECT TABLE_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'empresa_id'");
-    return array_values(array_unique($stmt->fetchAll(PDO::FETCH_COLUMN) ?: []));
 };
 
 // ── Procesar CREACIÓN ────────────────────────────────────────────────────────
@@ -132,67 +111,25 @@ if (isset($_POST['action']) && $_POST['action'] === 'update_empresa' && $dbOk) {
     }
 }
 
-// ── Procesar ELIMINACIÓN FÍSICA ────────────────────────────────────────────────
-if (isset($_POST['action']) && $_POST['action'] === 'delete_empresa' && $dbOk) {
+// ── Activar / desactivar sin borrar historial ───────────────────────────────
+if (isset($_POST['action']) && in_array($_POST['action'], ['deactivate_empresa', 'reactivate_empresa'], true) && $dbOk) {
     try {
-        $id = (int)$_POST['empresa_id'];
+        $id = (int)($_POST['empresa_id'] ?? 0);
         if ($id <= 0) throw new Exception('Empresa inválida.');
-
-        $mainTable = $useSiiTables ? 'sii_empresa' : 'empresas';
-        $stmtRut = $db->prepare("SELECT rut, razon_social FROM `$mainTable` WHERE id=? LIMIT 1");
-        $stmtRut->execute([$id]);
-        $empresaDel = $stmtRut->fetch(PDO::FETCH_ASSOC);
-        if (!$empresaDel) throw new Exception('Empresa no encontrada.');
-        $rutDel = (string)$empresaDel['rut'];
-
-        $db->beginTransaction();
-
-        $priority = [
-            'sii_folio_consumo', 'folios_consumidos',
-            'folios_asignaciones', 'sii_dte', 'documentos_emitidos',
-            'sii_caf', 'caf_archivos',
-            'sii_certificado', 'archivos_subidos',
-            'sii_api_key', 'dte_configuracion',
-            'empresa_configuracion_operativa', 'empresa_configuracion',
-            'sucursales', 'dispositivos_pos',
-        ];
-        $tables = array_values(array_unique(array_merge($priority, $tablesWithEmpresaId())));
-        $deletedRows = 0;
-
-        foreach (range(1, 4) as $_pass) {
-            foreach ($tables as $table) {
-                if ($table === $mainTable || !$tableExists($table)) continue;
-                try {
-                    $stmtDel = $db->prepare("DELETE FROM `$table` WHERE empresa_id=?");
-                    $stmtDel->execute([$id]);
-                    $deletedRows += $stmtDel->rowCount();
-                } catch (Throwable $ignored) {
-                    // Otra pasada puede eliminar primero la tabla que bloquea la FK.
-                }
-            }
+        if (!hash_equals((string)($_SESSION['empresas_csrf'] ?? ''), (string)($_POST['csrf_token'] ?? ''))) {
+            throw new Exception('La sesión del formulario expiró. Recargue la página.');
         }
 
-        $stmtMain = $db->prepare("DELETE FROM `$mainTable` WHERE id=?");
-        $stmtMain->execute([$id]);
-        if ($stmtMain->rowCount() === 0) {
-            throw new Exception('No se pudo eliminar la empresa principal. Revise dependencias de base de datos.');
+        $active = $_POST['action'] === 'reactivate_empresa';
+        (new EmpresaRepository())->setActive($id, $active);
+        if (!$active && (int)($_SESSION['active_empresa_id'] ?? 0) === $id) {
+            unset($_SESSION['active_empresa_id']);
         }
 
-        $db->commit();
-
-        $adminBase = dirname(__DIR__);
-        foreach ([
-            $adminBase . '/cert/' . $rutDel,
-            $adminBase . '/caf/' . $rutDel,
-            $adminBase . '/tmp/' . $rutDel,
-            $adminBase . '/cert_sets/' . $rutDel,
-        ] as $dirDel) {
-            $deleteDirTree($dirDel);
-        }
-
-        $empMsg = "Empresa eliminada definitivamente: {$empresaDel['razon_social']} ($rutDel). Registros relacionados: $deletedRows.";
-    } catch (Exception $e) {
-        if ($db->inTransaction()) $db->rollBack();
+        $empMsg = $active
+            ? 'Empresa reactivada correctamente.'
+            : 'Empresa desactivada. Se conservaron sus CAF, folios, documentos y registros históricos.';
+    } catch (Throwable $e) {
         $empError = $e->getMessage();
     }
 }
@@ -226,20 +163,25 @@ if ($dbOk && isset($_GET['edit'])) {
 
 // ── Refrescar listado ────────────────────────────────────────────────────────
 $empresas = [];
+$showInactive = isset($_GET['show_inactive']) && $_GET['show_inactive'] === '1';
 if ($dbOk) {
     if ($useSiiTables) {
-        $empresas = $db->query("SELECT id, rut, razon_social, giro, unidad_sii, ambiente_default, activo
-                                FROM sii_empresa ORDER BY activo DESC, razon_social")->fetchAll(PDO::FETCH_ASSOC);
+        $sql = "SELECT id, rut, razon_social, giro, unidad_sii, ambiente_default, activo
+                FROM sii_empresa" . ($showInactive ? '' : ' WHERE activo = 1') . "
+                ORDER BY activo DESC, razon_social";
+        $empresas = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
     } else {
-        $empresas = $db->query("
+        $sql = "
             SELECT e.id, e.rut, e.razon_social, e.giro,
                    '' AS unidad_sii,
                    COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default,
                    e.activo
             FROM empresas e
             LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id
+            " . ($showInactive ? '' : 'WHERE e.activo = 1') . "
             ORDER BY e.activo DESC, e.razon_social
-        ")->fetchAll(PDO::FETCH_ASSOC);
+        ";
+        $empresas = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
     }
 }
 
@@ -363,12 +305,22 @@ $ambActual = strtolower($editEmp['ambiente_default'] ?? 'certificacion');
             <div class="d-card-header">
                 <i class="bi bi-buildings"></i> Empresas Registradas
                 <span class="d-badge info" style="margin-left:auto"><?= count($empresas) ?> empresa(s)</span>
+                <a href="?module=empresas<?= $showInactive ? '' : '&show_inactive=1' ?>"
+                   class="d-btn d-btn-sm d-btn-outline"
+                   title="<?= $showInactive ? 'Ocultar empresas inactivas' : 'Mostrar empresas inactivas' ?>">
+                    <i class="bi bi-eye<?= $showInactive ? '-slash' : '' ?>"></i>
+                    <?= $showInactive ? 'Ocultar inactivas' : 'Ver inactivas' ?>
+                </a>
             </div>
             <div class="d-card-body" style="padding:0">
                 <?php if (empty($empresas)): ?>
                     <div style="padding:60px; text-align:center; color:var(--c-text-muted)">
                         <i class="bi bi-building-x" style="font-size:2.5rem"></i>
-                        <p class="mt-2">No hay empresas registradas aún.<br>Cree la primera usando el formulario.</p>
+                        <p class="mt-2">
+                            <?= $showInactive
+                                ? 'No hay empresas registradas aún.<br>Cree la primera usando el formulario.'
+                                : 'No hay empresas activas. Use “Ver inactivas” para revisar o reactivar empresas.' ?>
+                        </p>
                     </div>
                 <?php else: ?>
                 <table class="d-table">
@@ -396,11 +348,12 @@ $ambActual = strtolower($editEmp['ambiente_default'] ?? 'certificacion');
                                 <a href="?module=empresas&edit=<?= (int)$emp['id'] ?>" class="d-btn d-btn-sm d-btn-outline" title="Editar">
                                     <i class="bi bi-pencil"></i>
                                 </a>
-                                <form method="POST" style="display:inline" onsubmit="return confirm('¿Eliminar definitivamente la empresa <?= htmlspecialchars(addslashes($emp['razon_social'])) ?>? Se borrarán sus certificados, CAF, set de certificación y registros asociados.');">
-                                    <input type="hidden" name="action" value="delete_empresa">
+                                <form method="POST" style="display:inline" onsubmit="return confirm('¿<?= $emp['activo'] ? 'Desactivar' : 'Reactivar' ?> la empresa <?= htmlspecialchars(addslashes($emp['razon_social'])) ?>? <?= $emp['activo'] ? 'Sus CAF, folios y documentos se conservarán.' : 'La empresa volverá a estar disponible.' ?>');">
+                                    <input type="hidden" name="action" value="<?= $emp['activo'] ? 'deactivate_empresa' : 'reactivate_empresa' ?>">
                                     <input type="hidden" name="empresa_id" value="<?= (int)$emp['id'] ?>">
-                                    <button type="submit" class="d-btn d-btn-sm d-btn-outline" style="color:var(--c-danger)" title="Eliminar definitivamente">
-                                        <i class="bi bi-trash3"></i>
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars((string)$_SESSION['empresas_csrf']) ?>">
+                                    <button type="submit" class="d-btn d-btn-sm d-btn-outline" style="color:var(--c-<?= $emp['activo'] ? 'danger' : 'success' ?>)" title="<?= $emp['activo'] ? 'Desactivar empresa' : 'Reactivar empresa' ?>">
+                                        <i class="bi bi-<?= $emp['activo'] ? 'pause-circle' : 'arrow-counterclockwise' ?>"></i>
                                     </button>
                                 </form>
                             </td>
