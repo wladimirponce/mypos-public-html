@@ -20,6 +20,7 @@ error_reporting(E_ALL);
 
 require_once __DIR__ . '/autoload.php';
 use App\Core\Database;
+use App\Services\AdminMfa;
 use App\Services\AdminSecurity;
 
 if (file_exists(__DIR__ . '/openssl_legacy.cnf')) {
@@ -82,6 +83,17 @@ try {
     $db = Database::getInstance();
     $dbOk = true;
     AdminSecurity::guard($db);
+
+    // Enforcement MFA: con la flag activa, un rol obligado a segundo factor que
+    // aún no lo tenga enrolado es enviado a enrolarse antes de usar el panel
+    // (aplica también a sesiones ya activas al momento de activar la flag).
+    if (AdminMfa::isGloballyEnabled()
+        && AdminMfa::roleRequiresMfa((string) ($_SESSION['admin_rol'] ?? ''))
+        && AdminMfa::tableAvailable($db)
+        && !AdminMfa::isEnrolled($db, (int) ($_SESSION['admin_id'] ?? 0))) {
+        header('Location: mfa_enroll.php');
+        exit;
+    }
 
     $empresas = $db->query("SELECT e.id, e.rut, e.razon_social, COALESCE(dc.ambiente, 'CERTIFICACION') AS ambiente_default, e.activo FROM empresas e LEFT JOIN dte_configuracion dc ON e.id = dc.empresa_id WHERE e.activo = 1 ORDER BY e.razon_social")->fetchAll(PDO::FETCH_ASSOC);
 

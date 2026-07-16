@@ -49,6 +49,7 @@ final class SafeLogger
         $payload = [
             'time' => date('c'),
             'level' => $level,
+            'correlation_id' => RequestContext::correlationId(),
             'message' => self::cleanMessage($message),
             'context' => self::sanitize($context),
         ];

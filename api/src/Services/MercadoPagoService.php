@@ -9,6 +9,7 @@ use Mypos\Core\HttpException;
 use Mypos\Repositories\MercadoPagoRepository;
 use Mypos\Support\Crypto;
 use Mypos\Support\MercadoPagoClient;
+use Mypos\Support\SecurityAlert;
 use PDO;
 use Throwable;
 
@@ -338,6 +339,13 @@ final class MercadoPagoService
 
         if (!$this->firmaValida($signature, $resourceId, $headers, $empresaId)) {
             error_log('[MercadoPago] Firma de webhook invalida para order ' . $resourceId);
+            SecurityAlert::emit('webhook.firma_invalida', 'high', [
+                'component' => 'webhook',
+                'provider' => 'mercadopago',
+                'empresa_id' => $empresaId,
+                'resource' => 'order:' . $resourceId,
+                'reason' => 'firma_webhook_invalida',
+            ]);
             $this->repository->marcarWebhookProcesado($eventId, $empresaId);
             return;
         }
@@ -371,6 +379,15 @@ final class MercadoPagoService
             );
         }
         if ((int) $intento['monto'] !== $montoEsperado) {
+            // Discrepancia de monto al consumir el pago: señal fuerte de manipulación.
+            SecurityAlert::emit('pagos.monto_no_coincide', 'high', [
+                'component' => 'pagos',
+                'provider' => 'mercadopago',
+                'empresa_id' => $empresaId,
+                'resource' => 'venta:' . $ventaId,
+                'amount' => (int) $intento['monto'],
+                'reason' => 'esperado_' . $montoEsperado,
+            ]);
             throw new HttpException(
                 "El monto del pago MercadoPago no coincide (cobrado: {$intento['monto']}, esperado: {$montoEsperado})",
                 422,

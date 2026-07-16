@@ -60,39 +60,63 @@ final class InventarioFisicoController
         $this->respond(fn (int $uid): array => $this->service->abrirSesionBarrido($uid, Request::json()), 'Sesión de barrido lista');
     }
 
-    /** GET /api/v1/inventario-fisico/barrido/{id}?empresa_id=X */
+    /**
+     * GET /api/v1/inventario-fisico/barrido/{id}?empresa_id=X
+     *
+     * @param array<string, string> $params
+     */
     public function getBarrido(array $params): void
     {
         $this->respond(fn (int $uid): array => $this->service->getBarrido($uid, (int) $params['id'], $_GET));
     }
 
-    /** POST /api/v1/inventario-fisico/barrido/{id}/scan */
+    /**
+     * POST /api/v1/inventario-fisico/barrido/{id}/scan
+     *
+     * @param array<string, string> $params
+     */
     public function scan(array $params): void
     {
         $this->respond(fn (int $uid): array => $this->service->escanear($uid, (int) $params['id'], Request::json()));
     }
 
-    /** POST /api/v1/inventario-fisico/barrido/{id}/consolidar?empresa_id=X */
+    /**
+     * POST /api/v1/inventario-fisico/barrido/{id}/consolidar?empresa_id=X
+     *
+     * @param array<string, string> $params
+     */
     public function consolidar(array $params): void
     {
         $p = array_merge($_GET, Request::json());
         $this->respond(fn (int $uid): array => $this->service->consolidarBarrido($uid, (int) $params['id'], $p), 'Consolidación aplicada');
     }
 
-    /** POST /api/v1/inventario-fisico/barrido/{id}/cerrar?empresa_id=X */
+    /**
+     * POST /api/v1/inventario-fisico/barrido/{id}/cerrar?empresa_id=X
+     *
+     * @param array<string, string> $params
+     */
     public function cerrarBarrido(array $params): void
     {
         $p = array_merge($_GET, Request::json());
         $this->respond(fn (int $uid): array => $this->service->cerrarBarrido($uid, (int) $params['id'], $p), 'Barrido cerrado');
     }
 
-    /** GET /api/v1/inventario-fisico/barrido/{id}/no-inventariados?empresa_id=X */
+    /**
+     * GET /api/v1/inventario-fisico/barrido/{id}/no-inventariados?empresa_id=X
+     *
+     * @param array<string, string> $params
+     */
     public function noInventariados(array $params): void
     {
         $this->respond(fn (int $uid): array => $this->service->noInventariadosBarrido($uid, (int) $params['id'], $_GET));
     }
 
-    /** POST /api/v1/inventario-fisico/barrido/{id}/llevar-a-cero */
+    /**
+     * POST /api/v1/inventario-fisico/barrido/{id}/llevar-a-cero
+     *
+     * @param array<string, string> $params
+     */
     public function llevarACero(array $params): void
     {
         $body = array_merge($_GET, Request::json());

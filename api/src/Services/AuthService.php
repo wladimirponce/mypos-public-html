@@ -10,6 +10,7 @@ use Mypos\Core\HttpException;
 use Mypos\Repositories\AuthRepository;
 use Mypos\Repositories\PermissionRepository;
 use Mypos\Support\PlanCatalog;
+use Mypos\Support\SecurityAlert;
 
 final class AuthService
 {
@@ -274,6 +275,14 @@ final class AuthService
                 'metadata' => ['email' => $email, 'motivo' => 'usuario_inactivo'],
                 'severidad' => 'WARNING',
                 'resultado' => 'ERROR',
+            ]);
+            // Login anómalo: credenciales VÁLIDAS sobre una cuenta desactivada
+            // (posible cuenta comprometida ya inhabilitada siendo sondeada).
+            SecurityAlert::emit('auth.login_usuario_inactivo', 'high', [
+                'component' => 'auth',
+                'usuario_id' => (int) $user['id'],
+                'reason' => 'credenciales_validas_cuenta_inactiva',
+                'ip' => $_SERVER['REMOTE_ADDR'] ?? null,
             ]);
             throw new HttpException('Usuario inactivo', 403);
         }

@@ -7,6 +7,7 @@ namespace Mypos\Services;
 use Mypos\Config\Database;
 use Mypos\Core\HttpException;
 use Mypos\Repositories\EmpresaRepository;
+use Mypos\Support\SecurityAlert;
 
 final class EmpresaService
 {
@@ -418,6 +419,13 @@ final class EmpresaService
 
         $this->repository->asociarUsuarioEmpresa($empresaId, $usuarioId, $rolId, $sucursalId, $activo);
 
+        SecurityAlert::emit('usuarios.rol_asignado', 'medium', [
+            'component' => 'usuarios',
+            'empresa_id' => $empresaId,
+            'resource' => 'usuario:' . $usuarioId,
+            'reason' => 'rol_id_' . $rolId,
+        ]);
+
         return ['success' => true];
     }
 
@@ -472,6 +480,13 @@ final class EmpresaService
         }
 
         $this->repository->updateUsuarioEmpresa($empresaId, $usuarioId, $rolId, $sucursalId, $activo);
+
+        SecurityAlert::emit('usuarios.rol_actualizado', 'medium', [
+            'component' => 'usuarios',
+            'empresa_id' => $empresaId,
+            'resource' => 'usuario:' . $usuarioId,
+            'reason' => 'rol_id_' . $rolId . '_activo_' . $activo,
+        ]);
 
         return ['success' => true];
     }

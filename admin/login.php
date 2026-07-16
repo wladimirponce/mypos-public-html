@@ -25,6 +25,7 @@ if (!empty($_SESSION['admin_id'])) {
 require_once __DIR__ . '/autoload.php';
 use App\Core\Database;
 use App\Services\AdminBootstrap;
+use App\Services\AdminMfa;
 use App\Services\AdminSecurity;
 
 $error = '';
@@ -94,13 +95,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($user && password_verify($password, $user['password_hash'])) {
-                // Login exitoso
+                // Primer factor OK.
                 $clearThrottle();
-                AdminSecurity::initializeAuthenticatedSession($user);
-
-                // Actualizar último login
-                $db->prepare("UPDATE admin_usuario SET ultimo_login = NOW() WHERE id = :id")
-                   ->execute([':id' => $user['id']]);
 
                 // Prevención de open redirect: solo se permiten rutas internas
                 // relativas. Se descartan URLs absolutas, protocol-relative (//)
@@ -110,6 +106,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     || strpbrk($redirect, "\r\n") !== false) {
                     $redirect = 'dashboard.php';
                 }
+
+                $adminId = (int) $user['id'];
+                $rol     = (string) $user['rol'];
+                $mfaOn   = AdminMfa::isGloballyEnabled();
+
+                if ($mfaOn && AdminMfa::isEnrolled($db, $adminId)) {
+                    // Segundo factor obligatorio: sesión de DESAFÍO, no completa.
+                    session_regenerate_id(true);
+                    $_SESSION['admin_mfa_challenge'] = [
+                        'id' => $adminId, 'nombre' => (string) $user['nombre'],
+                        'rol' => $rol, 'started' => time(), 'redirect' => $redirect,
+                    ];
+                    header('Location: login_mfa.php');
+                    exit;
+                }
+
+                if ($mfaOn && AdminMfa::roleRequiresMfa($rol) && AdminMfa::tableAvailable($db)) {
+                    // Rol obligado a MFA sin enrolar: forzar enrolamiento primero.
+                    session_regenerate_id(true);
+                    $_SESSION['admin_mfa_enroll'] = [
+                        'id' => $adminId, 'nombre' => (string) $user['nombre'],
+                        'rol' => $rol, 'email' => $email, 'started' => time(),
+                        'redirect' => $redirect,
+                    ];
+                    header('Location: mfa_enroll.php');
+                    exit;
+                }
+
+                // Flag apagada, u operador no obligado: sesión completa directa.
+                AdminSecurity::initializeAuthenticatedSession($user);
+                $db->prepare("UPDATE admin_usuario SET ultimo_login = NOW() WHERE id = :id")
+                   ->execute([':id' => $adminId]);
                 header('Location: ' . $redirect);
                 exit;
             } else {

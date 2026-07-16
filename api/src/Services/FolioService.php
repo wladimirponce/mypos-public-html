@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use Mypos\Config\Database;
 use Mypos\Core\HttpException;
 use Mypos\Repositories\FolioRepository;
+use Mypos\Support\SecurityAlert;
 use Throwable;
 
 final class FolioService
@@ -468,6 +469,27 @@ final class FolioService
             ], $connection);
 
             $connection->commit();
+
+            // Alerta al CRUZAR el umbral (una sola vez): al llegar al mínimo y al
+            // agotarse. Como cada consumo baja de a 1, no genera ruido repetido.
+            $alertMin = (int) $assignment['alerta_minimo'];
+            if ($remaining === 0) {
+                SecurityAlert::emit('folios.agotados', 'high', [
+                    'component' => 'folios',
+                    'empresa_id' => $empresaId,
+                    'resource' => 'asignacion:' . (int) $assignment['id'],
+                    'reason' => 'tipo_' . $type,
+                    'count' => 0,
+                ]);
+            } elseif ($remaining === $alertMin && $alertMin > 0) {
+                SecurityAlert::emit('folios.bajos', 'medium', [
+                    'component' => 'folios',
+                    'empresa_id' => $empresaId,
+                    'resource' => 'asignacion:' . (int) $assignment['id'],
+                    'reason' => 'tipo_' . $type,
+                    'count' => $remaining,
+                ]);
+            }
 
             return [
                 'folio_consumido_id' => $consumedId,

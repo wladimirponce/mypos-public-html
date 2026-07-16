@@ -85,6 +85,7 @@ use Mypos\Services\PermissionService;
 use Mypos\Support\AppConfig;
 use Mypos\Support\Env;
 use Mypos\Support\SafeLogger;
+use Mypos\Support\RequestContext;
 
 $vendorAutoload = dirname(__DIR__) . '/vendor/autoload.php';
 
@@ -111,6 +112,7 @@ if (is_file($vendorAutoload)) {
 $envDir = dirname(__DIR__);
 Env::loadFile(dirname($envDir) . '/.env');
 Env::loadFile($envDir . '/.env');
+RequestContext::initialize($_SERVER['HTTP_X_CORRELATION_ID'] ?? null);
 
 // Mostrar errores en pantalla SOLO en entornos de depuración (jamás en producción).
 $appEnv = (string) ($_ENV['APP_ENV'] ?? getenv('APP_ENV') ?: 'production');

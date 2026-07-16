@@ -171,6 +171,9 @@ final class InventarioFisicoService
     /**
      * Obtiene o crea la sesión de barrido ABIERTA de la sucursal (regla
      * "mismo día = misma sesión": mientras siga abierta, se continúa).
+     *
+     * @param array<string, mixed> $body Cuerpo JSON (empresa_id, sucursal_id, nombre)
+     * @return array<string, mixed>
      */
     public function abrirSesionBarrido(int $userId, array $body): array
     {
@@ -180,7 +183,8 @@ final class InventarioFisicoService
 
         $sesion = $this->repository->findSesionAbierta($empresaId, $sucursalId);
         if ($sesion === null) {
-            $nombre = trim((string) ($body['nombre'] ?? ''));
+            $rawNombre = $body['nombre'] ?? '';
+            $nombre = trim(is_scalar($rawNombre) ? (string) $rawNombre : '');
             if ($nombre === '') {
                 $nombre = 'Barrido ' . date('d-m-Y H:i');
             }
@@ -196,6 +200,10 @@ final class InventarioFisicoService
         return $this->barridoPayload($empresaId, $sesion);
     }
 
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
     public function getBarrido(int $userId, int $id, array $params): array
     {
         $empresaId = $this->requireEmpresaId($params);
@@ -210,6 +218,9 @@ final class InventarioFisicoService
      * Registra una lectura del lector. Resuelve el producto por código exacto
      * (codigo/sku/código de barras) y acumula. Rechaza códigos no reconocidos y
      * productos que no controlan stock.
+     *
+     * @param array<string, mixed> $body Cuerpo JSON (empresa_id, codigo, cantidad)
+     * @return array<string, mixed>
      */
     public function escanear(int $userId, int $id, array $body): array
     {
@@ -221,11 +232,17 @@ final class InventarioFisicoService
             throw new HttpException('La sesión de barrido no está abierta', 409);
         }
 
-        $codigo = trim((string) ($body['codigo'] ?? ''));
+        $rawCodigo = $body['codigo'] ?? '';
+        $codigo = trim(is_scalar($rawCodigo) ? (string) $rawCodigo : '');
         if ($codigo === '') {
             throw new HttpException('Código vacío', 422);
         }
-        $cantidad = isset($body['cantidad']) ? (float) $body['cantidad'] : 1.0;
+        // Un valor presente pero no numérico cae a 0.0 y dispara la validación de abajo,
+        // igual que el cast (float) original.
+        $cantidad = 1.0;
+        if (isset($body['cantidad'])) {
+            $cantidad = is_numeric($body['cantidad']) ? (float) $body['cantidad'] : 0.0;
+        }
         if ($cantidad <= 0) {
             throw new HttpException('La cantidad debe ser mayor a 0', 422);
         }
@@ -277,6 +294,9 @@ final class InventarioFisicoService
      * diferencia (contado − stock actual) en una sola transacción. El delta
      * compone con ventas concurrentes; consolidar de nuevo sin lecturas nuevas
      * no cambia nada (idempotente). Devuelve las líneas para el ticket.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
      */
     public function consolidarBarrido(int $userId, int $id, array $params): array
     {
@@ -354,6 +374,9 @@ final class InventarioFisicoService
     /**
      * Productos que controlan stock y no fueron inventariados en la sesión.
      * Base para revisarlos y, si el barrido fue completo, llevarlos a 0.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
      */
     public function noInventariadosBarrido(int $userId, int $id, array $params): array
     {
@@ -384,6 +407,9 @@ final class InventarioFisicoService
      * el negativo de su stock actual y lo registra en la sesión. Solo tiene sentido
      * si el barrido cubrió todo el local (guarda en el frontend). Ignora productos
      * que sí tuvieron lecturas (para no pisar lo inventariado).
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
      */
     public function llevarACeroBarrido(int $userId, int $id, array $body): array
     {
@@ -464,6 +490,10 @@ final class InventarioFisicoService
         ];
     }
 
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
     public function cerrarBarrido(int $userId, int $id, array $params): array
     {
         $empresaId = $this->requireEmpresaId($params);
@@ -478,6 +508,10 @@ final class InventarioFisicoService
         return ['inventario_id' => $id, 'estado' => 'CERRADA'];
     }
 
+    /**
+     * @param array<string, string|null> $sesion Fila cruda de inventarios_fisicos
+     * @return array<string, mixed>
+     */
     private function barridoPayload(int $empresaId, array $sesion): array
     {
         $id         = (int) $sesion['id'];

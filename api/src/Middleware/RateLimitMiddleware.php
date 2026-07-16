@@ -7,6 +7,7 @@ namespace Mypos\Middleware;
 use Mypos\Core\Response;
 use Mypos\Support\AppConfig;
 use Mypos\Support\SafeLogger;
+use Mypos\Support\SecurityAlert;
 
 final class RateLimitMiddleware
 {
@@ -48,6 +49,20 @@ final class RateLimitMiddleware
             'ip' => $_SERVER['REMOTE_ADDR'] ?? null,
             'auth_sensitive' => $isAuthSensitive,
         ]);
+
+        if ($data['count'] === $max + 1) {
+            SecurityAlert::emit(
+                $isAuthSensitive ? 'auth.rate_limit_exceeded' : 'api.rate_limit_exceeded',
+                $isAuthSensitive ? 'high' : 'medium',
+                [
+                    'path' => $path,
+                    'ip' => $_SERVER['REMOTE_ADDR'] ?? null,
+                    'count' => $data['count'],
+                    'window_seconds' => $window,
+                    'component' => 'rate_limit',
+                ]
+            );
+        }
 
         Response::error(
             'Demasiadas solicitudes. Intenta nuevamente más tarde.',

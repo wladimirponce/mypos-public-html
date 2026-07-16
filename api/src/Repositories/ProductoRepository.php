@@ -153,6 +153,8 @@ final class ProductoRepository
      * Resuelve un producto por código EXACTO para lectura de lector de barras.
      * Busca en p.codigo, p.sku y productos_codigos_barra.codigo_barra (activo=1).
      * Prioriza productos que controlan stock. Devuelve null si no hay coincidencia.
+     *
+     * @return array{id: string, empresa_id: string, codigo: string|null, sku: string|null, nombre: string, controla_stock: string, activo: string}|null
      */
     public function findByCodigoExacto(int $empresaId, string $codigo): ?array
     {
@@ -182,6 +184,7 @@ final class ProductoRepository
             'codigo_s'   => $codigo,
             'codigo_b'   => $codigo,
         ]);
+        /** @var array{id: string, empresa_id: string, codigo: string|null, sku: string|null, nombre: string, controla_stock: string, activo: string}|false $row */
         $row = $statement->fetch(PDO::FETCH_ASSOC);
 
         return is_array($row) ? $row : null;

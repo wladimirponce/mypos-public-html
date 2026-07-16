@@ -161,7 +161,11 @@ final class InventarioFisicoRepository
 
     // ─── Barrido con lector ───
 
-    /** Sesión de barrido ABIERTA de la sucursal, o null. */
+    /**
+     * Sesión de barrido ABIERTA de la sucursal, o null.
+     *
+     * @return array<string, string|null>|null Fila cruda (columnas PDO como string|null)
+     */
     public function findSesionAbierta(int $empresaId, int $sucursalId): ?array
     {
         $st = $this->connection->prepare(
@@ -175,7 +179,11 @@ final class InventarioFisicoRepository
         return is_array($row) ? $row : null;
     }
 
-    /** Crea una cabecera de barrido ABIERTA (no puebla items; el log es la fuente). */
+    /**
+     * Crea una cabecera de barrido ABIERTA (no puebla items; el log es la fuente).
+     *
+     * @param array<string, mixed> $data
+     */
     public function createBarrido(array $data): int
     {
         $this->connection->prepare(
@@ -239,6 +247,8 @@ final class InventarioFisicoRepository
     /**
      * Resumen por producto de la sesión: pendiente, consolidado y bloqueo.
      * Une el log con productos para nombre/código actualizados.
+     *
+     * @return list<array<string, string|null>> Filas crudas (columnas PDO como string|null)
      */
     public function resumenBarrido(int $inventarioId, int $empresaId): array
     {
@@ -263,6 +273,8 @@ final class InventarioFisicoRepository
     /**
      * Productos con lecturas pendientes agrupadas: [{producto_id, contado, snapshot}].
      * snapshot = stock de sistema al iniciar el conteo (única lectura no-NULL del lote).
+     *
+     * @return list<array<string, string|null>> Filas crudas (columnas PDO como string|null)
      */
     public function scansPendientesAgrupados(int $inventarioId, int $empresaId): array
     {
@@ -324,6 +336,8 @@ final class InventarioFisicoRepository
      * Productos del catálogo que controlan stock y NO fueron inventariados en la
      * sesión (sin ninguna lectura). Incluye el stock actual de la sucursal, que es
      * lo que se descontaría al llevarlos a 0. Ordena primero los que tienen stock.
+     *
+     * @return list<array<string, string|null>> Filas crudas (columnas PDO como string|null)
      */
     public function noInventariados(int $inventarioId, int $empresaId, int $sucursalId): array
     {

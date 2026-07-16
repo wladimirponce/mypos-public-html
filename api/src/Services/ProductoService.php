@@ -10,6 +10,7 @@ use Mypos\Middleware\TenantMiddleware;
 use Mypos\Repositories\CentroCostoRepository;
 use Mypos\Repositories\ProductoRepository;
 use Mypos\Repositories\RubroRepository;
+use Mypos\Support\SecurityAlert;
 use PDOException;
 
 final class ProductoService
@@ -161,7 +162,34 @@ final class ProductoService
         $empresaId = $this->empresaId($data);
         $this->tenant($userId, $empresaId);
         $this->validateProducto($data);
+
+        // Precio anterior para detectar caídas sospechosas (posible fraude).
+        $precioNuevo = isset($data['precio_venta']) ? (int) $data['precio_venta'] : null;
+        $precioAnterior = null;
+        if ($precioNuevo !== null) {
+            $prev = Database::connection()->prepare(
+                'SELECT precio_venta FROM productos WHERE id = :id AND empresa_id = :e LIMIT 1'
+            );
+            $prev->execute([':id' => $id, ':e' => $empresaId]);
+            $val = $prev->fetchColumn();
+            $precioAnterior = $val === false ? null : (int) $val;
+        }
+
         $this->notFoundUnless($this->productos->update($id, $empresaId, $data));
+
+        // Alerta solo ante caída sospechosa: a 0 o por debajo del 50% del previo.
+        // Los cambios rutinarios de precio quedan en la auditoría, no como alerta.
+        if ($precioAnterior !== null && $precioNuevo !== null
+            && $precioAnterior > 0 && $precioNuevo !== $precioAnterior
+            && ($precioNuevo === 0 || $precioNuevo < (int) ($precioAnterior * 0.5))) {
+            SecurityAlert::emit('productos.precio_caida_sospechosa', 'medium', [
+                'component' => 'productos',
+                'empresa_id' => $empresaId,
+                'usuario_id' => $userId,
+                'resource' => 'producto:' . $id,
+                'reason' => 'precio_' . $precioAnterior . '_a_' . $precioNuevo,
+            ]);
+        }
 
         $codigosBarra = $data['codigos_barra'] ?? [];
 
