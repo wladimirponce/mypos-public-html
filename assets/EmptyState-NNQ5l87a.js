@@ -1,0 +1,1 @@
+import{t as e}from"./react-vendor-C0Fs0kvo.js";var t=e();function n({title:e,description:n}){return(0,t.jsxs)(`div`,{className:`rounded-lg border border-dashed border-border bg-white p-8 text-center`,children:[(0,t.jsx)(`p`,{className:`font-medium text-slate-900`,children:e}),n?(0,t.jsx)(`p`,{className:`mt-1 text-sm text-muted-foreground`,children:n}):null]})}export{n as t};
