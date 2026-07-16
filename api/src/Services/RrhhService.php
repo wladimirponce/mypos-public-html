@@ -31,7 +31,7 @@ final class RrhhService
             FROM empleados e
             LEFT JOIN ventas_credito_interno vci 
                 ON e.id = vci.empleado_id 
-                AND vci.empresa_id = :empresa_id
+                AND vci.empresa_id = :empresa_id_join
                 AND MONTH(vci.created_at) = :mes
                 AND YEAR(vci.created_at) = :anio
             WHERE e.empresa_id = :empresa_id
@@ -43,6 +43,7 @@ final class RrhhService
         $stmt = $this->db->prepare($query);
         $stmt->execute([
             'empresa_id' => $empresaId,
+            'empresa_id_join' => $empresaId,
             'mes' => $mes,
             'anio' => $anio
         ]);

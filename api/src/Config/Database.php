@@ -53,6 +53,9 @@ final class Database
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
+                // Tipos nativos en los fetch (INT/TINYINT llegan como number al
+                // JSON, no como "1"); evita el bug recurrente de flags string.
+                PDO::ATTR_STRINGIFY_FETCHES => false,
             ]);
         } catch (PDOException $exception) {
             throw new PDOException('No se pudo conectar a la base de datos (read-only).', (int) $exception->getCode(), $exception);
@@ -80,6 +83,8 @@ final class Database
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
+                // Tipos nativos en los fetch (ver readOnlyConnection).
+                PDO::ATTR_STRINGIFY_FETCHES => false,
             ]);
         } catch (PDOException $exception) {
             throw new PDOException('No se pudo conectar a la base de datos.', (int) $exception->getCode(), $exception);

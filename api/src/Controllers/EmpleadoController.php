@@ -108,13 +108,16 @@ final class EmpleadoController
                   FROM empleados 
                   WHERE empresa_id = :empresa_id 
                   AND activo = 1 
-                  AND (rut LIKE :q OR nombres LIKE :q OR apellidos LIKE :q) 
+                  AND (rut LIKE :q_rut OR nombres LIKE :q_nom OR apellidos LIKE :q_ape)
                   LIMIT 20";
 
+        $like = "%{$q}%";
         $stmt = Database::connection()->prepare($query);
         $stmt->execute([
             'empresa_id' => $empresaId,
-            'q' => "%{$q}%"
+            'q_rut' => $like,
+            'q_nom' => $like,
+            'q_ape' => $like
         ]);
 
         Response::success($stmt->fetchAll());
