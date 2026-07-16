@@ -648,6 +648,14 @@ $router->get('/api/v1/stock/alertas', protectedRoute([$stockController, 'alertas
 $inventarioFisicoController = new InventarioFisicoController();
 $router->get('/api/v1/inventario-fisico', protectedRoute([$inventarioFisicoController, 'index'], 'stock.ver'));
 $router->post('/api/v1/inventario-fisico', protectedRoute([$inventarioFisicoController, 'create'], 'stock.ajustar'));
+// Barrido con lector (antes de las rutas {id} para evitar colisión de patrón)
+$router->post('/api/v1/inventario-fisico/barrido', protectedRoute([$inventarioFisicoController, 'abrirBarrido'], 'stock.ajustar'));
+$router->get('/api/v1/inventario-fisico/barrido/{id}', protectedRoute([$inventarioFisicoController, 'getBarrido'], 'stock.ver'));
+$router->post('/api/v1/inventario-fisico/barrido/{id}/scan', protectedRoute([$inventarioFisicoController, 'scan'], 'stock.ajustar'));
+$router->post('/api/v1/inventario-fisico/barrido/{id}/consolidar', protectedRoute([$inventarioFisicoController, 'consolidar'], 'stock.ajustar'));
+$router->post('/api/v1/inventario-fisico/barrido/{id}/cerrar', protectedRoute([$inventarioFisicoController, 'cerrarBarrido'], 'stock.ajustar'));
+$router->get('/api/v1/inventario-fisico/barrido/{id}/no-inventariados', protectedRoute([$inventarioFisicoController, 'noInventariados'], 'stock.ver'));
+$router->post('/api/v1/inventario-fisico/barrido/{id}/llevar-a-cero', protectedRoute([$inventarioFisicoController, 'llevarACero'], 'stock.ajustar'));
 $router->get('/api/v1/inventario-fisico/{id}', protectedRoute([$inventarioFisicoController, 'show'], 'stock.ver'));
 $router->put('/api/v1/inventario-fisico/{id}/conteos', protectedRoute([$inventarioFisicoController, 'saveConteos'], 'stock.ajustar'));
 $router->post('/api/v1/inventario-fisico/{id}/aplicar', protectedRoute([$inventarioFisicoController, 'apply'], 'stock.ajustar'));

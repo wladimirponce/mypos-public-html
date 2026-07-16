@@ -1,6 +1,7 @@
 {
   "name": "agentika/mypos-backend",
   "description": "Backend API REST para MyPOS - Administrador Punto de Venta",
+  "license": "proprietary",
   "type": "project",
   "autoload": {
     "psr-4": {
@@ -20,11 +21,13 @@
     "friendsofphp/php-cs-fixer": "^3.64"
   },
   "scripts": {
-    "test": "phpunit",
+    "test": "@php vendor/bin/phpunit --configuration phpunit.xml.dist",
+    "test:unit": "@php vendor/bin/phpunit --configuration phpunit.xml.dist --testsuite unit",
+    "test:integration": "@php vendor/bin/phpunit --configuration phpunit.xml.dist --testsuite integration",
     "test:smoke": "php ../tests/run_smoke_tests.php",
     "check:env": "php ../scripts/check_env.php",
     "lint": "php -l public/index.php",
-    "analyse": "phpstan analyse src --level=max",
-    "cs-fix": "php-cs-fixer fix src"
+    "analyse": "@php vendor/bin/phpstan analyse --configuration phpstan.neon",
+    "cs-fix": "@php vendor/bin/php-cs-fixer fix src"
   }
 }

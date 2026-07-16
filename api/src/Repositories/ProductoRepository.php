@@ -149,6 +149,44 @@ final class ProductoRepository
         return is_array($row) ? $row : null;
     }
 
+    /**
+     * Resuelve un producto por código EXACTO para lectura de lector de barras.
+     * Busca en p.codigo, p.sku y productos_codigos_barra.codigo_barra (activo=1).
+     * Prioriza productos que controlan stock. Devuelve null si no hay coincidencia.
+     */
+    public function findByCodigoExacto(int $empresaId, string $codigo): ?array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT p.id, p.empresa_id, p.codigo, p.sku, p.nombre,
+                    p.controla_stock, p.activo
+             FROM productos p
+             WHERE p.empresa_id = :empresa_id
+               AND p.activo = 1
+               AND (
+                    p.codigo = :codigo_c
+                    OR p.sku = :codigo_s
+                    OR EXISTS (
+                        SELECT 1 FROM productos_codigos_barra pcb
+                        WHERE pcb.producto_id = p.id
+                          AND pcb.empresa_id = p.empresa_id
+                          AND pcb.activo = 1
+                          AND pcb.codigo_barra = :codigo_b
+                    )
+               )
+             ORDER BY p.controla_stock DESC, p.id
+             LIMIT 1'
+        );
+        $statement->execute([
+            'empresa_id' => $empresaId,
+            'codigo_c'   => $codigo,
+            'codigo_s'   => $codigo,
+            'codigo_b'   => $codigo,
+        ]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
     public function create(array $data): int
     {
         $statement = $this->connection->prepare(

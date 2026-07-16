@@ -52,6 +52,53 @@ final class InventarioFisicoController
         $this->respond(fn (int $uid): array => $this->service->aplicar($uid, (int) $params['id'], $p), 'Ajustes aplicados');
     }
 
+    // ─── Barrido con lector ───
+
+    /** POST /api/v1/inventario-fisico/barrido */
+    public function abrirBarrido(): void
+    {
+        $this->respond(fn (int $uid): array => $this->service->abrirSesionBarrido($uid, Request::json()), 'Sesión de barrido lista');
+    }
+
+    /** GET /api/v1/inventario-fisico/barrido/{id}?empresa_id=X */
+    public function getBarrido(array $params): void
+    {
+        $this->respond(fn (int $uid): array => $this->service->getBarrido($uid, (int) $params['id'], $_GET));
+    }
+
+    /** POST /api/v1/inventario-fisico/barrido/{id}/scan */
+    public function scan(array $params): void
+    {
+        $this->respond(fn (int $uid): array => $this->service->escanear($uid, (int) $params['id'], Request::json()));
+    }
+
+    /** POST /api/v1/inventario-fisico/barrido/{id}/consolidar?empresa_id=X */
+    public function consolidar(array $params): void
+    {
+        $p = array_merge($_GET, Request::json());
+        $this->respond(fn (int $uid): array => $this->service->consolidarBarrido($uid, (int) $params['id'], $p), 'Consolidación aplicada');
+    }
+
+    /** POST /api/v1/inventario-fisico/barrido/{id}/cerrar?empresa_id=X */
+    public function cerrarBarrido(array $params): void
+    {
+        $p = array_merge($_GET, Request::json());
+        $this->respond(fn (int $uid): array => $this->service->cerrarBarrido($uid, (int) $params['id'], $p), 'Barrido cerrado');
+    }
+
+    /** GET /api/v1/inventario-fisico/barrido/{id}/no-inventariados?empresa_id=X */
+    public function noInventariados(array $params): void
+    {
+        $this->respond(fn (int $uid): array => $this->service->noInventariadosBarrido($uid, (int) $params['id'], $_GET));
+    }
+
+    /** POST /api/v1/inventario-fisico/barrido/{id}/llevar-a-cero */
+    public function llevarACero(array $params): void
+    {
+        $body = array_merge($_GET, Request::json());
+        $this->respond(fn (int $uid): array => $this->service->llevarACeroBarrido($uid, (int) $params['id'], $body), 'Productos llevados a 0');
+    }
+
     private function respond(callable $callback, ?string $message = null): void
     {
         try {

@@ -1,0 +1,1 @@
+import{ab as a,al as t}from"./index-CglReBcw.js";const s={get(e){return a.get(t.agenteAlertas.config,{params:{empresa_id:e}})},update(e,r){return a.put(t.agenteAlertas.config,{empresa_id:e,...r})}};export{s as a};

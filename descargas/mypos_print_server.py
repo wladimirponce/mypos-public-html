@@ -1065,6 +1065,55 @@ def test_print():
     return jsonify({"success": ok, "message": message}), 200 if ok else 500
 
 
+def format_conteo_inventario(data: dict[str, Any]) -> bytes:
+    """Ticket de consolidación de inventario (barrido con lector).
+    Reutiliza los helpers ESC/POS. Columnas: producto | antes | contado | ajuste."""
+    ticket = bytearray()
+    ticket.extend(CMD_INIT)
+    ticket.extend(CMD_CODEPAGE_PC858)
+    ticket.extend(CMD_CENTER)
+    ticket.extend(CMD_BOLD_ON)
+    empresa = text(data.get("empresa") or data.get("nombre_fantasia") or data.get("razon_social"), 46)
+    ticket.extend(enc((empresa or "Empresa") + "\n"))
+    ticket.extend(CMD_BOLD_OFF)
+    if data.get("sucursal"):
+        ticket.extend(enc(text(data.get("sucursal"), 46) + "\n"))
+    ticket.extend(separator("="))
+    ticket.extend(CMD_BOLD_ON)
+    ticket.extend(enc("CONSOLIDACION DE INVENTARIO\n"))
+    ticket.extend(CMD_BOLD_OFF)
+    ticket.extend(enc("NO VALIDO COMO DOCUMENTO TRIBUTARIO\n"))
+    ticket.extend(separator("="))
+    ticket.extend(CMD_LEFT)
+    ticket.extend(line("Fecha", text(data.get("fecha")) or datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    ticket.extend(separator())
+    ticket.extend(CMD_BOLD_ON)
+    ticket.extend(enc(f"{'Producto':<20}{'Antes':>8}{'Cont':>8}{'Ajuste':>10}\n"))
+    ticket.extend(CMD_BOLD_OFF)
+    ticket.extend(separator())
+
+    lineas = data.get("lineas") or []
+    total_ajuste = 0.0
+    for item in lineas:
+        antes = number(item.get("antes"), 0)
+        contado = number(item.get("contado"), 0)
+        ajuste = number(item.get("ajuste"), 0)
+        total_ajuste += ajuste
+        rows = wrap_label(text(item.get("nombre")) or "Producto", 20)
+        ajuste_str = ("+" if ajuste > 0 else "") + f"{ajuste:g}"
+        ticket.extend(enc(f"{rows[0]:<20}{antes:>8g}{contado:>8g}{ajuste_str:>10}\n"))
+        for extra in rows[1:]:
+            ticket.extend(enc(extra[:20] + "\n"))
+
+    ticket.extend(separator("="))
+    ticket.extend(line("Productos ajustados", str(len(lineas))))
+    ticket.extend(line("Ajuste neto", ("+" if total_ajuste > 0 else "") + f"{total_ajuste:g}"))
+    ticket.extend(CMD_CENTER)
+    ticket.extend(enc("\n"))
+    ticket.extend(CMD_FEED_CUT)
+    return bytes(ticket)
+
+
 @app.post("/print")
 def print_ticket():
     data = request.get_json(silent=True) or {}
@@ -1098,6 +1147,11 @@ def print_ticket():
 
         if kind == "etiquetas":
             payload = format_etiquetas_batch(data)
+            ok, message = print_raw(payload, printer)
+            return jsonify({"success": ok, "message": message}), 200 if ok else 500
+
+        if kind == "conteo_inventario":
+            payload = format_conteo_inventario(data)
             ok, message = print_raw(payload, printer)
             return jsonify({"success": ok, "message": message}), 200 if ok else 500
 
