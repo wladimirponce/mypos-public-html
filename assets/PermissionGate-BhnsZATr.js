@@ -1,0 +1,1 @@
+import{t as e}from"./react-vendor-C0Fs0kvo.js";import{qt as t}from"./index-DnfIkmqm.js";var n=e();function r({permission:e,anyOf:r,fallback:i=null,children:a}){let o=t(e=>e.hasPermission),s=t(e=>e.hasAnyPermission);return(e?o(e):!r||s(r))?(0,n.jsx)(n.Fragment,{children:a}):(0,n.jsx)(n.Fragment,{children:i})}export{r as t};
