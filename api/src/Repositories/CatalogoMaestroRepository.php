@@ -173,7 +173,14 @@ final class CatalogoMaestroRepository
              WHERE p.catalogo_id = :catalogo_id
                AND p.estado_revision <> 'INACTIVO'
                AND (p.nombre LIKE :q_nombre OR p.principio_activo LIKE :q_principio
-                    OR p.producto_externo_id = :q_exact OR p.codigo_referencia = :q_exact2)
+                    OR p.producto_externo_id = :q_exact OR p.codigo_referencia = :q_exact2
+                    OR EXISTS (
+                        SELECT 1 FROM catalogo_maestro_codigos_barra cb
+                        WHERE cb.catalogo_id = p.catalogo_id
+                          AND cb.catalogo_producto_id = p.id
+                          AND cb.activo = 1
+                          AND cb.codigo_barra = :q_barra
+                    ))
              ORDER BY p.nombre
              LIMIT {$limit}"
         );
@@ -183,6 +190,7 @@ final class CatalogoMaestroRepository
             'q_principio' => $like,
             'q_exact' => $query,
             'q_exact2' => $query,
+            'q_barra' => $query,
         ]);
         return $stmt->fetchAll();
     }
