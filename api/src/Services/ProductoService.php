@@ -686,7 +686,13 @@ final class ProductoService
             return;
         } else {
             $fotoNombre = $codigoBarra . '.jpg';
-            $fotoPath = dirname(__DIR__, 5) . DIRECTORY_SEPARATOR . 'fotos' . DIRECTORY_SEPARATOR . $fotoNombre;
+            // FOTOS_DIR permite fijar la carpeta en produccion (en el hosting el
+            // calculo relativo apunta fuera de la cuenta). Fallback: layout del repo.
+            $fotosDir = trim((string) \Mypos\Support\Env::get('FOTOS_DIR', ''));
+            if ($fotosDir === '') {
+                $fotosDir = dirname(__DIR__, 5) . DIRECTORY_SEPARATOR . 'fotos';
+            }
+            $fotoPath = rtrim($fotosDir, '/\\') . DIRECTORY_SEPARATOR . $fotoNombre;
             if (file_exists($fotoPath)) {
                 $tempFile = $fotoPath;
             }
