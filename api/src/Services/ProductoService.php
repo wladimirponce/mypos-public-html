@@ -121,6 +121,21 @@ final class ProductoService
         $this->tenant($userId, $empresaId);
         $this->validateProducto($data);
 
+        if (isset($data['stock_inicial']) && !is_numeric($data['stock_inicial'])) {
+            throw new HttpException('El stock inicial debe ser numerico', 422);
+        }
+        $stockInicial = isset($data['stock_inicial']) ? (float) $data['stock_inicial'] : 0.0;
+        $sucursalId = isset($data['sucursal_id']) ? (int) $data['sucursal_id'] : 0;
+        if ($stockInicial < 0) {
+            throw new HttpException('El stock inicial no puede ser negativo', 422);
+        }
+        if ($stockInicial > 0) {
+            if ($sucursalId <= 0) {
+                throw new HttpException('Debes seleccionar una sucursal para registrar el stock inicial', 422);
+            }
+            (new PermissionService())->assertPermission($userId, $empresaId, 'stock.ajustar');
+        }
+
         $codigosBarra = $this->normalizeAndValidateBarcodes($empresaId, $data['codigos_barra'] ?? []);
         $db = Database::connection();
         // Puede llamarse dentro de una transaccion mayor (ej: incorporar desde
@@ -132,6 +147,7 @@ final class ProductoService
 
         try {
             $productoId = $this->guard(fn (): int => $this->productos->create($data));
+            $stockResult = null;
             foreach ($codigosBarra as $bc) {
                 $codigoBarraVal = (string) $bc['codigo_barra'];
                 $imagenUrlVal = isset($bc['imagen_url']) ? trim((string)$bc['imagen_url']) : null;
@@ -149,10 +165,21 @@ final class ProductoService
                 $this->asociarImagenPorCodigoBarra($userId, $empresaId, $productoId, $codigoBarraVal, $imagenUrlVal);
             }
 
+            if ($stockInicial > 0) {
+                $stockResult = (new StockService())->ajustarStock([
+                    'empresa_id' => $empresaId,
+                    'sucursal_id' => $sucursalId,
+                    'producto_id' => $productoId,
+                    'usuario_id' => $userId,
+                    'cantidad' => $stockInicial,
+                    'observacion' => 'Stock inicial registrado al crear el producto',
+                ], $db);
+            }
+
             if ($ownsTransaction) {
                 $db->commit();
             }
-            return ['id' => $productoId];
+            return ['id' => $productoId, 'stock_inicial' => $stockResult];
         } catch (Throwable $exception) {
             if ($ownsTransaction && $db->inTransaction()) {
                 $db->rollBack();

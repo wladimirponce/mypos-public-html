@@ -1,0 +1,1 @@
+import{M as e,y as t}from"./index-Dv4sjv3f.js";function n(n){return e(t,n)}export{n as t};
