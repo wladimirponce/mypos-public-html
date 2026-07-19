@@ -126,7 +126,11 @@ final class CatalogoMaestroService
         if (mb_strlen($query) < 2) {
             throw new HttpException('La busqueda requiere al menos 2 caracteres', 422);
         }
-        return ['productos' => $this->repository->search($catalogId, $query, max(1, min($limit, 100)))];
+        $productos = array_map(
+            fn (array $row): array => $this->exposeMetadata($row),
+            $this->repository->search($catalogId, $query, max(1, min($limit, 100)))
+        );
+        return ['productos' => $productos];
     }
 
     public function buscarCodigo(string $catalogCode, string $barcode): array
@@ -136,7 +140,7 @@ final class CatalogoMaestroService
         if ($product === null) {
             throw new HttpException('Producto no encontrado en el catalogo maestro', 404);
         }
-        return ['producto' => $product];
+        return ['producto' => $this->exposeMetadata($product)];
     }
 
     public function metricas(string $catalogCode): array
@@ -252,10 +256,31 @@ final class CatalogoMaestroService
             'bioequivalente' => $this->text($row['bioequivalente'] ?? null),
             'cenabast' => $this->boolInt($row['cenabast'] ?? 0),
             'estado_revision' => 'VALIDO',
-            'metadata_json' => null,
+            'metadata_json' => $this->metadataJson($row),
         ];
         $normalized['source_hash'] = hash('sha256', json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         return $normalized;
+    }
+
+    private function exposeMetadata(array $row): array
+    {
+        $metadata = json_decode((string) ($row['metadata_json'] ?? ''), true);
+        unset($row['metadata_json']);
+        $precio = is_array($metadata) ? ($metadata['precio_referencia'] ?? null) : null;
+        $row['precio_referencia'] = is_numeric($precio) ? (int) $precio : null;
+        return $row;
+    }
+
+    private function metadataJson(array $row): ?string
+    {
+        $metadata = [];
+        $precioReferencia = $this->text($row['precio_referencia'] ?? null);
+        if ($precioReferencia !== null && ctype_digit($precioReferencia) && (int) $precioReferencia > 0) {
+            $metadata['precio_referencia'] = (int) $precioReferencia;
+        }
+        return $metadata === []
+            ? null
+            : json_encode($metadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     private function csvRows(string $path): iterable

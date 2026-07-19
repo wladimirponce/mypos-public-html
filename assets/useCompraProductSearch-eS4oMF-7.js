@@ -1,1 +1,0 @@
-import{Ot as e,qt as t}from"./index-DnfIkmqm.js";import{n}from"./compraService-BJRi2efL.js";function r(r){let i=t(e=>e.empresaActiva);return e({queryKey:[`compras`,`productos`,i?.empresa_id,r],queryFn:()=>n.products(i?.empresa_id??0,r),enabled:!!(i?.empresa_id&&r.trim().length>=2),staleTime:2e4})}export{r as t};

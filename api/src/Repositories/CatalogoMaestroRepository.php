@@ -168,7 +168,7 @@ final class CatalogoMaestroRepository
         $stmt = $this->db->prepare(
             "SELECT p.id, p.producto_externo_id, p.codigo_referencia, p.nombre, p.categoria,
                     p.laboratorio, p.principio_activo, p.dosis, p.titular, p.presentacion,
-                    p.bioequivalente, p.cenabast, p.estado_revision
+                    p.bioequivalente, p.cenabast, p.estado_revision, p.metadata_json
              FROM catalogo_maestro_productos p
              WHERE p.catalogo_id = :catalogo_id
                AND p.estado_revision <> 'INACTIVO'
@@ -192,7 +192,7 @@ final class CatalogoMaestroRepository
         $stmt = $this->db->prepare(
             'SELECT p.id, p.producto_externo_id, p.codigo_referencia, p.nombre, p.categoria,
                     p.laboratorio, p.principio_activo, p.dosis, p.titular, p.presentacion,
-                    p.bioequivalente, p.cenabast, p.estado_revision,
+                    p.bioequivalente, p.cenabast, p.estado_revision, p.metadata_json,
                     c.codigo_barra, c.tipo_codigo, c.principal
              FROM catalogo_maestro_codigos_barra c
              INNER JOIN catalogo_maestro_productos p ON p.id = c.catalogo_producto_id
@@ -209,7 +209,7 @@ final class CatalogoMaestroRepository
         $stmt = $this->db->prepare(
             'SELECT id, catalogo_id, producto_externo_id, codigo_referencia, nombre, descripcion,
                     unidad_medida, categoria, familia, laboratorio, principio_activo, dosis,
-                    titular, presentacion, bioequivalente, cenabast, estado_revision
+                    titular, presentacion, bioequivalente, cenabast, estado_revision, metadata_json
              FROM catalogo_maestro_productos
              WHERE id = :id AND catalogo_id = :catalogo_id AND estado_revision <> "INACTIVO"
              LIMIT 1'
