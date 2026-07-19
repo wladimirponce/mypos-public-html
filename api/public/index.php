@@ -616,6 +616,7 @@ $router->put('/api/v1/productos/{id}/atributos', protectedRoute([$productoAtribu
 $router->get('/api/v1/productos/{id}/codigos-barra', protectedRoute([$productoController, 'listBarcodes'], 'productos.ver'));
 $router->post('/api/v1/productos/{id}/codigos-barra', protectedRoute([$productoController, 'storeBarcode'], 'productos.editar'));
 $router->delete('/api/v1/productos/{id}/codigos-barra/{codigo_barra_id}', protectedRoute([$productoController, 'deleteBarcode'], 'productos.editar'));
+$router->post('/api/v1/productos/{id}/codigos-barra/transferir', protectedRoute([$productoController, 'transferBarcode'], 'productos.editar'));
 $router->get('/api/v1/productos/{id}/imagenes', protectedRoute([$productoController, 'listImages'], 'productos.ver'));
 $router->post('/api/v1/productos/{id}/imagenes', protectedRoute([$productoController, 'storeImage'], 'productos.editar'));
 $router->delete('/api/v1/productos/{id}/imagenes/{imagen_id}', protectedRoute([$productoController, 'deleteImage'], 'productos.editar'));

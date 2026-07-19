@@ -12,6 +12,7 @@ use Mypos\Repositories\ProductoRepository;
 use Mypos\Repositories\RubroRepository;
 use Mypos\Support\SecurityAlert;
 use PDOException;
+use Throwable;
 
 final class ProductoService
 {
@@ -120,29 +121,37 @@ final class ProductoService
         $this->tenant($userId, $empresaId);
         $this->validateProducto($data);
 
-        $productoId = $this->guard(fn (): int => $this->productos->create($data));
+        $codigosBarra = $this->normalizeAndValidateBarcodes($empresaId, $data['codigos_barra'] ?? []);
+        $db = Database::connection();
+        $db->beginTransaction();
 
-        $codigosBarra = $data['codigos_barra'] ?? [];
-        foreach ($codigosBarra as $bc) {
-            $codigoBarraVal = isset($bc['codigo_barra']) ? trim((string)$bc['codigo_barra']) : '';
-            if ($codigoBarraVal !== '') {
+        try {
+            $productoId = $this->guard(fn (): int => $this->productos->create($data));
+            foreach ($codigosBarra as $bc) {
+                $codigoBarraVal = (string) $bc['codigo_barra'];
                 $imagenUrlVal = isset($bc['imagen_url']) ? trim((string)$bc['imagen_url']) : null;
                 $principalVal = !empty($bc['principal']) ? 1 : 0;
 
-                $this->productos->createBarcode($productoId, [
+                $this->guard(fn (): int => $this->productos->createBarcode($productoId, [
                     'empresa_id' => $empresaId,
                     'codigo_barra' => $codigoBarraVal,
                     'tipo_codigo' => $bc['tipo_codigo'] ?? 'BARRA',
                     'principal' => $principalVal,
                     'descripcion' => $principalVal ? 'Código de barra principal' : 'Código de barra adicional',
                     'imagen_url' => $imagenUrlVal,
-                ]);
+                ]));
 
                 $this->asociarImagenPorCodigoBarra($userId, $empresaId, $productoId, $codigoBarraVal, $imagenUrlVal);
             }
-        }
 
-        return ['id' => $productoId];
+            $db->commit();
+            return ['id' => $productoId];
+        } catch (Throwable $exception) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $exception;
+        }
     }
 
     public function showProducto(int $userId, int $id, int $empresaId): array
@@ -162,6 +171,7 @@ final class ProductoService
         $empresaId = $this->empresaId($data);
         $this->tenant($userId, $empresaId);
         $this->validateProducto($data);
+        $codigosBarra = $this->normalizeAndValidateBarcodes($empresaId, $data['codigos_barra'] ?? [], $id);
 
         // Precio anterior para detectar caídas sospechosas (posible fraude).
         $precioNuevo = isset($data['precio_venta']) ? (int) $data['precio_venta'] : null;
@@ -175,7 +185,11 @@ final class ProductoService
             $precioAnterior = $val === false ? null : (int) $val;
         }
 
-        $this->notFoundUnless($this->productos->update($id, $empresaId, $data));
+        $db = Database::connection();
+        $db->beginTransaction();
+
+        try {
+            $this->notFoundUnless($this->productos->update($id, $empresaId, $data));
 
         // Alerta solo ante caída sospechosa: a 0 o por debajo del 50% del previo.
         // Los cambios rutinarios de precio quedan en la auditoría, no como alerta.
@@ -191,10 +205,6 @@ final class ProductoService
             ]);
         }
 
-        $codigosBarra = $data['codigos_barra'] ?? [];
-
-        $db = Database::connection();
-        
         // 1. Desactivar todos los códigos de barra actuales para este producto
         $db->prepare(
             'UPDATE productos_codigos_barra SET principal = 0, activo = 0, updated_at = CURRENT_TIMESTAMP WHERE producto_id = :producto_id AND empresa_id = :empresa_id'
@@ -246,7 +256,14 @@ final class ProductoService
             $this->asociarImagenPorCodigoBarra($userId, $empresaId, $id, $codigoBarraVal, $imagenUrlVal);
         }
 
-        return ['id' => $id];
+            $db->commit();
+            return ['id' => $id];
+        } catch (Throwable $exception) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $exception;
+        }
     }
 
     public function deleteProducto(int $userId, int $id, int $empresaId): array
@@ -293,6 +310,9 @@ final class ProductoService
         $this->validateProductAccess($userId, $productoId, $empresaId);
         $this->requireText($data, 'codigo_barra');
 
+        $normalized = $this->normalizeAndValidateBarcodes($empresaId, [$data], $productoId);
+        $data = $normalized[0];
+
         $barcodeData = $data;
         $barcodeData['imagen_url'] = $data['imagen_url'] ?? null;
 
@@ -309,6 +329,72 @@ final class ProductoService
         $this->notFoundUnless($this->productos->deleteBarcode($barcodeId, $productoId, $empresaId));
 
         return ['id' => $barcodeId, 'activo' => 0];
+    }
+
+    public function transferBarcode(int $userId, int $productoId, array $data): array
+    {
+        $empresaId = $this->empresaId($data);
+        $this->validateProductAccess($userId, $productoId, $empresaId);
+        $codigoBarra = preg_replace('/[\x00-\x20\x7F]+/u', '', (string) ($data['codigo_barra'] ?? '')) ?? '';
+        $origenProductoId = (int) ($data['origen_producto_id'] ?? 0);
+
+        if ($codigoBarra === '' || $origenProductoId <= 0 || $origenProductoId === $productoId) {
+            throw new HttpException('Datos de transferencia invalidos', 422);
+        }
+
+        $owner = $this->productos->findActiveBarcodeOwner($empresaId, $codigoBarra, $productoId);
+        if ($owner === null || (int) $owner['producto_id'] !== $origenProductoId) {
+            throw new HttpException('El codigo ya no pertenece al producto indicado. Actualiza el formulario.', 409);
+        }
+
+        $db = Database::connection();
+        $db->beginTransaction();
+        try {
+            $this->notFoundUnless($this->productos->deactivateActiveBarcodeByCode(
+                $empresaId,
+                $origenProductoId,
+                $codigoBarra
+            ));
+            $barcodeId = $this->productos->reactivateBarcodeForProduct($empresaId, $productoId, $codigoBarra);
+            if ($barcodeId === null) {
+                $barcodeId = $this->productos->createBarcode($productoId, [
+                    'empresa_id' => $empresaId,
+                    'codigo_barra' => $codigoBarra,
+                    'tipo_codigo' => 'BARRA',
+                    'principal' => 0,
+                    'descripcion' => 'Codigo transferido desde producto ' . $origenProductoId,
+                    'imagen_url' => null,
+                ]);
+            }
+            $db->commit();
+
+            AuditoriaService::registrarEvento([
+                'empresa_id' => $empresaId,
+                'usuario_id' => $userId,
+                'modulo' => 'productos',
+                'accion' => 'transferir_codigo_barra',
+                'entidad' => 'productos_codigos_barra',
+                'entidad_id' => $barcodeId,
+                'descripcion' => 'Codigo de barra transferido entre productos',
+                'datos_anteriores' => ['producto_id' => $origenProductoId],
+                'datos_nuevos' => ['producto_id' => $productoId],
+                'metadata' => ['codigo_barra' => $codigoBarra],
+                'severidad' => 'INFO',
+                'resultado' => 'OK',
+            ]);
+
+            return [
+                'id' => $barcodeId,
+                'codigo_barra' => $codigoBarra,
+                'origen_producto_id' => $origenProductoId,
+                'destino_producto_id' => $productoId,
+            ];
+        } catch (Throwable $exception) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $exception;
+        }
     }
 
     public function createImage(int $userId, int $productoId, array $data): array
@@ -491,6 +577,56 @@ final class ProductoService
         if (!isset($data[$field]) || !is_int($data[$field]) && !ctype_digit((string) $data[$field]) || (int) $data[$field] < 0) {
             throw new HttpException('Error de validación', 422, [$field => ["El campo {$field} debe ser un entero >= 0"]]);
         }
+    }
+
+    private function normalizeAndValidateBarcodes(int $empresaId, array $barcodes, ?int $excludeProductoId = null): array
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($barcodes as $barcode) {
+            if (!is_array($barcode)) {
+                continue;
+            }
+
+            // Lectores USB suelen terminar con Enter/Tab. Se eliminan controles
+            // y espacios sin alterar codigos alfanumericos validos.
+            $code = preg_replace('/[\x00-\x20\x7F]+/u', '', (string) ($barcode['codigo_barra'] ?? '')) ?? '';
+            if ($code === '') {
+                continue;
+            }
+            if (strlen($code) > 80) {
+                throw new HttpException('Error de validacion', 422, [
+                    'codigos_barra' => ['El codigo de barra no puede superar 80 caracteres'],
+                ]);
+            }
+            if (isset($seen[$code])) {
+                throw new HttpException('Error de validacion', 422, [
+                    'codigos_barra' => ["El codigo de barra {$code} esta repetido en el formulario"],
+                ]);
+            }
+
+            $owner = $this->productos->findActiveBarcodeOwner($empresaId, $code, $excludeProductoId);
+            if ($owner !== null) {
+                $label = trim((string) ($owner['codigo'] ?? ''));
+                $label = $label !== '' ? $label . ' - ' . (string) $owner['nombre'] : (string) $owner['nombre'];
+                throw new HttpException('Codigo de barra ya utilizado', 422, [
+                    'codigos_barra' => ["El codigo {$code} ya esta asociado al producto {$label}"],
+                    'codigo_barra_conflicto' => [
+                        'codigo_barra' => $code,
+                        'producto_id' => (int) $owner['producto_id'],
+                        'producto_codigo' => (string) ($owner['codigo'] ?? ''),
+                        'producto_nombre' => (string) $owner['nombre'],
+                    ],
+                ]);
+            }
+
+            $seen[$code] = true;
+            $barcode['codigo_barra'] = $code;
+            $normalized[] = $barcode;
+        }
+
+        return $normalized;
     }
 
     private function tenant(int $userId, int $empresaId): void

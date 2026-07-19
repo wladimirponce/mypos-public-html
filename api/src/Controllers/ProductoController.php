@@ -81,6 +81,14 @@ final class ProductoController
         $this->respond(fn (int $userId): array => $this->service->deleteBarcode($userId, (int) $params['id'], (int) $params['codigo_barra_id'], $this->queryEmpresaId()), 'Código de barra desactivado');
     }
 
+    public function transferBarcode(array $params): void
+    {
+        $this->respond(
+            fn (int $userId): array => $this->service->transferBarcode($userId, (int) $params['id'], Request::json()),
+            'Codigo de barra transferido'
+        );
+    }
+
     public function listImages(array $params): void
     {
         $this->related($params, 'imagenes');

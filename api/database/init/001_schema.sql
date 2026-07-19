@@ -218,10 +218,13 @@ CREATE TABLE IF NOT EXISTS productos_codigos_barra (
     descripcion VARCHAR(160) NULL,
     principal TINYINT(1) NOT NULL DEFAULT 0,
     activo TINYINT(1) NOT NULL DEFAULT 1,
+    codigo_barra_activo VARCHAR(80) GENERATED ALWAYS AS (
+        CASE WHEN activo = 1 THEN codigo_barra ELSE NULL END
+    ) STORED,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_productos_codigos_empresa_codigo (empresa_id, codigo_barra),
+    UNIQUE KEY uq_productos_codigos_empresa_codigo_activo (empresa_id, codigo_barra_activo),
     KEY idx_productos_codigos_producto (producto_id),
     KEY idx_productos_codigos_busqueda (empresa_id, codigo_barra, activo),
     CONSTRAINT fk_productos_codigos_empresa FOREIGN KEY (empresa_id) REFERENCES empresas (id),

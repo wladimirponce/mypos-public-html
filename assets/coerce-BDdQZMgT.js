@@ -1,1 +1,0 @@
-import{M as e,y as t}from"./index-V4ihfpQR.js";function n(n){return e(t,n)}export{n as t};

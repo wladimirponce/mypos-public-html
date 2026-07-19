@@ -294,6 +294,29 @@ final class ProductoRepository
         );
     }
 
+    public function findActiveBarcodeOwner(int $empresaId, string $codigoBarra, ?int $excludeProductoId = null): ?array
+    {
+        $sql = 'SELECT pcb.producto_id, p.codigo, p.nombre
+                FROM productos_codigos_barra pcb
+                INNER JOIN productos p ON p.id = pcb.producto_id AND p.empresa_id = pcb.empresa_id
+                WHERE pcb.empresa_id = :empresa_id
+                  AND pcb.codigo_barra = :codigo_barra
+                  AND pcb.activo = 1';
+        $params = ['empresa_id' => $empresaId, 'codigo_barra' => $codigoBarra];
+
+        if ($excludeProductoId !== null) {
+            $sql .= ' AND pcb.producto_id <> :exclude_producto_id';
+            $params['exclude_producto_id'] = $excludeProductoId;
+        }
+
+        $sql .= ' LIMIT 1';
+        $statement = $this->connection->prepare($sql);
+        $statement->execute($params);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
     public function createBarcode(int $productoId, array $data): int
     {
         if ((int) ($data['principal'] ?? 0) === 1) {
@@ -326,6 +349,51 @@ final class ProductoRepository
         $statement->execute(['id' => $id, 'producto_id' => $productoId, 'empresa_id' => $empresaId]);
 
         return $statement->rowCount() > 0;
+    }
+
+    public function deactivateActiveBarcodeByCode(int $empresaId, int $productoId, string $codigoBarra): bool
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE productos_codigos_barra
+             SET activo = 0, principal = 0, updated_at = CURRENT_TIMESTAMP
+             WHERE empresa_id = :empresa_id AND producto_id = :producto_id
+               AND codigo_barra = :codigo_barra AND activo = 1'
+        );
+        $statement->execute([
+            'empresa_id' => $empresaId,
+            'producto_id' => $productoId,
+            'codigo_barra' => $codigoBarra,
+        ]);
+
+        return $statement->rowCount() > 0;
+    }
+
+    public function reactivateBarcodeForProduct(int $empresaId, int $productoId, string $codigoBarra): ?int
+    {
+        $statement = $this->connection->prepare(
+            'SELECT id FROM productos_codigos_barra
+             WHERE empresa_id = :empresa_id AND producto_id = :producto_id
+               AND codigo_barra = :codigo_barra AND activo = 0
+             ORDER BY id DESC LIMIT 1'
+        );
+        $statement->execute([
+            'empresa_id' => $empresaId,
+            'producto_id' => $productoId,
+            'codigo_barra' => $codigoBarra,
+        ]);
+        $id = $statement->fetchColumn();
+        if ($id === false) {
+            return null;
+        }
+
+        $update = $this->connection->prepare(
+            'UPDATE productos_codigos_barra
+             SET activo = 1, principal = 0, updated_at = CURRENT_TIMESTAMP
+             WHERE id = :id'
+        );
+        $update->execute(['id' => $id]);
+
+        return (int) $id;
     }
 
     public function listImages(int $productoId, int $empresaId): array
