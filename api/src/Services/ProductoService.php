@@ -123,7 +123,12 @@ final class ProductoService
 
         $codigosBarra = $this->normalizeAndValidateBarcodes($empresaId, $data['codigos_barra'] ?? []);
         $db = Database::connection();
-        $db->beginTransaction();
+        // Puede llamarse dentro de una transaccion mayor (ej: incorporar desde
+        // catalogo maestro); solo administra la transaccion si la abrio aqui.
+        $ownsTransaction = !$db->inTransaction();
+        if ($ownsTransaction) {
+            $db->beginTransaction();
+        }
 
         try {
             $productoId = $this->guard(fn (): int => $this->productos->create($data));
@@ -144,10 +149,12 @@ final class ProductoService
                 $this->asociarImagenPorCodigoBarra($userId, $empresaId, $productoId, $codigoBarraVal, $imagenUrlVal);
             }
 
-            $db->commit();
+            if ($ownsTransaction) {
+                $db->commit();
+            }
             return ['id' => $productoId];
         } catch (Throwable $exception) {
-            if ($db->inTransaction()) {
+            if ($ownsTransaction && $db->inTransaction()) {
                 $db->rollBack();
             }
             throw $exception;
@@ -186,7 +193,10 @@ final class ProductoService
         }
 
         $db = Database::connection();
-        $db->beginTransaction();
+        $ownsTransaction = !$db->inTransaction();
+        if ($ownsTransaction) {
+            $db->beginTransaction();
+        }
 
         try {
             $this->notFoundUnless($this->productos->update($id, $empresaId, $data));
@@ -256,10 +266,12 @@ final class ProductoService
             $this->asociarImagenPorCodigoBarra($userId, $empresaId, $id, $codigoBarraVal, $imagenUrlVal);
         }
 
-            $db->commit();
+            if ($ownsTransaction) {
+                $db->commit();
+            }
             return ['id' => $id];
         } catch (Throwable $exception) {
-            if ($db->inTransaction()) {
+            if ($ownsTransaction && $db->inTransaction()) {
                 $db->rollBack();
             }
             throw $exception;
