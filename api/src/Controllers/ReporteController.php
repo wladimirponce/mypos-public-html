@@ -55,6 +55,16 @@ final class ReporteController
         $this->respond(fn (): array => $this->service->dashboard($_GET));
     }
 
+    public function calidadDatos(): void
+    {
+        $this->respond(fn (): array => $this->service->calidadDatos($_GET));
+    }
+
+    public function analiticaAvanzada(): void
+    {
+        $this->respond(fn (): array => $this->service->analiticaAvanzada($_GET));
+    }
+
     public function saludFinanciera(): void
     {
         $this->respond(function (): array {

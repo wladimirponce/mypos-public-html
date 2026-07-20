@@ -35,6 +35,11 @@ final class AlertasRunner
         'ventas_caida'     => ['intervalo_min' => 230,  'ventanas' => [[14, 16], [19, 21]]],
         'suscripcion'      => ['intervalo_min' => 1300, 'ventanas' => [[9, 13]]],
         'compras_borrador' => ['intervalo_min' => 1300, 'ventanas' => [[9, 13]]],
+        'inventario_inmovilizado' => ['intervalo_min' => 1300, 'ventanas' => [[8, 12]]],
+        'anomalias_ventas' => ['intervalo_min' => 230, 'ventanas' => [[14, 16], [19, 21]]],
+        'anomalias_caja' => ['intervalo_min' => 1300, 'ventanas' => [[8, 12]]],
+        'anomalias_stock' => ['intervalo_min' => 350, 'ventanas' => [[8, 21]]],
+        'proveedores_atrasados' => ['intervalo_min' => 1300, 'ventanas' => [[8, 12]]],
         'resumen_diario'   => ['intervalo_min' => 1300, 'ventanas' => [[8, 10]]],
     ];
 
@@ -167,6 +172,11 @@ final class AlertasRunner
             'folios_bajos' => $this->chequeos->foliosBajos($empresaId, $params),
             'suscripcion' => $this->chequeos->suscripcion($empresaId, $params),
             'compras_borrador' => $this->chequeos->comprasBorrador($empresaId, $params),
+            'inventario_inmovilizado' => $this->chequeos->inventarioInmovilizado($empresaId, $params),
+            'anomalias_ventas' => $this->chequeos->anomaliasVentas($empresaId, $params),
+            'anomalias_caja' => $this->chequeos->anomaliasCaja($empresaId, $params),
+            'anomalias_stock' => $this->chequeos->anomaliasStock($empresaId, $params),
+            'proveedores_atrasados' => $this->chequeos->proveedoresAtrasados($empresaId, $params),
             'resumen_diario' => $this->chequeos->resumenDiario($empresaId, $params),
             default => [],
         };

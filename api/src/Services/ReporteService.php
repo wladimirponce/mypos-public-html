@@ -20,6 +20,70 @@ final class ReporteService
         $this->repository = $repository ?? new ReporteRepository(Database::connection());
     }
 
+    public function calidadDatos(array $filters): array
+    {
+        $empresaId = (int) ($filters['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+
+        $metricas = $this->repository->calidadDatos($empresaId);
+        $total = max(1, $metricas['productos_activos']);
+        $definiciones = [
+            ['codigo' => 'SIN_COSTO', 'campo' => 'productos_sin_costo', 'titulo' => 'Productos sin costo', 'impacto' => 'Impide calcular margen y capital correctamente.', 'url' => '/app/productos'],
+            ['codigo' => 'SIN_PROVEEDOR', 'campo' => 'productos_sin_proveedor', 'titulo' => 'Productos sin proveedor', 'impacto' => 'Reduce la calidad de las recomendaciones de compra.', 'url' => '/app/proveedores'],
+            ['codigo' => 'SIN_PARAMETROS_STOCK', 'campo' => 'productos_sin_parametros_stock', 'titulo' => 'Productos sin parámetros de reposición', 'impacto' => 'No se puede anticipar el quiebre con reglas confiables.', 'url' => '/app/stock'],
+            ['codigo' => 'SIN_RUBRO', 'campo' => 'productos_sin_rubro', 'titulo' => 'Productos sin rubro', 'impacto' => 'Dificulta comparar rotación y margen por categoría.', 'url' => '/app/productos'],
+            ['codigo' => 'SIN_LEAD_TIME', 'campo' => 'relaciones_sin_plazo_entrega', 'titulo' => 'Proveedores sin plazo de entrega', 'impacto' => 'La fecha de quiebre usa un plazo supuesto.', 'url' => '/app/proveedores'],
+            ['codigo' => 'VENTA_SIN_COSTO', 'campo' => 'ventas_sin_costo_historico', 'titulo' => 'Ventas recientes sin costo histórico', 'impacto' => 'El margen histórico queda incompleto.', 'url' => '/app/reportes/productos'],
+            ['codigo' => 'LOTE_SIN_VENCIMIENTO', 'campo' => 'productos_lote_sin_vencimiento', 'titulo' => 'Productos con lote sin vencimiento', 'impacto' => 'No se pueden anticipar pérdidas por caducidad.', 'url' => '/app/farmacia'],
+        ];
+
+        $problemas = [];
+        $afectados = 0;
+        foreach ($definiciones as $definicion) {
+            $cantidad = (int) ($metricas[$definicion['campo']] ?? 0);
+            $afectados += min($total, $cantidad);
+            $problemas[] = [
+                'codigo' => $definicion['codigo'],
+                'titulo' => $definicion['titulo'],
+                'cantidad' => $cantidad,
+                'impacto' => $definicion['impacto'],
+                'correccion_url' => $definicion['url'],
+                'estado' => $cantidad === 0 ? 'OK' : ($cantidad / $total >= 0.25 ? 'CRITICO' : 'ADVERTENCIA'),
+            ];
+        }
+
+        $puntaje = (int) round(max(0, 100 - ($afectados / ($total * count($definiciones))) * 100));
+        return [
+            'empresa_id' => $empresaId,
+            'puntaje' => $puntaje,
+            'nivel' => $puntaje >= 90 ? 'LISTO' : ($puntaje >= 70 ? 'MEJORABLE' : 'INSUFICIENTE'),
+            'productos_activos' => $metricas['productos_activos'],
+            'problemas' => $problemas,
+            'generado_at' => date(DATE_ATOM),
+        ];
+    }
+
+    public function analiticaAvanzada(array $filters): array
+    {
+        $empresaId = (int) ($filters['empresa_id'] ?? 0);
+        if ($empresaId <= 0) {
+            throw new HttpException('empresa_id obligatorio', 422);
+        }
+        $hasta = $this->date((string) ($filters['hasta'] ?? date('Y-m-d')), 'hasta');
+        $desdeDefault = date('Y-m-d', strtotime($hasta . ' -29 days'));
+        $desde = $this->date((string) ($filters['desde'] ?? $desdeDefault), 'desde');
+        if ($desde > $hasta) {
+            throw new HttpException('Rango de fechas invalido', 422);
+        }
+        return [
+            'empresa_id' => $empresaId,
+            'desde' => $desde,
+            'hasta' => $hasta,
+        ] + $this->repository->analiticaAvanzada($empresaId, $desde, $hasta);
+    }
+
     public function resumenVentas(array $filters): array
     {
         [$empresaId, $sucursalId, $from, $to] = $this->filters($filters);

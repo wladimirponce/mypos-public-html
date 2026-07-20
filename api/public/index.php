@@ -40,6 +40,7 @@ use Mypos\Controllers\DteController;
 use Mypos\Controllers\EgresoController;
 use Mypos\Controllers\FolioController;
 use Mypos\Controllers\IaController;
+use Mypos\Controllers\InteligenciaController;
 use Mypos\Controllers\ImportacionCatalogoController;
 use Mypos\Controllers\ProductoImportController;
 use Mypos\Controllers\F29Controller;
@@ -831,6 +832,12 @@ $router->get('/api/v1/libros/ventas/resumen-tipo-documento', protectedRoute([$li
 $router->get('/api/v1/libros/compras/resumen-proveedor', protectedRoute([$libroController, 'comprasResumenProveedor'], 'libros.compras.ver'));
 
 $reporteController = new ReporteController();
+$router->get('/api/v1/analytics/calidad-datos', protectedRoute([$reporteController, 'calidadDatos'], 'reportes.ver'));
+$router->get('/api/v1/analytics/resumen', protectedRoute([$reporteController, 'analiticaAvanzada'], 'reportes.ver'));
+$inteligenciaController = new InteligenciaController();
+$router->get('/api/v1/inteligencia/alertas', protectedRoute([$inteligenciaController, 'alertas'], 'reportes.ver'));
+$router->get('/api/v1/analytics/impacto-inteligencia', protectedRoute([$inteligenciaController, 'impacto'], 'reportes.ver'));
+$router->post('/api/v1/inteligencia/feedback', protectedRoute([$inteligenciaController, 'feedback'], 'reportes.ver'));
 $router->get('/api/v1/reportes/salud-financiera', protectedRoute([$reporteController, 'saludFinanciera'], 'reportes.ver'));
 $router->get('/api/v1/reportes/resumen-ventas', protectedRoute([$reporteController, 'resumenVentas'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-dia', protectedRoute([$reporteController, 'ventasPorDia'], 'reportes.ver'));

@@ -1,1 +1,0 @@
-import{n as e,o as t}from"./apiClient-Dco-zaqw.js";var n={get(n){return e.get(t.agenteAlertas.config,{params:{empresa_id:n}})},update(n,r){return e.put(t.agenteAlertas.config,{empresa_id:n,...r})}};export{n as t};

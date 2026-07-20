@@ -50,8 +50,11 @@ final class CompraInteligenteController
             $umbralAlza  = isset($_GET['umbral_alza']) && is_numeric($_GET['umbral_alza'])
                 ? (float) $_GET['umbral_alza']
                 : 0.05;
+            $presupuesto = isset($_GET['presupuesto']) && is_numeric($_GET['presupuesto']) && (int) $_GET['presupuesto'] > 0
+                ? (int) $_GET['presupuesto']
+                : null;
 
-            return $this->service->sugerencias($empresaId, $ubicacionId, $diasConsumo, $umbralAlza);
+            return $this->service->sugerencias($empresaId, $ubicacionId, $diasConsumo, $umbralAlza, $presupuesto);
         });
     }
 

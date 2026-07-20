@@ -22,6 +22,96 @@ final class ReporteRepository
         return (bool) $statement->fetchColumn();
     }
 
+    /** @return array<string, int> */
+    public function calidadDatos(int $empresaId): array
+    {
+        $queries = [
+            'productos_activos' => 'SELECT COUNT(*) FROM productos p WHERE p.empresa_id = :empresa_id AND p.activo = 1',
+            'productos_sin_costo' => 'SELECT COUNT(*) FROM productos p WHERE p.empresa_id = :empresa_id AND p.activo = 1 AND p.costo_actual <= 0',
+            'productos_sin_rubro' => 'SELECT COUNT(*) FROM productos p WHERE p.empresa_id = :empresa_id AND p.activo = 1 AND p.rubro_id IS NULL',
+            'productos_sin_proveedor' => 'SELECT COUNT(*) FROM productos p WHERE p.empresa_id = :empresa_id AND p.activo = 1 AND NOT EXISTS (SELECT 1 FROM proveedor_productos pp WHERE pp.empresa_id = p.empresa_id AND pp.producto_id = p.id AND pp.activo = 1 AND pp.deleted_at IS NULL)',
+            'productos_sin_parametros_stock' => 'SELECT COUNT(*) FROM productos p WHERE p.empresa_id = :empresa_id AND p.activo = 1 AND p.controla_stock = 1 AND NOT EXISTS (SELECT 1 FROM stock_ubicacion su WHERE su.empresa_id = p.empresa_id AND su.producto_id = p.id AND su.punto_reorden > 0 AND su.stock_maximo > 0)',
+            'relaciones_sin_plazo_entrega' => 'SELECT COUNT(*) FROM proveedor_productos pp WHERE pp.empresa_id = :empresa_id AND pp.activo = 1 AND pp.deleted_at IS NULL AND (pp.plazo_entrega_dias IS NULL OR pp.plazo_entrega_dias = 0)',
+            'ventas_sin_costo_historico' => 'SELECT COUNT(DISTINCT vd.producto_id) FROM venta_detalles vd INNER JOIN ventas v ON v.id = vd.venta_id AND v.empresa_id = vd.empresa_id WHERE vd.empresa_id = :empresa_id AND v.estado = \'REGISTRADA\' AND v.fecha_venta >= DATE_SUB(NOW(), INTERVAL 90 DAY) AND vd.costo_unitario <= 0',
+            'productos_lote_sin_vencimiento' => 'SELECT COUNT(DISTINCT p.id) FROM productos p INNER JOIN stock_ubicacion su ON su.empresa_id = p.empresa_id AND su.producto_id = p.id AND su.cantidad > 0 WHERE p.empresa_id = :empresa_id AND p.activo = 1 AND p.requiere_lote = 1 AND NOT EXISTS (SELECT 1 FROM stock_lotes sl WHERE sl.empresa_id = p.empresa_id AND sl.producto_id = p.id AND sl.activo = 1 AND sl.fecha_vencimiento IS NOT NULL)',
+        ];
+
+        $resultado = [];
+        foreach ($queries as $key => $sql) {
+            $stmt = $this->connection->prepare($sql);
+            $stmt->execute(['empresa_id' => $empresaId]);
+            $resultado[$key] = (int) $stmt->fetchColumn();
+        }
+        return $resultado;
+    }
+
+    /** @return array<string, mixed> */
+    public function analiticaAvanzada(int $empresaId, string $desde, string $hasta): array
+    {
+        $stmt = $this->connection->prepare(
+            'SELECT COALESCE(SUM(ventas),0) ventas, COALESCE(SUM(unidades),0) unidades,
+                    COALESCE(SUM(total),0) total, COALESCE(SUM(descuentos),0) descuentos,
+                    COALESCE(SUM(margen),0) margen, COALESCE(SUM(anulaciones),0) anulaciones
+             FROM analytics_ventas_diarias
+             WHERE empresa_id=:empresa_id AND fecha BETWEEN :desde AND :hasta'
+        );
+        $stmt->execute(['empresa_id' => $empresaId, 'desde' => $desde, 'hasta' => $hasta]);
+        $resumen = $stmt->fetch() ?: [];
+
+        $stmt = $this->connection->prepare(
+            'SELECT hora, SUM(ventas) ventas, SUM(total) total
+             FROM analytics_ventas_diarias
+             WHERE empresa_id=:empresa_id AND fecha BETWEEN :desde AND :hasta
+             GROUP BY hora ORDER BY hora'
+        );
+        $stmt->execute(['empresa_id' => $empresaId, 'desde' => $desde, 'hasta' => $hasta]);
+        $horarios = $stmt->fetchAll();
+
+        $stmt = $this->connection->prepare(
+            'SELECT a.producto_id,p.nombre,p.sku,
+                    SUM(a.unidades_vendidas) unidades_vendidas,SUM(a.venta_neta) venta_neta,SUM(a.margen) margen,
+                    MAX(a.stock_cierre) stock_actual,MAX(a.valor_stock) capital_inmovilizado,
+                    CASE WHEN SUM(a.unidades_vendidas)>0
+                         THEN ROUND(MAX(a.stock_cierre)/(SUM(a.unidades_vendidas)/GREATEST(DATEDIFF(:hasta_dias,:desde_dias)+1,1)),1)
+                         ELSE NULL END dias_inventario
+             FROM analytics_producto_sucursal_diario a
+             INNER JOIN productos p ON p.id=a.producto_id AND p.empresa_id=a.empresa_id
+             WHERE a.empresa_id=:empresa_id AND a.fecha BETWEEN :desde AND :hasta
+             GROUP BY a.producto_id,p.nombre,p.sku
+             ORDER BY unidades_vendidas DESC, p.nombre ASC LIMIT 100'
+        );
+        $stmt->execute([
+            'empresa_id' => $empresaId, 'desde' => $desde, 'hasta' => $hasta,
+            'desde_dias' => $desde, 'hasta_dias' => $hasta,
+        ]);
+        $productos = $stmt->fetchAll();
+
+        $stmt = $this->connection->prepare(
+            'SELECT a.sucursal_id,s.nombre,SUM(a.ventas) ventas,SUM(a.total) total,SUM(a.margen) margen,SUM(a.anulaciones) anulaciones
+             FROM analytics_ventas_diarias a INNER JOIN sucursales s ON s.id=a.sucursal_id AND s.empresa_id=a.empresa_id
+             WHERE a.empresa_id=:empresa_id AND a.fecha BETWEEN :desde AND :hasta
+             GROUP BY a.sucursal_id,s.nombre ORDER BY total DESC'
+        );
+        $stmt->execute(['empresa_id' => $empresaId, 'desde' => $desde, 'hasta' => $hasta]);
+        $sucursales = $stmt->fetchAll();
+
+        $stmt = $this->connection->prepare(
+            'SELECT a.proveedor_id,p.razon_social proveedor,a.ordenes_recibidas,a.entregas_atrasadas,a.plazo_real_promedio,a.cumplimiento_pct
+             FROM analytics_proveedor_desempeno a INNER JOIN proveedores p ON p.id=a.proveedor_id AND p.empresa_id=a.empresa_id
+             WHERE a.empresa_id=:empresa_id AND a.fecha_calculo=(SELECT MAX(x.fecha_calculo) FROM analytics_proveedor_desempeno x WHERE x.empresa_id=a.empresa_id)
+             ORDER BY a.cumplimiento_pct DESC, p.razon_social'
+        );
+        $stmt->execute(['empresa_id' => $empresaId]);
+
+        return [
+            'resumen' => $resumen,
+            'ventas_por_hora' => $horarios,
+            'productos' => $productos,
+            'sucursales' => $sucursales,
+            'proveedores' => $stmt->fetchAll(),
+        ];
+    }
+
     /** @return array<string, mixed> */
     public function resumenVentas(int $empresaId, ?int $sucursalId, string $from, string $to): array
     {

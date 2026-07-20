@@ -53,6 +53,9 @@ COMPRAS Y REPOSICIÓN
 
 FINANZAS
 - resumen_iva            → IVA débito / crédito / a pagar del mes
+- calidad_datos          → preparación para recomendaciones confiables
+- analitica_negocio      → rotación, margen, sucursales y proveedores
+- capital_inmovilizado   → inventario sin movimiento y dinero inmovilizado
 
 SII
 - estado_folios_sii      → folios disponibles por tipo de DTE y alertas de CAF

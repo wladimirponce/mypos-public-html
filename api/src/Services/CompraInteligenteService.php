@@ -7,6 +7,7 @@ namespace Mypos\Services;
 use Mypos\Config\Database;
 use Mypos\Core\HttpException;
 use Mypos\Repositories\CompraInteligenteRepository;
+use Mypos\Support\ReposicionCalculator;
 
 /**
  * Servicio de compras inteligentes v1/v2.
@@ -35,7 +36,7 @@ final class CompraInteligenteService
      * @param int      $diasConsumo  Ventana de días para calcular consumo promedio (default 60)
      * @param float    $umbralAlza   Porcentaje (0.0-1.0) que activa la alerta de alza de costo (default 0.05)
      */
-    public function sugerencias(int $empresaId, ?int $ubicacionId, int $diasConsumo = 60, float $umbralAlza = 0.05): array
+    public function sugerencias(int $empresaId, ?int $ubicacionId, int $diasConsumo = 60, float $umbralAlza = 0.05, ?int $presupuesto = null): array
     {
         if ($empresaId <= 0) {
             throw new HttpException('empresa_id inválido', 422);
@@ -52,9 +53,10 @@ final class CompraInteligenteService
 
         $rows     = $this->repository->obtenerSugerencias($empresaId, $ubicacionId);
         $enriched = array_map(
-            fn (array $row) => $this->enrichRowV2($row, $diasConsumo, $umbralAlza),
+            fn (array $row) => $this->enrichRowV3($row, $diasConsumo, $umbralAlza),
             $rows
         );
+        $enriched = $this->aplicarPresupuesto($enriched, $presupuesto);
 
         return [
             'sugerencias'            => $enriched,
@@ -63,6 +65,7 @@ final class CompraInteligenteService
             'parametros'             => [
                 'dias_consumo'  => $diasConsumo,
                 'umbral_alza'   => $umbralAlza,
+                'presupuesto'   => $presupuesto,
             ],
         ];
     }
@@ -226,20 +229,14 @@ final class CompraInteligenteService
         // --- Punto de reorden sugerido (P6): consumo × (lead time + seguridad) ---
         // Usa el plazo de entrega del proveedor sugerido; si no hay dato, asume 3
         // días. El colchón de seguridad cubre variabilidad de demanda/entrega.
-        $leadTime = isset($row['plazo_entrega_dias']) && (int) $row['plazo_entrega_dias'] > 0
-            ? (int) $row['plazo_entrega_dias']
-            : 3;
-        $diasSeguridad = max(2, (int) ceil($leadTime * 0.5));
-        $row['lead_time_dias']         = $leadTime;
-        $row['dias_inventario_optimo'] = $leadTime + $diasSeguridad;
-        $row['punto_reorden_sugerido'] = $consumoDiario > 0
-            ? (int) ceil($consumoDiario * ($leadTime + $diasSeguridad))
-            : null;
+        $reposicion = ReposicionCalculator::calcular(
+            $consumoDiario,
+            (float) $row['cantidad_actual'],
+            isset($row['plazo_entrega_dias']) ? (int) $row['plazo_entrega_dias'] : null,
+        );
+        $row += $reposicion;
         // Quiebre inminente: el stock actual se agota antes de que llegue la
         // reposición (cobertura actual <= plazo de entrega).
-        $row['quiebre_inminente'] = $consumoDiario > 0
-            && ($row['cantidad_actual'] / $consumoDiario) <= $leadTime;
-
         // --- Traslados posibles ---
         $necesidad = (float) $row['deficit'];
         $traslados = $necesidad > 0
@@ -268,6 +265,76 @@ final class CompraInteligenteService
         $row['ranking_proveedores'] = $this->repository->rankingProveedores($empresaId, $productoId);
 
         return $row;
+    }
+
+    private function enrichRowV3(array $row, int $diasConsumo, float $umbralAlza): array
+    {
+        $row = $this->enrichRowV2($row, $diasConsumo, $umbralAlza);
+        $empresaId = (int) $row['empresa_id'];
+        $productoId = (int) $row['producto_id'];
+        $ubicacionId = (int) $row['ubicacion_id'];
+        $consumo = (float) $row['consumo_diario_promedio'];
+        $disponible = (float) $row['disponible'];
+        $transito = $this->repository->stockEnTransito($empresaId, $productoId, $ubicacionId);
+        $vencimiento = $this->repository->stockProximoVencer($empresaId, $productoId, $ubicacionId);
+        $objetivo = $consumo > 0 ? $consumo * (int) $row['dias_inventario_optimo'] : (float) $row['stock_maximo'];
+        $necesidad = max(0.0, $objetivo - $disponible - $transito);
+
+        $multiplo = max(1.0, (float) ($row['factor_conversion'] ?? 1));
+        $minimo = max(0.0, (float) ($row['compra_minima'] ?? 0));
+        $cantidad = $necesidad > 0 ? ceil(max($necesidad, $minimo) / $multiplo) * $multiplo : 0.0;
+        $row['stock_en_transito'] = round($transito, 3);
+        $row['stock_proximo_vencer'] = round((float) $vencimiento['cantidad'], 3);
+        $row['proximo_vencimiento'] = $vencimiento['proximo_vencimiento'];
+        $row['demanda_objetivo'] = round($objetivo, 3);
+        $row['necesidad_neta'] = round($necesidad, 3);
+        $row['multiplo_compra'] = $multiplo;
+        $row['cantidad_sugerida'] = round($cantidad, 3);
+
+        if ((float) $vencimiento['cantidad'] > 0 && $cantidad > 0) {
+            $row['accion_recomendada'] = 'EVALUAR';
+        } elseif (($row['traslados_posibles'] ?? []) !== [] && $cantidad > 0) {
+            $row['accion_recomendada'] = 'TRASLADAR';
+        } elseif ($cantidad > 0 && $consumo > 0) {
+            $row['accion_recomendada'] = 'COMPRAR';
+        } else {
+            $row['accion_recomendada'] = 'EVALUAR';
+        }
+
+        $confianza = $consumo <= 0 ? 'BAJA' : (!empty($row['proveedor_id']) && !empty($row['plazo_entrega_dias']) ? 'ALTA' : 'MEDIA');
+        $row['nivel_confianza'] = $confianza;
+        $row['explicacion'] = sprintf(
+            'Se estiman %.1f unidades para %d dias; hay %.1f disponibles y %.1f en transito. Se ajusta a multiplo %.1f%s.',
+            $objetivo,
+            (int) $row['dias_inventario_optimo'],
+            $disponible,
+            $transito,
+            $multiplo,
+            (float) $vencimiento['cantidad'] > 0 ? ' y requiere revisar stock proximo a vencer' : '',
+        );
+        $costo = (int) ($row['precio_vigente'] ?? $row['costo_actual']);
+        $row['costo_estimado_total'] = (int) round($cantidad * $costo);
+        return $row;
+    }
+
+    /** @param list<array<string,mixed>> $rows @return list<array<string,mixed>> */
+    private function aplicarPresupuesto(array $rows, ?int $presupuesto): array
+    {
+        if ($presupuesto === null || $presupuesto <= 0) {
+            foreach ($rows as &$row) $row['dentro_presupuesto'] = true;
+            unset($row);
+            return $rows;
+        }
+        usort($rows, static fn (array $a, array $b): int => ((int) $b['quiebre_inminente'] <=> (int) $a['quiebre_inminente']) ?: ((float) $b['deficit'] <=> (float) $a['deficit']));
+        $restante = $presupuesto;
+        foreach ($rows as &$row) {
+            $costo = (int) $row['costo_estimado_total'];
+            $row['dentro_presupuesto'] = $costo <= $restante;
+            if ($row['dentro_presupuesto']) $restante -= $costo;
+            $row['presupuesto_restante_estimado'] = $restante;
+        }
+        unset($row);
+        return $rows;
     }
 
     /**
@@ -360,6 +427,12 @@ final class CompraInteligenteService
                 'accion_recomendada'      => $accion,
                 'traslados_posibles'      => $s['traslados_posibles']      ?? [],
                 'alerta_alza_precio'      => $s['alerta_alza_precio']      ?? null,
+                'stock_en_transito'       => $s['stock_en_transito']       ?? 0,
+                'stock_proximo_vencer'    => $s['stock_proximo_vencer']    ?? 0,
+                'necesidad_neta'          => $s['necesidad_neta']          ?? 0,
+                'nivel_confianza'         => $s['nivel_confianza']         ?? 'BAJA',
+                'explicacion'             => $s['explicacion']             ?? '',
+                'dentro_presupuesto'      => $s['dentro_presupuesto']      ?? true,
             ];
 
             $grupos[$key]['total_costo_estimado'] += $s['costo_estimado_total'];

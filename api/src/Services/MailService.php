@@ -44,12 +44,22 @@ final class MailService
      */
     public function enviarAlertasAgente(string $toEmail, string $razonSocial, string $htmlListado): bool
     {
+        return $this->enviarAlertaAgenteEncolada(
+            $toEmail,
+            $razonSocial,
+            'Alertas MyPOS - ' . $razonSocial,
+            $htmlListado,
+        );
+    }
+
+    public function enviarAlertaAgenteEncolada(string $toEmail, string $razonSocial, string $asunto, string $htmlListado): bool
+    {
         try {
             $mail = $this->getMailer();
             $mail->addAddress($toEmail, $razonSocial);
 
             $mail->isHTML(true);
-            $mail->Subject = 'Alertas MyPOS — ' . $razonSocial;
+            $mail->Subject = $asunto;
             $mail->Body = "
                 <h2 style=\"margin-bottom:4px;\">Alertas de tu negocio</h2>
                 <p style=\"margin-top:0;color:#555;\">{$razonSocial} — " . date('d/m/Y H:i') . "</p>

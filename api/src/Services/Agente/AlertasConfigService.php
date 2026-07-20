@@ -29,6 +29,11 @@ final class AlertasConfigService
         'folios_bajos'     => ['activo' => true, 'umbral_boleta' => 150, 'umbral_factura' => 20],
         'suscripcion'      => ['activo' => true, 'dias_aviso' => 5],
         'compras_borrador' => ['activo' => true, 'dias' => 3],
+        'inventario_inmovilizado' => ['activo' => true, 'dias' => 90, 'max_listado' => 10],
+        'anomalias_ventas' => ['activo' => true, 'umbral_pct' => 50],
+        'anomalias_caja' => ['activo' => true, 'repeticiones' => 3],
+        'anomalias_stock' => ['activo' => true, 'ajustes_dia' => 5],
+        'proveedores_atrasados' => ['activo' => true, 'cumplimiento_minimo_pct' => 80],
         'resumen_diario'   => ['activo' => false],
         // No es una "alerta": interruptor de las consultas SQL dinamicas en
         // linea del chat (capa 2.5, /agente/consulta-adhoc). Vive aqui porque

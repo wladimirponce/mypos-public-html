@@ -274,6 +274,34 @@ final class CompraInteligenteRepository
         return (float) $statement->fetchColumn();
     }
 
+    public function stockEnTransito(int $empresaId, int $productoId, int $ubicacionId): float
+    {
+        $statement = $this->connection->prepare(
+            "SELECT COALESCE(SUM(oci.cantidad_solicitada-oci.cantidad_recibida),0)
+             FROM ordenes_compra_items oci
+             INNER JOIN ordenes_compra oc ON oc.id=oci.orden_id AND oc.empresa_id=oci.empresa_id
+             INNER JOIN ubicaciones_stock u ON u.empresa_id=oc.empresa_id AND u.sucursal_id=oc.sucursal_id AND u.id=:ubicacion_id
+             WHERE oci.empresa_id=:empresa_id AND oci.producto_id=:producto_id
+               AND oc.estado IN ('ENVIADA','RECIBIDA_PARCIAL')"
+        );
+        $statement->execute(['ubicacion_id' => $ubicacionId, 'empresa_id' => $empresaId, 'producto_id' => $productoId]);
+        return (float) $statement->fetchColumn();
+    }
+
+    /** @return array{cantidad:float,proximo_vencimiento:?string} */
+    public function stockProximoVencer(int $empresaId, int $productoId, int $ubicacionId, int $dias = 30): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT COALESCE(SUM(slu.cantidad),0) cantidad,MIN(sl.fecha_vencimiento) proximo_vencimiento
+             FROM stock_lotes_ubicacion slu INNER JOIN stock_lotes sl ON sl.id=slu.lote_id AND sl.empresa_id=slu.empresa_id
+             WHERE slu.empresa_id=:empresa_id AND slu.producto_id=:producto_id AND slu.ubicacion_id=:ubicacion_id
+               AND slu.cantidad>0 AND sl.activo=1 AND sl.fecha_vencimiento<=DATE_ADD(CURRENT_DATE,INTERVAL :dias DAY)'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'producto_id' => $productoId, 'ubicacion_id' => $ubicacionId, 'dias' => max(1, $dias)]);
+        $row = $statement->fetch() ?: [];
+        return ['cantidad' => (float) ($row['cantidad'] ?? 0), 'proximo_vencimiento' => $row['proximo_vencimiento'] ?? null];
+    }
+
     /**
      * Busca todas las ubicaciones activas de la empresa (distintas a la
      * ubicación con déficit) que tengan disponible >= $necesidad para el
@@ -297,14 +325,13 @@ final class CompraInteligenteRepository
              WHERE su.empresa_id  = :empresa_id
                AND su.producto_id = :producto_id
                AND su.ubicacion_id <> :ubicacion_origen_id
-               AND (su.cantidad - COALESCE(su.reservado, 0)) >= :necesidad
-             ORDER BY (su.cantidad - COALESCE(su.reservado, 0)) DESC'
+               AND (su.cantidad - COALESCE(su.reservado, 0) - COALESCE(su.stock_maximo,su.punto_reorden,su.stock_minimo,0)) > 0
+             ORDER BY (su.cantidad - COALESCE(su.reservado, 0) - COALESCE(su.stock_maximo,su.punto_reorden,su.stock_minimo,0)) DESC'
         );
         $statement->execute([
             'empresa_id'         => $empresaId,
             'producto_id'        => $productoId,
             'ubicacion_origen_id' => $ubicacionOrigenId,
-            'necesidad'          => $necesidad,
         ]);
 
         return $statement->fetchAll(PDO::FETCH_ASSOC);

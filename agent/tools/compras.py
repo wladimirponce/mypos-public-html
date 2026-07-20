@@ -93,7 +93,7 @@ async def sugerencias_reposicion(
 
     payload = data.get("data") or {}
     sugerencias = payload.get("sugerencias") or []
-    por_proveedor = payload.get("por_proveedor") or {}
+    por_proveedor = payload.get("agrupado_por_proveedor") or []
 
     if not sugerencias:
         return "No hay productos que requieran reposición en este momento."
@@ -104,18 +104,21 @@ async def sugerencias_reposicion(
     ]
 
     if por_proveedor:
-        for proveedor, items in list(por_proveedor.items())[:5]:
+        for grupo in por_proveedor[:5]:
+            proveedor = grupo.get("proveedor_nombre") or "Sin proveedor"
+            items = grupo.get("items") or []
             total_items = len(items)
             lines.append(f"\n  Proveedor: {proveedor} ({total_items} productos)")
             for s in items[:4]:
-                nombre = s.get("nombre_producto") or s.get("nombre") or "?"
+                nombre = s.get("producto_nombre") or s.get("nombre") or "?"
                 qty = float(s.get("cantidad_sugerida") or s.get("cantidad") or 0)
-                lines.append(f"    · {nombre}: reponer {qty:g} uds")
+                explicacion = s.get("explicacion") or ""
+                lines.append(f"    · {nombre}: reponer {qty:g} uds" + (f". {explicacion}" if explicacion else ""))
             if total_items > 4:
                 lines.append(f"    … y {total_items - 4} más de este proveedor")
     else:
         for s in sugerencias[:10]:
-            nombre = s.get("nombre_producto") or s.get("nombre") or "?"
+            nombre = s.get("producto_nombre") or s.get("nombre") or "?"
             qty = float(s.get("cantidad_sugerida") or s.get("cantidad") or 0)
             lines.append(f"  · {nombre}: reponer {qty:g} uds")
         if len(sugerencias) > 10:

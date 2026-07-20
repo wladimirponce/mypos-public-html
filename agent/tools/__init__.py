@@ -8,6 +8,7 @@ from tools.folios import estado_folios_sii
 from tools.caja import estado_cajas
 from tools.escalate import guia_accion_manual
 from tools.exportar import exportar_excel_a_correo
+from tools.analytics import calidad_datos, analitica_negocio, capital_inmovilizado
 
 ALL_TOOLS = [
     # Ventas
@@ -27,6 +28,9 @@ ALL_TOOLS = [
     sugerencias_reposicion,
     # Finanzas
     resumen_iva,
+    calidad_datos,
+    analitica_negocio,
+    capital_inmovilizado,
     # SII
     estado_folios_sii,
     # Exportaciones (Excel al correo registrado de la empresa)

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Mypos\Services\Agente;
 
 use Mypos\Config\Database;
-use Mypos\Services\MailService;
 use PDO;
 
 /**
@@ -38,6 +37,11 @@ final class AlertasNotifier
         'folios_bajos'     => 20,
         'suscripcion'      => 20,
         'compras_borrador' => 20,
+        'inventario_inmovilizado' => 72,
+        'anomalias_ventas' => 8,
+        'anomalias_caja' => 24,
+        'anomalias_stock' => 12,
+        'proveedores_atrasados' => 72,
         'resumen_diario'   => 20,
     ];
 
@@ -53,16 +57,21 @@ final class AlertasNotifier
         'folios_bajos'     => '🧾 Folios SII por agotarse',
         'suscripcion'      => '⚠️ Suscripción MyPOS',
         'compras_borrador' => '📝 Compras en borrador',
+        'inventario_inmovilizado' => '📦 Inventario sin movimiento',
+        'anomalias_ventas' => '🔎 Comportamiento inusual en ventas',
+        'anomalias_caja' => '💵 Diferencias reiteradas de caja',
+        'anomalias_stock' => '📋 Ajustes inusuales de stock',
+        'proveedores_atrasados' => '🚚 Proveedores con entregas atrasadas',
         'resumen_diario'   => '📊 Resumen diario',
     ];
 
     private PDO $db;
-    private ?MailService $mailService;
+    private AgenteCorreoOutboxService $correoOutbox;
 
-    public function __construct(?PDO $connection = null, ?MailService $mailService = null)
+    public function __construct(?PDO $connection = null, ?AgenteCorreoOutboxService $correoOutbox = null)
     {
         $this->db = $connection ?? Database::connection();
-        $this->mailService = $mailService;
+        $this->correoOutbox = $correoOutbox ?? new AgenteCorreoOutboxService($this->db);
     }
 
     /** Filtra los items ya avisados dentro del periodo de gracia del tipo. */
@@ -74,7 +83,7 @@ final class AlertasNotifier
              WHERE empresa_id = :empresa_id
                AND tipo = :tipo
                AND clave = :clave
-               AND estado = \'enviada\'
+               AND estado IN (\'pendiente\', \'procesando\', \'enviada\')
                AND created_at > DATE_SUB(NOW(), INTERVAL :grace HOUR)
              LIMIT 1'
         );
@@ -131,9 +140,19 @@ final class AlertasNotifier
         $emailRequerido = $config['canal_email']
             || $resultado['whatsapp'] === false   // fallback garantizado si WhatsApp fallo
             || $resultado['whatsapp'] === null;   // o si no hay WhatsApp configurado
+        $correoOutboxId = 0;
         if ($emailRequerido && $email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
-            $mailService = $this->mailService ?? new MailService();
-            $resultado['email'] = $mailService->enviarAlertasAgente($email, $razonSocial, $html);
+            $tipos = implode(', ', array_keys($porTipo));
+            $correoOutboxId = $this->correoOutbox->encolar(
+                $empresaId,
+                $email,
+                $razonSocial,
+                'Alertas MyPOS - ' . $razonSocial,
+                $html,
+                'alerta_proactiva',
+                'El agente detecto eventos que requieren atencion: ' . $tipos,
+            );
+            $resultado['email'] = $correoOutboxId > 0;
         }
 
         $enviado = ($resultado['email'] === true) || ($resultado['whatsapp'] === true);
@@ -143,8 +162,10 @@ final class AlertasNotifier
         ])));
 
         $stmt = $this->db->prepare(
-            'INSERT INTO agente_alertas_log (empresa_id, tipo, clave, canal, estado, mensaje, detalle_json)
-             VALUES (:empresa_id, :tipo, :clave, :canal, :estado, :mensaje, :detalle_json)'
+            'INSERT INTO agente_alertas_log
+                (empresa_id, tipo, clave, canal, estado, mensaje, detalle_json, correo_outbox_id)
+             VALUES
+                (:empresa_id, :tipo, :clave, :canal, :estado, :mensaje, :detalle_json, :correo_outbox_id)'
         );
         foreach ($porTipo as $tipo => $items) {
             foreach ($items as $item) {
@@ -153,9 +174,10 @@ final class AlertasNotifier
                     ':tipo' => $tipo,
                     ':clave' => mb_substr((string) $item['clave'], 0, 120),
                     ':canal' => $canal !== '' ? $canal : 'ninguno',
-                    ':estado' => $enviado ? 'enviada' : 'fallida',
+                    ':estado' => $correoOutboxId > 0 ? 'pendiente' : ($enviado ? 'enviada' : 'fallida'),
                     ':mensaje' => mb_substr((string) $item['texto'], 0, 2000),
                     ':detalle_json' => json_encode($item['detalle'] ?? [], JSON_UNESCAPED_UNICODE),
+                    ':correo_outbox_id' => $correoOutboxId > 0 ? $correoOutboxId : null,
                 ]);
             }
         }

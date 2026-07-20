@@ -573,6 +573,111 @@ final class AlertasChequeosService
     }
 
     /** Resumen del dia anterior (opt-in). Siempre genera 1 item si hubo actividad. */
+    public function inventarioInmovilizado(int $empresaId, array $params): array
+    {
+        $dias = max(30, min(365, (int) ($params['dias'] ?? 90)));
+        $limite = max(1, min(30, (int) ($params['max_listado'] ?? 10)));
+        $stmt = $this->db->prepare(
+            "SELECT p.id,p.nombre,p.costo_actual,SUM(su.cantidad) stock,
+                    ROUND(SUM(su.cantidad)*p.costo_actual) valor,MAX(v.fecha_venta) ultima_venta
+             FROM productos p
+             INNER JOIN stock_ubicacion su ON su.empresa_id=p.empresa_id AND su.producto_id=p.id AND su.cantidad>0
+             LEFT JOIN venta_detalles vd ON vd.empresa_id=p.empresa_id AND vd.producto_id=p.id
+             LEFT JOIN ventas v ON v.id=vd.venta_id AND v.estado='REGISTRADA'
+             WHERE p.empresa_id=:empresa_id AND p.activo=1
+             GROUP BY p.id,p.nombre,p.costo_actual
+             HAVING ultima_venta IS NULL OR ultima_venta<DATE_SUB(NOW(), INTERVAL {$dias} DAY)
+             ORDER BY valor DESC LIMIT {$limite}"
+        );
+        $stmt->execute(['empresa_id' => $empresaId]);
+        return array_map(static fn (array $r): array => [
+            'clave' => 'inmovilizado:' . $r['id'] . ':' . $dias,
+            'texto' => sprintf('%s mantiene %s unidades sin venta reciente; hay $%s inmovilizados.', $r['nombre'], (float) $r['stock'], number_format((int) $r['valor'], 0, ',', '.')),
+            'detalle' => ['producto_id' => (int) $r['id'], 'stock' => (float) $r['stock'], 'valor' => (int) $r['valor'], 'dias' => $dias],
+        ], $stmt->fetchAll());
+    }
+
+    public function anomaliasVentas(int $empresaId, array $params): array
+    {
+        $umbral = max(10, min(300, (int) ($params['umbral_pct'] ?? 50)));
+        $stmt = $this->db->prepare(
+            "SELECT COUNT(*) operaciones,
+                    SUM(estado='ANULADA') anuladas,
+                    COALESCE(SUM(descuento_total),0) descuentos,
+                    COALESCE(SUM(CASE WHEN estado='REGISTRADA' THEN subtotal ELSE 0 END),0) subtotal
+             FROM ventas WHERE empresa_id=:empresa_hoy AND fecha_venta>=CURRENT_DATE"
+        );
+        $stmt->execute(['empresa_hoy' => $empresaId]);
+        $hoy = $stmt->fetch() ?: [];
+        if ((int) ($hoy['operaciones'] ?? 0) < 5) return [];
+
+        $stmt = $this->db->prepare(
+            "SELECT AVG(tasa_anulacion) tasa_anulacion,AVG(tasa_descuento) tasa_descuento FROM (
+                SELECT DATE(fecha_venta) fecha,100*SUM(estado='ANULADA')/GREATEST(COUNT(*),1) tasa_anulacion,
+                       100*SUM(descuento_total)/GREATEST(SUM(CASE WHEN estado='REGISTRADA' THEN subtotal ELSE 0 END),1) tasa_descuento
+                FROM ventas WHERE empresa_id=:empresa_historia AND fecha_venta>=DATE_SUB(CURRENT_DATE,INTERVAL 30 DAY) AND fecha_venta<CURRENT_DATE
+                GROUP BY DATE(fecha_venta)
+             ) historia"
+        );
+        $stmt->execute(['empresa_historia' => $empresaId]);
+        $base = $stmt->fetch() ?: [];
+        $tasaAnulacion = 100 * (int) $hoy['anuladas'] / max(1, (int) $hoy['operaciones']);
+        $tasaDescuento = 100 * (int) $hoy['descuentos'] / max(1, (int) $hoy['subtotal']);
+        $items = [];
+        if ($tasaAnulacion > max(2.0, (float) ($base['tasa_anulacion'] ?? 0) * (1 + $umbral / 100))) {
+            $items[] = ['clave' => 'anulaciones:' . date('Y-m-d'), 'texto' => sprintf('Las anulaciones de hoy alcanzan %.1f%%, por encima del comportamiento habitual.', $tasaAnulacion), 'detalle' => ['tasa_actual' => round($tasaAnulacion, 2), 'tasa_base' => round((float) ($base['tasa_anulacion'] ?? 0), 2)]];
+        }
+        if ($tasaDescuento > max(3.0, (float) ($base['tasa_descuento'] ?? 0) * (1 + $umbral / 100))) {
+            $items[] = ['clave' => 'descuentos:' . date('Y-m-d'), 'texto' => sprintf('Los descuentos de hoy representan %.1f%% del subtotal, sobre el promedio reciente.', $tasaDescuento), 'detalle' => ['tasa_actual' => round($tasaDescuento, 2), 'tasa_base' => round((float) ($base['tasa_descuento'] ?? 0), 2)]];
+        }
+        return $items;
+    }
+
+    public function anomaliasCaja(int $empresaId, array $params): array
+    {
+        $repeticiones = max(2, min(20, (int) ($params['repeticiones'] ?? 3)));
+        $stmt = $this->db->prepare(
+            "SELECT cc.sucursal_id,s.nombre,COUNT(*) repeticiones,SUM(ABS(cc.diferencia)) diferencia
+             FROM caja_cierres cc INNER JOIN sucursales s ON s.id=cc.sucursal_id AND s.empresa_id=cc.empresa_id
+             WHERE cc.empresa_id=:empresa_id AND cc.fecha_cierre>=DATE_SUB(NOW(),INTERVAL 30 DAY) AND cc.diferencia<>0
+             GROUP BY cc.sucursal_id,s.nombre HAVING COUNT(*)>=:repeticiones ORDER BY diferencia DESC"
+        );
+        $stmt->bindValue('empresa_id', $empresaId, PDO::PARAM_INT);
+        $stmt->bindValue('repeticiones', $repeticiones, PDO::PARAM_INT);
+        $stmt->execute();
+        return array_map(static fn (array $r): array => ['clave' => 'caja:' . $r['sucursal_id'] . ':' . date('Y-m-d'), 'texto' => sprintf('%s acumula %d cierres con diferencias durante los últimos 30 días ($%s en valor absoluto).', $r['nombre'], $r['repeticiones'], number_format((int) $r['diferencia'], 0, ',', '.')), 'detalle' => $r], $stmt->fetchAll());
+    }
+
+    public function anomaliasStock(int $empresaId, array $params): array
+    {
+        $umbral = max(2, min(50, (int) ($params['ajustes_dia'] ?? 5)));
+        $stmt = $this->db->prepare(
+            "SELECT sm.usuario_id,sm.producto_id,p.nombre,COUNT(*) ajustes,SUM(ABS(sm.cantidad)) unidades
+             FROM stock_movimientos sm INNER JOIN productos p ON p.id=sm.producto_id AND p.empresa_id=sm.empresa_id
+             WHERE sm.empresa_id=:empresa_id AND sm.tipo_movimiento='AJUSTE' AND sm.created_at>=DATE_SUB(NOW(),INTERVAL 24 HOUR)
+             GROUP BY sm.usuario_id,sm.producto_id,p.nombre HAVING COUNT(*)>=:umbral ORDER BY ajustes DESC"
+        );
+        $stmt->bindValue('empresa_id', $empresaId, PDO::PARAM_INT);
+        $stmt->bindValue('umbral', $umbral, PDO::PARAM_INT);
+        $stmt->execute();
+        return array_map(static fn (array $r): array => ['clave' => 'stock:' . $r['usuario_id'] . ':' . $r['producto_id'] . ':' . date('Y-m-d'), 'texto' => sprintf('%s recibió %d ajustes manuales en 24 horas (%s unidades involucradas).', $r['nombre'], $r['ajustes'], (float) $r['unidades']), 'detalle' => $r], $stmt->fetchAll());
+    }
+
+    public function proveedoresAtrasados(int $empresaId, array $params): array
+    {
+        $minimo = max(1, min(100, (int) ($params['cumplimiento_minimo_pct'] ?? 80)));
+        $stmt = $this->db->prepare(
+            'SELECT a.proveedor_id,p.razon_social,a.ordenes_recibidas,a.entregas_atrasadas,a.cumplimiento_pct,a.plazo_real_promedio
+             FROM analytics_proveedor_desempeno a INNER JOIN proveedores p ON p.id=a.proveedor_id AND p.empresa_id=a.empresa_id
+             WHERE a.empresa_id=:empresa_id AND a.fecha_calculo=(SELECT MAX(x.fecha_calculo) FROM analytics_proveedor_desempeno x WHERE x.empresa_id=a.empresa_id)
+               AND a.cumplimiento_pct<:minimo ORDER BY a.cumplimiento_pct'
+        );
+        $stmt->bindValue('empresa_id', $empresaId, PDO::PARAM_INT);
+        $stmt->bindValue('minimo', $minimo, PDO::PARAM_INT);
+        $stmt->execute();
+        return array_map(static fn (array $r): array => ['clave' => 'proveedor:' . $r['proveedor_id'] . ':' . date('Y-m-d'), 'texto' => sprintf('%s cumple solo %.1f%% de sus fechas prometidas; plazo real promedio %.1f días.', $r['razon_social'], $r['cumplimiento_pct'], $r['plazo_real_promedio']), 'detalle' => $r], $stmt->fetchAll());
+    }
+
     public function resumenDiario(int $empresaId, array $params): array
     {
         $ayer = date('Y-m-d', strtotime('-1 day'));

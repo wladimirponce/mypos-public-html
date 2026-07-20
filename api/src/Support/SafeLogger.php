@@ -43,7 +43,7 @@ final class SafeLogger
         $path = AppConfig::logPath();
         $dir = dirname($path);
         if (!is_dir($dir)) {
-            mkdir($dir, 0775, true);
+            @mkdir($dir, 0775, true);
         }
 
         $payload = [
@@ -54,11 +54,16 @@ final class SafeLogger
             'context' => self::sanitize($context),
         ];
 
-        file_put_contents(
+        $written = @file_put_contents(
             $path,
             json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL,
             FILE_APPEND | LOCK_EX
         );
+        if ($written === false) {
+            // El logger nunca debe interrumpir la operacion principal si el
+            // hosting monta temporalmente storage como solo lectura.
+            error_log('[SafeLogger] No se pudo escribir el log estructurado');
+        }
     }
 
     private static function sanitize(mixed $value): mixed
