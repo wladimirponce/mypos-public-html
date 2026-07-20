@@ -174,6 +174,30 @@ final class VentaService
 
                 if ((int) $item['controla_stock'] === 1) {
                     $stockService = new StockService(new StockRepository($connection));
+                    // Una venta originada en MyPOS Cerca consume primero el bloqueo
+                    // de la reserva dentro de la misma transaccion. Si la venta
+                    // falla, tanto la liberacion como el descuento hacen rollback.
+                    $reservaDigitalId = (int) ($payload['presencia_reserva_id'] ?? 0);
+                    if ($reservaDigitalId > 0) {
+                        $cercaRepository = new \Mypos\Repositories\MyposCercaRepository($connection);
+                        $reservedItem = $cercaRepository->reservationItemForProduct(
+                            $empresaId,
+                            $reservaDigitalId,
+                            (int) $item['producto_id']
+                        );
+                        if ($reservedItem === null || abs((float) $reservedItem['cantidad'] - (float) $item['cantidad_formatted']) > 0.001) {
+                            throw new HttpException('La venta no coincide con el stock reservado en MyPOS Cerca', 409);
+                        }
+                        $stockService->liberarReservaDigital(
+                            $empresaId,
+                            $sucursalId,
+                            (int) $item['producto_id'],
+                            (int) $reservedItem['ubicacion_id'],
+                            (float) $reservedItem['cantidad'],
+                            $connection
+                        );
+                        $cercaRepository->markReservationItemReleased((int) $reservedItem['id']);
+                    }
                     $stockService->descontarPorVenta([
                         'empresa_id' => $empresaId,
                         'sucursal_id' => $sucursalId,
@@ -216,6 +240,20 @@ final class VentaService
                     }
                     (new MercadoPagoService())
                         ->confirmarPagoParaVenta($connection, $empresaId, $mpReferencia, (int) $payment['monto'], $saleId);
+                }
+
+                if (in_array($payment['metodo_pago_codigo'], ['FLOW_ONLINE', 'MP_ONLINE'], true)) {
+                    $onlineReference = trim((string) ($payment['referencia'] ?? ''));
+                    if ($onlineReference === '') {
+                        throw new HttpException('El pago online requiere una referencia validada', 422);
+                    }
+                    (new OnlinePaymentService())->confirmForSale(
+                        $connection,
+                        $empresaId,
+                        $onlineReference,
+                        (int) $payment['monto'],
+                        $saleId
+                    );
                 }
 
                 $this->repository->insertPayment([
@@ -289,6 +327,12 @@ final class VentaService
                     'dispositivo_id' => $deviceId,
                 ],
             ], $connection);
+
+            $reservaDigitalId = (int) ($payload['presencia_reserva_id'] ?? 0);
+            if ($reservaDigitalId > 0) {
+                (new \Mypos\Repositories\MyposCercaRepository($connection))
+                    ->linkReservationSale($empresaId, $reservaDigitalId, $saleId);
+            }
 
             $connection->commit();
 

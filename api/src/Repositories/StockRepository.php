@@ -161,6 +161,36 @@ final class StockRepository
         $statement->execute(['id' => $stockId, 'cantidad' => $newQuantity]);
     }
 
+    public function updateLocationReserved(int $stockId, string $reserved): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE stock_ubicacion SET reservado=:reservado, updated_at=CURRENT_TIMESTAMP WHERE id=:id'
+        );
+        $statement->execute(['id' => $stockId, 'reservado' => $reserved]);
+    }
+
+    public function recalcSucursalReserved(int $empresaId, int $sucursalId, int $productoId): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE stock_sucursal ss
+             SET ss.reservado=(
+                 SELECT COALESCE(SUM(su.reservado),0.000)
+                 FROM stock_ubicacion su
+                 INNER JOIN ubicaciones_stock u ON u.id=su.ubicacion_id AND u.empresa_id=su.empresa_id
+                 WHERE su.empresa_id=:empresa_sum AND su.producto_id=:producto_sum AND u.sucursal_id=:sucursal_sum
+             ), ss.updated_at=CURRENT_TIMESTAMP
+             WHERE ss.empresa_id=:empresa_update AND ss.sucursal_id=:sucursal_update AND ss.producto_id=:producto_update'
+        );
+        $statement->execute([
+            'empresa_sum' => $empresaId,
+            'producto_sum' => $productoId,
+            'sucursal_sum' => $sucursalId,
+            'empresa_update' => $empresaId,
+            'sucursal_update' => $sucursalId,
+            'producto_update' => $productoId,
+        ]);
+    }
+
     public function insertMovement(array $data): int
     {
         $statement = $this->connection->prepare(

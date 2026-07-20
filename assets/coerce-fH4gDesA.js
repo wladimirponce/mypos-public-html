@@ -1,1 +1,0 @@
-import{M as e,y as t}from"./index-784HIU1t.js";function n(n){return e(t,n)}export{n as t};

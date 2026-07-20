@@ -69,6 +69,8 @@ use Mypos\Controllers\ValeCreditoController;
 use Mypos\Controllers\DevolucionController;
 use Mypos\Controllers\SuscripcionController;
 use Mypos\Controllers\MercadoPagoController;
+use Mypos\Controllers\MyposCercaController;
+use Mypos\Controllers\OnlinePaymentController;
 use Mypos\Core\Auth;
 use Mypos\Core\HttpException;
 use Mypos\Core\Request;
@@ -158,12 +160,29 @@ set_exception_handler(static function (Throwable $exception): void {
 
 $router = new Router();
 
+// Portal publico MyPOS Cerca. Comparte rate limit y cabeceras de seguridad
+// globales, pero nunca pasa por autenticacion del panel administrativo.
+$myposCercaController = new MyposCercaController();
+$onlinePaymentController = new OnlinePaymentController();
+$router->get('/api/public/cerca/search', [$myposCercaController, 'search']);
+$router->get('/api/public/cerca/locales/{slug}', [$myposCercaController, 'publicStore']);
+$router->get('/api/public/cerca/productos/{slug}', [$myposCercaController, 'publicProduct']);
+$router->post('/api/public/cerca/cotizaciones', [$myposCercaController, 'createQuote']);
+$router->post('/api/public/cerca/reservas', [$myposCercaController, 'createReservation']);
+$router->get('/api/public/cerca/reservas/{token}', [$myposCercaController, 'reservationStatus']);
+$router->get('/api/public/cerca/reservas/{token}/pasarelas', [$onlinePaymentController, 'available']);
+$router->post('/api/public/cerca/reservas/{token}/pagos', [$onlinePaymentController, 'createReservationPayment']);
+$router->post('/api/public/cerca/pagos/{proveedor}/confirmacion', [$onlinePaymentController, 'callback']);
+$router->get('/api/public/cerca/oauth/mercadopago/callback', [$onlinePaymentController, 'mercadoPagoOauthCallback']);
+$router->get('/cerca/reserva/{token}', [$onlinePaymentController, 'paymentReturn']);
+
 function protectedRoute(callable $handler, string $permission): callable
 {
     return static function (array $params = []) use ($handler, $permission): void {
         $claims = (new AuthMiddleware())->handle();
         $userId = (int) $claims['user_id'];
         $empresaId = 0;
+        $sucursalId = isset($params['sucursal_id']) ? (int) $params['sucursal_id'] : (isset($_GET['sucursal_id']) ? (int) $_GET['sucursal_id'] : 0);
 
         if (isset($_GET['empresa_id'])) {
             $empresaId = (int) $_GET['empresa_id'];
@@ -176,13 +195,16 @@ function protectedRoute(callable $handler, string $permission): callable
         if ($empresaId <= 0) {
             $payload = Request::json();
             $empresaId = (int) ($payload['empresa_id'] ?? 0);
+            if ($sucursalId <= 0) {
+                $sucursalId = (int) ($payload['sucursal_id'] ?? 0);
+            }
         }
 
         if ($empresaId <= 0) {
             throw new HttpException('empresa_id obligatorio', 422);
         }
 
-        (new TenantMiddleware())->handle($userId, $empresaId);
+        (new TenantMiddleware())->handle($userId, $empresaId, $sucursalId > 0 ? $sucursalId : null);
         (new SubscriptionMiddleware())->handle();
         (new PermissionMiddleware())->handle($userId, $empresaId, $permission);
 
@@ -501,6 +523,23 @@ $router->put('/api/v1/mercadopago/terminales/{id}', protectedRoute([$mercadoPago
 $router->put('/api/v1/mercadopago/terminales/{id}/estado', protectedRoute([$mercadoPagoController, 'estadoTerminal'], 'mercadopago.configurar'));
 $router->post('/api/v1/mercadopago/cobros', protectedRoute([$mercadoPagoController, 'iniciarCobro'], 'mercadopago.cobrar'));
 $router->get('/api/v1/mercadopago/cobros/{id}', protectedRoute([$mercadoPagoController, 'estadoCobro'], 'mercadopago.cobrar'));
+
+// Presencia digital / MyPOS Cerca (administracion autenticada).
+$router->get('/api/v1/presencia-digital/perfiles/{sucursal_id}', protectedRoute([$myposCercaController, 'getProfile'], 'presencia_digital.ver'));
+$router->put('/api/v1/presencia-digital/perfiles/{sucursal_id}', protectedRoute([$myposCercaController, 'putProfile'], 'presencia_digital.configurar'));
+$router->get('/api/v1/presencia-digital/productos', protectedRoute([$myposCercaController, 'products'], 'presencia_digital.ver'));
+$router->put('/api/v1/presencia-digital/productos', protectedRoute([$myposCercaController, 'putProducts'], 'presencia_digital.configurar'));
+$router->get('/api/v1/presencia-digital/cotizaciones', protectedRoute([$myposCercaController, 'quotes'], 'presencia_digital.ver'));
+$router->get('/api/v1/presencia-digital/reservas', protectedRoute([$myposCercaController, 'reservations'], 'presencia_digital.ver'));
+$router->post('/api/v1/presencia-digital/reservas/{id}/estado', protectedRoute([$myposCercaController, 'reservationState'], 'presencia_digital.operar'));
+$router->post('/api/v1/presencia-digital/reservas/{id}/convertir-venta', protectedRoute([$myposCercaController, 'convertReservation'], 'presencia_digital.operar'));
+$router->post('/api/v1/presencia-digital/reservas/{id}/reembolsar', protectedRoute([$onlinePaymentController, 'refundReservation'], 'presencia_digital.operar'));
+$router->get('/api/v1/presencia-digital/metricas', protectedRoute([$myposCercaController, 'metrics'], 'presencia_digital.ver'));
+$router->get('/api/v1/presencia-digital/pasarelas', protectedRoute([$onlinePaymentController, 'configs'], 'presencia_digital.ver'));
+$router->put('/api/v1/presencia-digital/pasarelas/{proveedor}', protectedRoute([$onlinePaymentController, 'saveConfig'], 'presencia_digital.configurar'));
+$router->post('/api/v1/presencia-digital/pasarelas/{proveedor}/validar', protectedRoute([$onlinePaymentController, 'validate'], 'presencia_digital.configurar'));
+$router->post('/api/v1/presencia-digital/pasarelas/{proveedor}/prueba-real', protectedRoute([$onlinePaymentController, 'verification'], 'presencia_digital.configurar'));
+$router->post('/api/v1/presencia-digital/pasarelas/mercadopago/oauth', protectedRoute([$onlinePaymentController, 'mercadoPagoOauthStart'], 'presencia_digital.configurar'));
 
 $auditoriaController = new AuditoriaController();
 $router->get('/api/v1/auditoria', protectedRoute([$auditoriaController, 'index'], 'auditoria.ver'));

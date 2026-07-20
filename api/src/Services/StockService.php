@@ -394,6 +394,77 @@ final class StockService
         }
     }
 
+    /**
+     * Reserva stock sin modificar la cantidad fisica. Devuelve la ubicacion
+     * concreta bloqueada para que la reserva pueda liberarse de forma exacta.
+     */
+    public function reservarParaCanalDigital(
+        int $empresaId,
+        int $sucursalId,
+        int $productoId,
+        float $cantidad,
+        float $stockProtegido = 0,
+        ?PDO $externalConnection = null
+    ): array {
+        if ($cantidad <= 0 || $stockProtegido < 0) {
+            throw new HttpException('Cantidad o stock protegido invalido', 422);
+        }
+        $connection = $externalConnection ?? $this->repository->connection();
+        $ownsTransaction = !$connection->inTransaction();
+        $repository = $externalConnection !== null ? new StockRepository($connection) : $this->repository;
+
+        try {
+            if ($ownsTransaction) $connection->beginTransaction();
+            $this->validarBase($empresaId, $sucursalId, $productoId, $repository);
+            $repository->ensureDefaultLocationForSucursal($empresaId, $sucursalId);
+            $location = $repository->defaultLocationForSucursal($empresaId, $sucursalId);
+            if ($location === null) throw new HttpException('Ubicacion de venta no disponible', 422);
+
+            $ubicacionId = (int) $location['id'];
+            $repository->ensureLocationStockRow($empresaId, $ubicacionId, $productoId);
+            $row = $repository->lockLocationStockRow($empresaId, $ubicacionId, $productoId);
+            $actual = (float) $row['cantidad'];
+            $reservado = (float) $row['reservado'];
+            if (($actual - $reservado - $stockProtegido) + 0.0001 < $cantidad) {
+                throw new HttpException('Stock insuficiente para reservar', 409);
+            }
+            $repository->updateLocationReserved((int) $row['id'], $this->formatQuantity($reservado + $cantidad));
+            $repository->ensureStockRow($empresaId, $sucursalId, $productoId);
+            $repository->recalcSucursalReserved($empresaId, $sucursalId, $productoId);
+            if ($ownsTransaction) $connection->commit();
+            return ['ubicacion_id' => $ubicacionId, 'cantidad_reservada' => $cantidad];
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $connection->inTransaction()) $connection->rollBack();
+            throw $e;
+        }
+    }
+
+    public function liberarReservaDigital(
+        int $empresaId,
+        int $sucursalId,
+        int $productoId,
+        int $ubicacionId,
+        float $cantidad,
+        ?PDO $externalConnection = null
+    ): void {
+        if ($cantidad <= 0) throw new HttpException('Cantidad de reserva invalida', 422);
+        $connection = $externalConnection ?? $this->repository->connection();
+        $ownsTransaction = !$connection->inTransaction();
+        $repository = $externalConnection !== null ? new StockRepository($connection) : $this->repository;
+        try {
+            if ($ownsTransaction) $connection->beginTransaction();
+            $row = $repository->lockLocationStockRow($empresaId, $ubicacionId, $productoId);
+            if (!is_array($row)) throw new HttpException('Stock reservado no encontrado', 404);
+            $nuevo = max(0, (float) $row['reservado'] - $cantidad);
+            $repository->updateLocationReserved((int) $row['id'], $this->formatQuantity($nuevo));
+            $repository->recalcSucursalReserved($empresaId, $sucursalId, $productoId);
+            if ($ownsTransaction) $connection->commit();
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $connection->inTransaction()) $connection->rollBack();
+            throw $e;
+        }
+    }
+
     public function alertas(int $empresaId, ?int $sucursalId): array
     {
         if ($empresaId <= 0) {

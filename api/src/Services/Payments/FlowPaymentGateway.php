@@ -1,0 +1,21 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Mypos\Services\Payments;
+
+use Mypos\Contracts\PaymentGatewayInterface;
+use Mypos\Core\HttpException;
+use Mypos\Support\GatewayHttpClient;
+
+final class FlowPaymentGateway implements PaymentGatewayInterface
+{
+    private string $base;
+    public function __construct(private readonly string $apiKey,private readonly string $secret,private readonly string $environment='sandbox',private readonly ?string $merchantId=null,private readonly ?GatewayHttpClient $http=null){$this->base=$environment==='produccion'?'https://www.flow.cl/api':'https://sandbox.flow.cl/api';}
+    public function validateCredentials():array{try{$r=$this->call('GET','payment/getStatusByFlowOrder',['flowOrder'=>1]);if(in_array($r['status'],[200,400],true))return['ok'=>true,'account_id'=>$this->merchantId,'message'=>'Credenciales Flow aceptadas por la API'];return['ok'=>false,'account_id'=>null,'message'=>'Flow rechazo las credenciales'];}catch(HttpException$e){return['ok'=>false,'account_id'=>null,'message'=>$e->getMessage()];}}
+    public function createPayment(array $p):array{$params=['commerceOrder'=>(string)$p['reference'],'subject'=>(string)$p['description'],'currency'=>'CLP','amount'=>(int)$p['amount'],'email'=>(string)$p['payer_email'],'paymentMethod'=>9,'urlConfirmation'=>(string)$p['notification_url'],'urlReturn'=>(string)$p['return_url'],'timeout'=>(int)($p['timeout_seconds']??900),'optional'=>json_encode(['reference'=>$p['reference']],JSON_UNESCAPED_UNICODE)];if($this->merchantId)$params['merchantId']=$this->merchantId;$r=$this->call('POST','payment/create',$params);$this->ok($r,'No se pudo crear el pago en Flow');$token=(string)($r['body']['token']??'');$url=(string)($r['body']['url']??'');if($token===''||$url==='')throw new HttpException('Flow no entrego URL de pago',502);return['provider_id'=>(string)($r['body']['flowOrder']??$token),'checkout_url'=>$url.'?token='.rawurlencode($token),'status'=>'PENDIENTE','raw'=>$r['body']];}
+    public function getPayment(string $providerId):array{$isOrder=preg_match('/^\d+$/',$providerId)===1;$r=$this->call('GET',$isOrder?'payment/getStatusByFlowOrder':'payment/getStatus',$isOrder?['flowOrder'=>$providerId]:['token'=>$providerId]);$this->ok($r,'No se pudo consultar el pago Flow');$b=$r['body'];$status=match((int)($b['status']??1)){2=>'APROBADO',3=>'RECHAZADO',4=>'CANCELADO',default=>'PENDIENTE'};$pd=is_array($b['paymentData']??null)?$b['paymentData']:[];return['provider_id'=>(string)($b['flowOrder']??$providerId),'reference'=>(string)($b['commerceOrder']??''),'status'=>$status,'amount'=>(int)($b['amount']??0),'fee'=>isset($pd['fee'])?(int)round((float)$pd['fee']):null,'net_amount'=>isset($pd['balance'])?(int)round((float)$pd['balance']):null,'expected_settlement_at'=>$pd['transferDate']??null,'settlement_status'=>!empty($pd['transferDate'])?'PROGRAMADA':'PENDIENTE','raw'=>$b];}
+    public function refund(string $providerId,?int $amount=null):array{$payment=$this->getPayment($providerId);$payer=(string)($payment['raw']['payer']??'');if($payer===''||$amount===null||$amount<=0)throw new HttpException('Flow requiere monto y pagador para reembolsar',422);$ref='RF-'.strtoupper(bin2hex(random_bytes(6)));$r=$this->call('POST','refund/create',['refundCommerceOrder'=>$ref,'receiverEmail'=>$payer,'amount'=>$amount,'urlCallBack'=>(string)($payment['raw']['optional']['refund_callback']??''),'commerceTrxId'=>$providerId]);$this->ok($r,'No se pudo crear el reembolso Flow');return['status'=>'REEMBOLSO_PENDIENTE','provider_refund_id'=>$r['body']['token']??null,'raw'=>$r['body']];}
+    private function call(string $method,string $path,array $params):array{$params=['apiKey'=>$this->apiKey]+$params;ksort($params);$toSign='';foreach($params as$k=>$v)$toSign.=$k.(is_scalar($v)?(string)$v:json_encode($v));$params['s']=hash_hmac('sha256',$toSign,$this->secret);$query=$method==='GET'?'?'.http_build_query($params):'';return($this->http??new GatewayHttpClient())->request($method,$this->base.'/'.$path.$query,['Accept: application/json','Content-Type: application/x-www-form-urlencoded'],$method==='POST'?$params:null);}
+    private function ok(array $r,string $message):void{if($r['status']<200||$r['status']>=300)throw new HttpException($message,502);}
+}
