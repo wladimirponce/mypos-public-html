@@ -1,0 +1,1 @@
+import{M as e,y as t}from"./index-2RfFez50.js";function n(n){return e(t,n)}export{n as t};

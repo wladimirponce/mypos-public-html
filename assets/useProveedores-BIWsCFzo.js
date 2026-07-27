@@ -1,1 +1,0 @@
-import{Jt as e,kt as t}from"./index-DgNu-xEZ.js";import{n,r}from"./compraService-EoZfPWje.js";function i(i=``){let a=e(e=>e.empresaActiva);return t({queryKey:[`proveedores`,a?.empresa_id,i],queryFn:async()=>r(await n.providers(a?.empresa_id??0,i)),enabled:!!a?.empresa_id,staleTime:6e4})}export{i as t};
