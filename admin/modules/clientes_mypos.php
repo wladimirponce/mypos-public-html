@@ -199,8 +199,28 @@ if (isset($_POST['action']) && $_POST['action'] === 'actualizar_monto_plan' && $
     }
 }
 
+if (isset($_POST['action']) && $_POST['action'] === 'adelantar_fecha_pago' && $dbOk) {
+    try {
+        if (!hash_equals((string)($_SESSION['clientes_mypos_csrf'] ?? ''), (string)($_POST['csrf_token'] ?? ''))) {
+            throw new Exception('La sesion del formulario expiro. Recarga la pagina e intenta nuevamente.');
+        }
+        $empresaId = (int)($_POST['empresa_id'] ?? 0);
+        $fechaPago = (string)($_POST['fecha_pago'] ?? '');
+        (new MyposSubscriptionService())->adelantarFechaPago($empresaId, $fechaPago);
+        $fechaPagoFormateada = DateTimeImmutable::createFromFormat('!Y-m-d', $fechaPago);
+        $pagoMsg = 'Fecha de pago adelantada al '
+            . ($fechaPagoFormateada ? $fechaPagoFormateada->format('d/m/Y') : $fechaPago)
+            . '. Desde ese dia el cliente debera regularizar su suscripcion.';
+    } catch (Throwable $e) {
+        $pagoError = $e->getMessage();
+    }
+}
+
 if (isset($_POST['action']) && $_POST['action'] === 'forzar_pago_manual' && $dbOk) {
     try {
+        if (!hash_equals((string)($_SESSION['clientes_mypos_csrf'] ?? ''), (string)($_POST['csrf_token'] ?? ''))) {
+            throw new Exception('La sesion del formulario expiro. Recarga la pagina e intenta nuevamente.');
+        }
         $empresaId = (int)($_POST['empresa_id'] ?? 0);
         $dias = max(1, min(365, (int)($_POST['dias_vigencia'] ?? 30)));
         if ($empresaId <= 0) throw new Exception('Empresa inválida.');
@@ -335,6 +355,41 @@ function montoMensualCliente(array $cliente): int
         default => 23788,
     };
 }
+
+function proximoPagoCliente(array $cliente): array
+{
+    $fechaFinRaw = trim((string)($cliente['suscripcion_fin'] ?? ''));
+    if ($fechaFinRaw === '') {
+        return ['label' => 'Sin fecha', 'tone' => 'warning', 'fecha' => null, 'dias' => null];
+    }
+
+    try {
+        $fechaFin = new DateTimeImmutable($fechaFinRaw);
+    } catch (Throwable) {
+        return ['label' => 'Fecha invalida', 'tone' => 'danger', 'fecha' => null, 'dias' => null];
+    }
+
+    $hoy = new DateTimeImmutable('today');
+    $fechaFinDia = $fechaFin->setTime(0, 0);
+    $dias = (int)$hoy->diff($fechaFinDia)->format('%r%a');
+
+    if (($cliente['suscripcion_estado'] ?? '') !== 'activa' || $fechaFin < new DateTimeImmutable()) {
+        $diasVencida = max(0, abs($dias));
+        return [
+            'label' => $diasVencida === 0 ? 'Vencida hoy' : 'Vencida hace ' . $diasVencida . 'd',
+            'tone' => 'danger',
+            'fecha' => $fechaFin,
+            'dias' => $dias,
+        ];
+    }
+
+    return [
+        'label' => $dias === 0 ? 'Vence hoy' : 'Restan ' . $dias . 'd',
+        'tone' => $dias <= 3 ? 'danger' : ($dias <= 7 ? 'warning' : 'prod'),
+        'fecha' => $fechaFin,
+        'dias' => $dias,
+    ];
+}
 ?>
 
 <?php if ($pagoMsg): ?>
@@ -383,18 +438,19 @@ function montoMensualCliente(array $cliente): int
             <?= $showInactive ? 'Ocultar inactivos' : 'Ver inactivos' ?>
         </a>
     </div>
-    <div class="d-card-body" style="padding:0">
+    <div class="d-card-body" style="padding:0;overflow-x:auto">
         <?php if (!$clientes): ?>
             <div style="padding:60px; text-align:center; color:var(--c-text-muted)">
                 <i class="bi bi-building-x" style="font-size:2.5rem"></i>
                 <p class="mt-2">No hay clientes registrados en MyPOS.</p>
             </div>
         <?php else: ?>
-            <table class="d-table">
+            <table class="d-table" style="min-width:1180px">
                 <thead>
                     <tr>
                         <th>Cliente</th>
                         <th>Suscripcion</th>
+                        <th>Proximo pago</th>
                         <th>Monto mensual</th>
                         <th>DTE MyPOS</th>
                         <th>Ficha SII</th>
@@ -410,6 +466,7 @@ function montoMensualCliente(array $cliente): int
                             $hasSii = !empty($cliente['sii_empresa_id']);
                             $hasCert = (int)$cliente['certificados_activos'] > 0;
                             $hasFolios = (int)$cliente['folios_disponibles'] > 0;
+                            $proximoPago = proximoPagoCliente($cliente);
                             $subscription = isTrialSubscription($cliente)
                                 ? clienteBadge('Prueba 7 dias', 'warning')
                                 : (($cliente['suscripcion_estado'] ?? '') === 'activa'
@@ -422,6 +479,14 @@ function montoMensualCliente(array $cliente): int
                                 <span class="text-muted small"><?= htmlspecialchars($cliente['rut'] ?: 'Sin RUT') ?></span>
                             </td>
                             <td><?= $subscription ?></td>
+                            <td style="min-width:118px">
+                                <?= clienteBadge($proximoPago['label'], $proximoPago['tone']) ?><br>
+                                <span class="text-muted small">
+                                    <?= $proximoPago['fecha'] instanceof DateTimeImmutable
+                                        ? htmlspecialchars($proximoPago['fecha']->format('d/m/Y'))
+                                        : 'No programado' ?>
+                                </span>
+                            </td>
                             <td style="min-width:170px">
                                 <?php if (!empty($cliente['plan_id']) && $hasRecurringPriceColumn): ?>
                                     <form method="POST" style="display:flex;gap:5px;align-items:center"
@@ -476,6 +541,7 @@ function montoMensualCliente(array $cliente): int
                                           onsubmit="return confirm('¿Registrar pago manual para <?= htmlspecialchars(addslashes((string)($cliente['razon_social'] ?: $cliente['nombre_fantasia']))) ?>?')">
                                         <input type="hidden" name="action" value="forzar_pago_manual">
                                         <input type="hidden" name="empresa_id" value="<?= (int)$cliente['id'] ?>">
+                                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars((string)$_SESSION['clientes_mypos_csrf']) ?>">
                                         <select name="dias_vigencia" style="padding:2px 4px;font-size:11px;border:1px solid var(--c-border,#ccc);border-radius:4px;background:var(--c-bg,#fff);color:var(--c-text,#333)">
                                             <option value="30">30d</option>
                                             <option value="60">60d</option>
@@ -486,6 +552,35 @@ function montoMensualCliente(array $cliente): int
                                             <i class="bi bi-cash-coin"></i> Pago
                                         </button>
                                     </form>
+                                    <?php
+                                        $fechaFinDia = $proximoPago['fecha'] instanceof DateTimeImmutable
+                                            ? $proximoPago['fecha']->setTime(0, 0)
+                                            : null;
+                                        $hoyPago = new DateTimeImmutable('today');
+                                        $puedeAdelantar = ($cliente['suscripcion_estado'] ?? '') === 'activa'
+                                            && $fechaFinDia instanceof DateTimeImmutable
+                                            && $fechaFinDia > $hoyPago;
+                                    ?>
+                                    <?php if ($puedeAdelantar): ?>
+                                        <form method="POST" class="adelantar-pago-form"
+                                              data-cliente="<?= htmlspecialchars((string)($cliente['razon_social'] ?: $cliente['nombre_fantasia']), ENT_QUOTES) ?>"
+                                              style="display:flex;gap:4px;align-items:center"
+                                              onsubmit="return confirmarAdelantoPago(this)">
+                                            <input type="hidden" name="action" value="adelantar_fecha_pago">
+                                            <input type="hidden" name="empresa_id" value="<?= (int)$cliente['id'] ?>">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars((string)$_SESSION['clientes_mypos_csrf']) ?>">
+                                            <input type="date" name="fecha_pago" required
+                                                   min="<?= $hoyPago->format('Y-m-d') ?>"
+                                                   max="<?= $fechaFinDia->modify('-1 day')->format('Y-m-d') ?>"
+                                                   aria-label="Nueva fecha de pago"
+                                                   style="width:112px;padding:2px 4px;font-size:11px;border:1px solid var(--c-border,#ccc);border-radius:4px;background:var(--c-bg,#fff);color:var(--c-text,#333)">
+                                            <button type="submit" class="d-btn d-btn-sm"
+                                                    style="background:#dc6b19;color:#fff;border:none"
+                                                    title="Adelantar la fecha en que se exigira el pago">
+                                                <i class="bi bi-calendar2-event"></i> Adelantar
+                                            </button>
+                                        </form>
+                                    <?php endif; ?>
                                 </div>
                             </td>
                         </tr>
@@ -639,6 +734,20 @@ function montoMensualCliente(array $cliente): int
 <script>
 let modalInstancia = null;
 let sucursalesCache = [];
+
+function confirmarAdelantoPago(form) {
+    const fecha = form.elements.fecha_pago.value;
+    if (!fecha) return false;
+
+    const [anio, mes, dia] = fecha.split('-');
+    const fechaVisible = `${dia}/${mes}/${anio}`;
+    const cliente = form.dataset.cliente || 'este cliente';
+
+    return confirm(
+        `¿Adelantar el vencimiento de ${cliente} al ${fechaVisible}?\n\n` +
+        'Desde el inicio de ese dia se exigira regularizar el pago. Esta accion no realiza un cargo automatico.'
+    );
+}
 
 function abrirModalUsuarios(empresaId, razonSocial) {
     document.getElementById('nombre-empresa-modal').textContent = razonSocial;

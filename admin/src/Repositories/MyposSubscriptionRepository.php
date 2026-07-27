@@ -7,6 +7,20 @@ use RuntimeException;
 
 final class MyposSubscriptionRepository extends BaseRepository
 {
+    public function findByEmpresaId(int $empresaId): ?array
+    {
+        $statement = $this->db->prepare(
+            'SELECT empresa_id, plan_id, fecha_inicio, fecha_fin, estado
+             FROM empresas_suscripcion
+             WHERE empresa_id = :empresa_id
+             LIMIT 1'
+        );
+        $statement->execute(['empresa_id' => $empresaId]);
+        $subscription = $statement->fetch(\PDO::FETCH_ASSOC);
+
+        return $subscription ?: null;
+    }
+
     public function updateRecurringPrice(int $empresaId, int $montoClp): void
     {
         $statement = $this->db->prepare(
@@ -19,6 +33,19 @@ final class MyposSubscriptionRepository extends BaseRepository
         if ($statement->rowCount() === 0 && !$this->subscriptionExists($empresaId)) {
             throw new RuntimeException('La empresa no tiene una suscripcion asociada.');
         }
+    }
+
+    public function advancePaymentDate(int $empresaId, string $paymentDate): void
+    {
+        $statement = $this->db->prepare(
+            'UPDATE empresas_suscripcion
+             SET fecha_fin = :fecha_fin
+             WHERE empresa_id = :empresa_id'
+        );
+        $statement->execute([
+            'fecha_fin' => $paymentDate . ' 00:00:00',
+            'empresa_id' => $empresaId,
+        ]);
     }
 
     private function subscriptionExists(int $empresaId): bool

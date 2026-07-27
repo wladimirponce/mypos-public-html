@@ -139,6 +139,8 @@ la migracion SaaS `077_auth_public_tokens_hardening` y nunca crea tablas al abri
 
 En `Clientes MyPOS`, la columna **Monto mensual** edita el valor recurrente real guardado en `empresas_suscripcion.precio_especial_clp`. Los próximos cobros Flow usan ese monto en lugar del precio de catálogo del plan.
 
+La columna **Próximo pago** muestra la fecha de vencimiento y los días restantes. La acción **Adelantar** permite mover `empresas_suscripcion.fecha_fin` a una fecha anterior; desde el inicio de ese día `SubscriptionMiddleware` exige regularizar la suscripción. No genera un débito automático en Flow.
+
 El módulo `modules/saas.php` permite administrar la suscripción y las funcionalidades habilitadas por empresa. Usa `SaaSRepository` para gestionar:
 
 - **Plan:** básico, estándar, premium
