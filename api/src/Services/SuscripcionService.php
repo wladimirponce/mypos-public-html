@@ -14,6 +14,7 @@ use Mypos\Repositories\AuthRepository;
 use Mypos\Repositories\SuscripcionRepository;
 use Mypos\Support\AppConfig;
 use Mypos\Support\PlanCatalog;
+use Mypos\Support\SubscriptionChargePolicy;
 
 class SuscripcionService
 {
@@ -41,6 +42,59 @@ class SuscripcionService
         return ['price_clp' => $plan['price_clp'], 'price_usd' => $plan['price_usd'], 'name' => $plan['nombre']];
     }
 
+    /**
+     * Monto mensual real en CLP de una empresa.
+     *
+     * La regla dirigida define QUIEN paga; el monto personalizado define CUANTO.
+     * Prioridad: `empresas_suscripcion.precio_especial_clp` (link de promocion o
+     * columna "Monto mensual" del panel admin) > monto de la regla dirigida >
+     * precio de catalogo del plan.
+     *
+     * @param array{price_clp:int,...} $plan
+     * @param array<string,mixed>|null $suscripcion
+     * @param array{amount_clp:int,...}|null $chargeRule
+     */
+    private function montoMensualClp(array $plan, ?array $suscripcion, ?array $chargeRule): int
+    {
+        return $this->montoNegociadoClp($suscripcion, $chargeRule) ?? (int) $plan['price_clp'];
+    }
+
+    /**
+     * Estado efectivo de la suscripcion considerando el vencimiento del periodo.
+     *
+     * @param array<string,mixed> $suscripcion
+     */
+    private function estadoVigente(array $suscripcion): string
+    {
+        $estado = (string) $suscripcion['estado'];
+        if ($estado !== 'activa') {
+            return $estado;
+        }
+
+        $fechaFin = $suscripcion['fecha_fin'] ? strtotime((string) $suscripcion['fecha_fin']) : 0;
+
+        return $fechaFin >= time() ? 'activa' : 'vencida';
+    }
+
+    /**
+     * Monto pactado fuera del catalogo, o null si la empresa paga precio de lista.
+     *
+     * `null` es la senal que usa la SPA para mostrar la grilla de planes en vez de
+     * una unica tarjeta con el valor acordado.
+     *
+     * @param array<string,mixed>|null $suscripcion
+     * @param array{amount_clp:int,...}|null $chargeRule
+     */
+    private function montoNegociadoClp(?array $suscripcion, ?array $chargeRule): ?int
+    {
+        $precioEspecial = (int) ($suscripcion['precio_especial_clp'] ?? 0);
+        if ($precioEspecial > 0) {
+            return $precioEspecial;
+        }
+
+        return $chargeRule !== null ? (int) $chargeRule['amount_clp'] : null;
+    }
+
     public function createPaymentOrder(array $payload, int $empresaId, int $usuarioId): array
     {
         if ($empresaId <= 0) {
@@ -53,12 +107,17 @@ class SuscripcionService
 
         $gateway = strtolower((string) ($payload['gateway'] ?? 'flow'));
         $planId = PlanCatalog::normalize((string) ($payload['plan_id'] ?? 'mypos-start'));
+        $chargeRule = SubscriptionChargePolicy::forEmpresa($empresaId);
         
         $setupFee = filter_var($payload['setup_fee'] ?? false, FILTER_VALIDATE_BOOLEAN);
         $extraUsers = (int) ($payload['extra_users_count'] ?? 0);
 
         if (!in_array($gateway, ['flow', 'paypal'], true)) {
             throw new HttpException('Gateway de pago invalido', 422);
+        }
+
+        if ($chargeRule !== null && $gateway !== 'flow') {
+            throw new HttpException('El pago mensual de esta empresa se realiza exclusivamente mediante Flow', 422);
         }
 
         $plan = $this->getPlanDetails($planId);
@@ -77,13 +136,12 @@ class SuscripcionService
         $baseMonto = $gateway === 'flow' ? $plan['price_clp'] : $plan['price_usd'];
         $moneda = $gateway === 'flow' ? 'CLP' : 'USD';
 
-        // Precio especial recurrente (link de promoción): reemplaza el precio de
-        // catálogo del plan de forma indefinida. Definido en CLP, aplica a Flow.
+        // Precio especial recurrente (link de promoción o edición desde el panel
+        // admin): reemplaza el precio de catálogo del plan de forma indefinida.
+        // Definido en CLP, aplica a Flow.
         if ($gateway === 'flow') {
             $sub = $this->repository->getSubscriptionStatus($empresaId);
-            if ($sub !== null && !empty($sub['precio_especial_clp'])) {
-                $baseMonto = (int) $sub['precio_especial_clp'];
-            }
+            $baseMonto = $this->montoMensualClp($plan, $sub, $chargeRule);
         }
 
         $montoExtraUsers = 0;
@@ -96,7 +154,10 @@ class SuscripcionService
             $montoSetup = $gateway === 'flow' ? 35688 : 38.00; // $29.990 + IVA
         }
         
-        $montoTotal = $baseMonto + $montoExtraUsers + $montoSetup;
+        // Con regla dirigida se cobra la cuota mensual exacta, sin extras ni setup.
+        $montoTotal = $chargeRule !== null
+            ? $baseMonto
+            : $baseMonto + $montoExtraUsers + $montoSetup;
 
         $ordenId = $this->repository->createOrder(
             $ordenNumero,
@@ -144,8 +205,36 @@ class SuscripcionService
         }
 
         if ($orden['estado'] !== 'completado') {
+            $empresaId = (int) $orden['empresa_id'];
+            $chargeRule = SubscriptionChargePolicy::forEmpresa($empresaId);
+
+            // El monto de la orden lo calcula el backend al crearla, por lo que un
+            // desajuste solo aparece cuando el monto mensual cambio mientras el
+            // cliente pagaba. Rechazar dejaria un cobro cursado sin servicio: se
+            // deja trazado y se acredita igual.
+            $montoEsperado = $this->montoMensualClp(
+                PlanCatalog::get((string) $orden['plan_id']),
+                $this->repository->getSubscriptionStatus($empresaId),
+                $chargeRule
+            );
+            if ((int) $orden['monto'] !== $montoEsperado) {
+                error_log(sprintf(
+                    '[Suscripciones] Orden %s pagada por %d CLP; monto mensual vigente %d CLP (empresa %d)',
+                    (string) $orden['orden_numero'],
+                    (int) $orden['monto'],
+                    $montoEsperado,
+                    $empresaId
+                ));
+            }
+
+            $restartPeriod = $chargeRule !== null
+                && !$this->repository->hasCompletedFlowPayment($empresaId);
             $this->repository->markOrderCompleted((int) $orden['id']);
-            $this->repository->updateOrActivateSubscription((int) $orden['empresa_id'], (string) $orden['plan_id']);
+            $this->repository->updateOrActivateSubscription(
+                (int) $orden['empresa_id'],
+                (string) $orden['plan_id'],
+                $restartPeriod
+            );
         }
     }
 
@@ -181,6 +270,10 @@ class SuscripcionService
             throw new HttpException('Usuario no pertenece a la empresa', 403);
         }
 
+        // Toda empresa paga: `payment_required` es siempre true y el estado que se
+        // informa es el real, para que la SPA lleve al muro de pago a quien esta
+        // vencido en vez de dejarlo chocando contra 402 en cada modulo.
+        $chargeRule = SubscriptionChargePolicy::forEmpresa($empresaId);
         $status = $this->repository->getSubscriptionStatus($empresaId);
         if (!$status) {
             $limits = (new PlanLimitService())->status($empresaId);
@@ -190,6 +283,10 @@ class SuscripcionService
                 'plan_id' => $limits['plan']['id'],
                 'plan_nombre' => $limits['plan']['nombre'],
                 'limites' => $limits,
+                'payment_required' => true,
+                'monthly_amount_clp' => $this->montoNegociadoClp(null, $chargeRule),
+                'payment_gateway' => $chargeRule['gateway'] ?? null,
+                'exenta' => false,
             ];
         }
 
@@ -200,7 +297,14 @@ class SuscripcionService
             'limites' => (new PlanLimitService())->status($empresaId),
             'fecha_inicio' => $status['fecha_inicio'],
             'fecha_fin' => $status['fecha_fin'],
-            'estado' => $status['estado'],
+            // El periodo puede haber vencido sin que el middleware haya alcanzado a
+            // marcar la fila; se informa vencida igual para no mostrar un "activa"
+            // que la primera llamada operativa va a desmentir con un 402.
+            'estado' => $this->estadoVigente($status),
+            'payment_required' => true,
+            'monthly_amount_clp' => $this->montoNegociadoClp($status, $chargeRule),
+            'payment_gateway' => $chargeRule['gateway'] ?? null,
+            'exenta' => false,
         ];
     }
 

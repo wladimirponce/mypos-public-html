@@ -7,8 +7,8 @@ namespace Mypos\Middleware;
 use Mypos\Core\Auth;
 use Mypos\Core\HttpException;
 use Mypos\Config\Database;
+use Mypos\Repositories\SuscripcionRepository;
 use Mypos\Support\AppConfig;
-use PDO;
 
 final class SubscriptionMiddleware
 {
@@ -31,12 +31,16 @@ final class SubscriptionMiddleware
         if (!$empresaId) {
             throw new HttpException('Empresa no seleccionada en el contexto', 400);
         }
-        
+
+        // Toda empresa necesita suscripcion vigente para operar. La regla de
+        // FLOW_MONTHLY_CHARGE_RULES no decide el acceso: solo aporta monto y
+        // pasarela de respaldo cuando la suscripcion no trae precio propio.
+        // La vigencia la define fecha_fin, que solo avanza con un pago confirmado
+        // por el webhook o con una accion explicita desde el panel admin.
         $connection = Database::connection();
-        $stmt = $connection->prepare('SELECT * FROM empresas_suscripcion WHERE empresa_id = :empresa_id');
-        $stmt->execute(['empresa_id' => $empresaId]);
-        $suscripcion = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+        $repository = new SuscripcionRepository($connection);
+        $suscripcion = $repository->getSubscriptionStatus($empresaId);
+
         if (!$suscripcion) {
             throw new HttpException('Tu suscripción no se encuentra activa o no existe. Por favor regulariza tu pago.', 402);
         }

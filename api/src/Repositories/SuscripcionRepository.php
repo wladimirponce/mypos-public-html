@@ -102,17 +102,24 @@ class SuscripcionRepository
         $statement->execute(['id' => $ordenId]);
     }
 
-    public function updateOrActivateSubscription(int $empresaId, string $planId): void
+    public function updateOrActivateSubscription(int $empresaId, string $planId, bool $restartPeriod = false): void
     {
-        // 1 month subscription
-        $statement = $this->connection->prepare(
-            'INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado)
-             VALUES (:empresa_id, :plan_id, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), "activa")
-             ON DUPLICATE KEY UPDATE
-                plan_id = VALUES(plan_id),
-                fecha_fin = DATE_ADD(GREATEST(fecha_fin, NOW()), INTERVAL 1 MONTH),
-                estado = "activa"'
-        );
+        $sql = $restartPeriod
+            ? 'INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado)
+               VALUES (:empresa_id, :plan_id, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), "activa")
+               ON DUPLICATE KEY UPDATE
+                  plan_id = VALUES(plan_id),
+                  fecha_inicio = NOW(),
+                  fecha_fin = DATE_ADD(NOW(), INTERVAL 1 MONTH),
+                  estado = "activa"'
+            : 'INSERT INTO empresas_suscripcion (empresa_id, plan_id, fecha_inicio, fecha_fin, estado)
+               VALUES (:empresa_id, :plan_id, NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), "activa")
+               ON DUPLICATE KEY UPDATE
+                  plan_id = VALUES(plan_id),
+                  fecha_fin = DATE_ADD(GREATEST(fecha_fin, NOW()), INTERVAL 1 MONTH),
+                  estado = "activa"';
+
+        $statement = $this->connection->prepare($sql);
 
         $statement->execute([
             'empresa_id' => $empresaId,
@@ -128,5 +135,33 @@ class SuscripcionRepository
         $statement->execute(['empresa_id' => $empresaId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
+    }
+
+    /**
+     * Indica si la empresa tiene al menos un pago Flow acreditado.
+     *
+     * El monto mensual es editable (`precio_especial_clp`), por lo que filtrar por
+     * un importe exacto dejaria fuera a quien ya pago con el precio anterior. La
+     * vigencia del periodo la controla `fecha_fin`, no el importe. `$amountClp`
+     * queda disponible solo para verificar un cobro puntual.
+     */
+    public function hasCompletedFlowPayment(int $empresaId, ?int $amountClp = null): bool
+    {
+        $sql = 'SELECT 1
+                FROM suscripciones_ordenes
+                WHERE empresa_id = :empresa_id
+                  AND gateway = "flow"
+                  AND estado = "completado"';
+        $params = ['empresa_id' => $empresaId];
+
+        if ($amountClp !== null) {
+            $sql .= ' AND monto = :monto';
+            $params['monto'] = $amountClp;
+        }
+
+        $statement = $this->connection->prepare($sql . ' LIMIT 1');
+        $statement->execute($params);
+
+        return $statement->fetchColumn() !== false;
     }
 }
