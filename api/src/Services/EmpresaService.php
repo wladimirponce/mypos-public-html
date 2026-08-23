@@ -6,6 +6,7 @@ namespace Mypos\Services;
 
 use Mypos\Config\Database;
 use Mypos\Core\HttpException;
+use Mypos\Repositories\AuthRepository;
 use Mypos\Repositories\EmpresaRepository;
 use Mypos\Support\SecurityAlert;
 
@@ -397,6 +398,14 @@ final class EmpresaService
         $rolId = (int) ($data['rol_id'] ?? 0);
         $sucursalId = isset($data['sucursal_principal_id']) && $data['sucursal_principal_id'] !== '' ? (int) $data['sucursal_principal_id'] : null;
 
+        // Alta de una cuenta nueva desde el panel. Hasta ahora solo se podia
+        // asociar a alguien que ya se hubiera registrado por su cuenta, asi que
+        // un administrador no tenia forma de dar acceso a su equipo.
+        $nuevoUsuario = is_array($data['nuevo_usuario'] ?? null) ? $data['nuevo_usuario'] : null;
+        if ($usuarioId <= 0 && $nuevoUsuario !== null) {
+            $usuarioId = $this->crearUsuarioParaEmpresa($nuevoUsuario);
+        }
+
         if ($usuarioId <= 0) {
             throw new HttpException('El usuario es obligatorio', 422, ['usuario_id' => ['El usuario es obligatorio']]);
         }
@@ -427,6 +436,55 @@ final class EmpresaService
         ]);
 
         return ['success' => true];
+    }
+
+    /**
+     * Crea la cuenta de acceso de un integrante del equipo.
+     *
+     * Nace verificada y activa porque la da de alta un administrador de la
+     * empresa: no hay correo que confirmar y debe poder entrar de inmediato con
+     * las credenciales que se le entregan.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function crearUsuarioParaEmpresa(array $data): int
+    {
+        $nombre = trim((string) ($data['nombre'] ?? ''));
+        $email = trim(strtolower((string) ($data['email'] ?? '')));
+        $password = (string) ($data['password'] ?? '');
+
+        if ($nombre === '') {
+            throw new HttpException('El nombre es obligatorio', 422, ['nuevo_usuario.nombre' => ['El nombre es obligatorio']]);
+        }
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new HttpException('Formato de email inválido', 422, ['nuevo_usuario.email' => ['Formato de email inválido']]);
+        }
+        // Mismo minimo que el registro publico: no se relaja por venir del panel.
+        if (strlen($password) < 12) {
+            throw new HttpException(
+                'La contraseña debe tener al menos 12 caracteres',
+                422,
+                ['nuevo_usuario.password' => ['La contraseña debe tener al menos 12 caracteres']]
+            );
+        }
+        if (strlen($password) > 128) {
+            throw new HttpException(
+                'La contraseña no puede superar 128 caracteres',
+                422,
+                ['nuevo_usuario.password' => ['La contraseña no puede superar 128 caracteres']]
+            );
+        }
+
+        $authRepository = new AuthRepository($this->repository->connection());
+        if ($authRepository->findUserByEmail($email) !== null) {
+            throw new HttpException(
+                'Ya existe una cuenta con ese correo. Búscala arriba para darle acceso a esta empresa.',
+                422,
+                ['nuevo_usuario.email' => ['Ya existe una cuenta con ese correo']]
+            );
+        }
+
+        return $authRepository->createUser($nombre, $email, password_hash($password, PASSWORD_DEFAULT), null, true);
     }
 
     public function actualizarUsuario(int $empresaId, int $usuarioId, array $data): array

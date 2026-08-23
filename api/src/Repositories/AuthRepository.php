@@ -12,23 +12,35 @@ final class AuthRepository
     {
     }
 
-    public function createUser(string $nombre, string $email, string $passwordHash, ?string $emailVerificationToken = null): int
-    {
+    /**
+     * @param bool $emailVerificado Nace verificado cuando lo crea un administrador
+     *                              de la empresa: no hay correo de por medio que
+     *                              confirmar y, sin esto, no podria iniciar sesion
+     *                              si REQUIRE_EMAIL_VERIFICATION esta activo.
+     */
+    public function createUser(
+        string $nombre,
+        string $email,
+        string $passwordHash,
+        ?string $emailVerificationToken = null,
+        bool $emailVerificado = false
+    ): int {
         $statement = $this->connection->prepare(
             'INSERT INTO usuarios
                 (nombre, email, password_hash, activo, email_verificado,
                  email_verification_token, email_verification_token_hash,
                  email_verification_expires_at, email_verification_sent_at)
              VALUES
-                (:nombre, :email, :password_hash, 1, 0,
+                (:nombre, :email, :password_hash, 1, :email_verificado,
                  NULL, :email_verification_token_hash,
-                 DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 24 HOUR), CURRENT_TIMESTAMP)'
+                 ' . ($emailVerificado ? 'NULL, NULL' : 'DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 24 HOUR), CURRENT_TIMESTAMP') . ')'
         );
 
         $statement->execute([
             'nombre' => $nombre,
             'email' => $email,
             'password_hash' => $passwordHash,
+            'email_verificado' => $emailVerificado ? 1 : 0,
             'email_verification_token_hash' => $emailVerificationToken !== null
                 ? hash('sha256', $emailVerificationToken)
                 : null,

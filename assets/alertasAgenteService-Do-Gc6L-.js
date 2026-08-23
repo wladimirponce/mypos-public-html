@@ -1,1 +1,0 @@
-import{c as e,n as t}from"./apiClient-CHI_OrCQ.js";var n={get(n){return t.get(e.agenteAlertas.config,{params:{empresa_id:n}})},update(n,r){return t.put(e.agenteAlertas.config,{empresa_id:n,...r})}};export{n as t};
