@@ -1,0 +1,1 @@
+import{Nt as e,Qt as t}from"./index-CUpN0l-2.js";import{n}from"./compraService-B1hYJG3A.js";function r(r){let i=t(e=>e.empresaActiva);return e({queryKey:[`compras`,`productos`,i?.empresa_id,r],queryFn:()=>n.products(i?.empresa_id??0,r),enabled:!!(i?.empresa_id&&r.trim().length>=2),staleTime:2e4})}export{r as t};

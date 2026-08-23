@@ -1,0 +1,1 @@
+import{F as e,S as t}from"./index-CUpN0l-2.js";function n(n){return e(t,n)}export{n as t};
