@@ -139,6 +139,21 @@ final class ImportParserService
 
                     if ($type === 's') { // Shared String
                         $val = $sharedStrings[(int) $val] ?? '';
+                    } elseif ($type === 'inlineStr') {
+                        // El texto va dentro de <is><t>, no en <v>. Lo escriben asi
+                        // openpyxl y varios exportadores; sin este caso las celdas de
+                        // texto llegaban vacias, la cabecera no se reconocia y el
+                        // archivo se rechazaba con "no contiene filas de datos".
+                        $val = '';
+                        if (isset($cellNode->is)) {
+                            if (isset($cellNode->is->t)) {
+                                $val = (string) $cellNode->is->t;
+                            } elseif (isset($cellNode->is->r)) {
+                                foreach ($cellNode->is->r as $run) {
+                                    $val .= (string) $run->t;
+                                }
+                            }
+                        }
                     }
 
                     $rowCells[$colIndex] = $val;
