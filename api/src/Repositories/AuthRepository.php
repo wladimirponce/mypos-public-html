@@ -169,6 +169,15 @@ final class AuthRepository
         return (bool) $statement->fetchColumn();
     }
 
+    /** Reemplaza la contrasena de un usuario. El hash se calcula fuera. */
+    public function updateUserPassword(int $userId, string $passwordHash): void
+    {
+        $statement = $this->connection->prepare(
+            'UPDATE usuarios SET password_hash = :password_hash WHERE id = :id'
+        );
+        $statement->execute(['password_hash' => $passwordHash, 'id' => $userId]);
+    }
+
     public function setUserVerificationToken(int $userId, ?string $token): void
     {
         if ($token === null) {

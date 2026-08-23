@@ -8,6 +8,7 @@ use Mypos\Config\Database;
 use Mypos\Core\HttpException;
 use Mypos\Repositories\AuthRepository;
 use Mypos\Repositories\EmpresaRepository;
+use Mypos\Support\AppConfig;
 use Mypos\Support\SecurityAlert;
 
 final class EmpresaService
@@ -487,6 +488,67 @@ final class EmpresaService
         return $authRepository->createUser($nombre, $email, password_hash($password, PASSWORD_DEFAULT), null, true);
     }
 
+    /**
+     * Restablece la contrasena de un integrante de la empresa.
+     *
+     * El administrador puede hacerlo porque el mismo dio de alta la cuenta y
+     * necesita poder entregar credenciales nuevas cuando alguien las olvida. Dos
+     * limites cierran el paso a un escalamiento entre tenants:
+     *
+     * - Si la persona pertenece a mas de una empresa, su cuenta no es exclusiva
+     *   de este administrador y debe cambiarla ella misma.
+     * - Nunca se toca la cuenta del operador de plataforma.
+     */
+    private function cambiarPasswordDeUsuario(int $empresaId, int $usuarioId, string $password): void
+    {
+        if (strlen($password) < 12) {
+            throw new HttpException(
+                'La contraseña debe tener al menos 12 caracteres',
+                422,
+                ['password' => ['La contraseña debe tener al menos 12 caracteres']]
+            );
+        }
+        if (strlen($password) > 128) {
+            throw new HttpException(
+                'La contraseña no puede superar 128 caracteres',
+                422,
+                ['password' => ['La contraseña no puede superar 128 caracteres']]
+            );
+        }
+
+        $authRepository = new AuthRepository($this->repository->connection());
+        $usuario = $authRepository->findUserById($usuarioId);
+        if (!is_array($usuario)) {
+            throw new HttpException('Usuario no encontrado', 404);
+        }
+
+        if (AppConfig::isPlatformOwnerEmail((string) ($usuario['email'] ?? ''))) {
+            throw new HttpException('No se puede cambiar la contraseña de esta cuenta', 403);
+        }
+
+        $empresasDelUsuario = $authRepository->empresasByUserId($usuarioId);
+        $ajenas = array_filter(
+            $empresasDelUsuario,
+            static fn (array $fila): bool => (int) $fila['empresa_id'] !== $empresaId
+        );
+        if ($ajenas !== []) {
+            throw new HttpException(
+                'Esta persona también tiene acceso a otras empresas, así que su contraseña solo puede cambiarla ella.',
+                422,
+                ['password' => ['La cuenta pertenece a más de una empresa']]
+            );
+        }
+
+        $authRepository->updateUserPassword($usuarioId, password_hash($password, PASSWORD_DEFAULT));
+
+        SecurityAlert::emit('usuarios.password_restablecida', 'high', [
+            'component' => 'usuarios',
+            'empresa_id' => $empresaId,
+            'resource' => 'usuario:' . $usuarioId,
+            'reason' => 'restablecida_por_administrador_de_empresa',
+        ]);
+    }
+
     public function actualizarUsuario(int $empresaId, int $usuarioId, array $data): array
     {
         $this->obtenerEmpresa($empresaId);
@@ -538,6 +600,10 @@ final class EmpresaService
         }
 
         $this->repository->updateUsuarioEmpresa($empresaId, $usuarioId, $rolId, $sucursalId, $activo);
+
+        if (($data['password'] ?? '') !== '') {
+            $this->cambiarPasswordDeUsuario($empresaId, $usuarioId, (string) $data['password']);
+        }
 
         SecurityAlert::emit('usuarios.rol_actualizado', 'medium', [
             'component' => 'usuarios',
