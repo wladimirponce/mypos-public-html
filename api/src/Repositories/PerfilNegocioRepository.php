@@ -202,7 +202,10 @@ final class PerfilNegocioRepository
     public function perfilesDisponibles(): array
     {
         return [
-            ['codigo' => 'FARMACIA', 'nombre' => 'Farmacia', 'descripcion' => 'Medicamentos, ISP, recetas, lotes y vencimientos', 'capacidades' => $this->profileCapabilityCodes('FARMACIA')],
+            // Farmacia retirado de la oferta de MyPOS: lo cubre el sistema
+            // especializado de Agentika. Las empresas que ya lo tengan activo
+            // conservan sus capacidades y atributos.
+            // ['codigo' => 'FARMACIA', 'nombre' => 'Farmacia', 'descripcion' => 'Medicamentos, ISP, recetas, lotes y vencimientos', 'capacidades' => $this->profileCapabilityCodes('FARMACIA')],
             ['codigo' => 'MINIMARKET', 'nombre' => 'Minimarket', 'descripcion' => 'Alta rotacion, perecibles, precio por peso y mermas', 'capacidades' => $this->profileCapabilityCodes('MINIMARKET')],
             ['codigo' => 'BOTILLERIA', 'nombre' => 'Botilleria', 'descripcion' => 'Bebidas, tabaco, formatos, packs, retornables e impuestos adicionales', 'capacidades' => $this->profileCapabilityCodes('BOTILLERIA')],
             ['codigo' => 'ALMACEN', 'nombre' => 'Almacen de barrio', 'descripcion' => 'Venta simple por unidad o peso, reposicion y fiado', 'capacidades' => $this->profileCapabilityCodes('ALMACEN')],

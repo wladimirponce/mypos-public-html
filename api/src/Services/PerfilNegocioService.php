@@ -22,7 +22,9 @@ final class PerfilNegocioService
     private PerfilNegocioRepository $repository;
 
     private const PERFILES_VALIDOS = [
-        'FARMACIA',
+        // 'FARMACIA' retirado de MyPOS: lo cubre el sistema especializado de
+        // Agentika. Las empresas que ya lo tengan activo conservan sus
+        // capacidades; simplemente deja de ofrecerse como perfil nuevo.
         'MINIMARKET',
         'BOTILLERIA',
         'ALMACEN',

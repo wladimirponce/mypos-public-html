@@ -1,1 +1,0 @@
-import{Nt as e}from"./index-CUpN0l-2.js";import{t}from"./reporteService-Yf08PaVd.js";function n(n){return e({queryKey:[`dashboard`,n.empresa_id,n.sucursal_id,n.fecha_desde,n.fecha_hasta],queryFn:()=>t.getDashboard(n),enabled:n.empresa_id>0,staleTime:3e4})}export{n as t};
