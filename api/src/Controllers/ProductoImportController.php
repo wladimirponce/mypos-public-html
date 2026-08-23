@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mypos\Controllers;
 
+use Mypos\Core\Auth;
 use Mypos\Core\HttpException;
 use Mypos\Core\Response;
 use Mypos\Middleware\AuthMiddleware;
@@ -66,15 +67,20 @@ final class ProductoImportController
         }
     }
 
+    /**
+     * Resuelve la empresa del request.
+     *
+     * Antes leia solo $_GET y $_POST. `aplicar` recibe la empresa en el cuerpo
+     * JSON, donde ambos superglobales estan vacios, asi que devolvia 0 y el
+     * servicio respondia "No tienes acceso a esta empresa o sucursal": el usuario
+     * cargaba el archivo y veia la vista previa —esas dos rutas viajan por query
+     * string y multipart— pero no podia aplicar la importacion nunca.
+     *
+     * `Auth::empresaId()` cubre los tres transportes y es el mismo resolutor que
+     * usa el router para validar la pertenencia al tenant.
+     */
     private function empresaId(): int
     {
-        if (isset($_GET['empresa_id'])) {
-            return (int) $_GET['empresa_id'];
-        }
-        if (isset($_POST['empresa_id'])) {
-            return (int) $_POST['empresa_id'];
-        }
-
-        return (int) ($_GET['empresa_id'] ?? 0);
+        return Auth::empresaId() ?? 0;
     }
 }
