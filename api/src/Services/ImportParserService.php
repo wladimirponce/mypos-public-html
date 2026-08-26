@@ -10,6 +10,27 @@ use Mypos\Core\HttpException;
 final class ImportParserService
 {
     /**
+     * Cabeceras del ultimo archivo parseado que no correspondieron a ningun
+     * campo conocido.
+     *
+     * Antes una columna sin mapear se descartaba sin dejar rastro: el caso
+     * tipico era "Stock", que no calzaba con ningun campo esperado y hacia que
+     * el catalogo entero se importara con existencias en cero, reportando la
+     * importacion como exitosa. Quien parsea puede leer esto y advertirlo.
+     *
+     * @var array<int, string>
+     */
+    private array $columnasIgnoradas = [];
+
+    /**
+     * @return array<int, string>
+     */
+    public function columnasIgnoradas(): array
+    {
+        return $this->columnasIgnoradas;
+    }
+
+    /**
      * Parsea un archivo CSV detectando el separador y encoding.
      */
     public function parseCsv(string $filePath, array $expectedFields): array
@@ -205,7 +226,7 @@ final class ImportParserService
                 if ($textVal !== '') {
                     $hasData = true;
                     // Limpieza específica para campos numéricos/dinero
-                    if (in_array($field, ['precio_compra', 'precio_costo', 'precio_venta', 'stock_minimo', 'factor_conversion'], true)) {
+                    if (in_array($field, ['precio_compra', 'precio_costo', 'precio_venta', 'stock_minimo', 'stock_inicial', 'factor_conversion'], true)) {
                         $item[$field] = $this->cleanNumber($textVal);
                     } else {
                         $item[$field] = $textVal;
@@ -288,6 +309,12 @@ final class ImportParserService
             'precio_venta' => ['precio_venta', 'valor_venta', 'venta', 'precio', 'price', 'precio venta', 'valor venta', 'p.venta', 'p venta'],
             'rubro' => ['rubro', 'categoria', 'categoría', 'category', 'departamento', 'familia'],
             'stock_minimo' => ['stock_minimo', 'stock minimo', 'minimo', 'mínimo', 'stock_min', 'min_stock', 'stock min'],
+            // Existencias con las que arranca el producto. Ojo: 'stock' a secas
+            // pertenece aqui y NO a stock_minimo, que es el umbral de reposicion.
+            'stock_inicial' => [
+                'stock_inicial', 'stock inicial', 'stock', 'cantidad', 'cantidades', 'existencia',
+                'existencias', 'inventario', 'saldo', 'unidades', 'stock actual', 'stock_actual',
+            ],
             'activo' => ['activo', 'active', 'estado', 'habilitado', 'vigente'],
             'proveedor' => ['proveedor', 'marca', 'provider', 'brand', 'proveedor_identificado', 'proveedores'],
             'codigo_proveedor' => ['codigo_proveedor', 'codigo_prov', 'prov_code', 'ref_proveedor', 'codigo prov', 'código proveedor', 'codigo de proveedor'],
@@ -295,20 +322,32 @@ final class ImportParserService
             'factor_conversion' => ['factor_conversion', 'factor', 'conversion', 'multiplo', 'factor de conversión', 'multiplicador', 'factor conversion']
         ];
 
+        $this->columnasIgnoradas = [];
+
         foreach ($header as $index => $colName) {
             if ($colName === null || trim((string) $colName) === '') {
                 continue;
             }
             $cleanColName = $this->normalizeString((string) $colName);
+            $mapeada = false;
+
             foreach ($expectedFields as $field) {
                 if (isset($synonyms[$field])) {
                     foreach ($synonyms[$field] as $synonym) {
                         if ($this->normalizeString($synonym) === $cleanColName) {
                             $mapping[$field] = $index;
+                            $mapeada = true;
                             break 2;
                         }
                     }
                 }
+            }
+
+            // Una columna que no calza con ningun campo esperado se descarta.
+            // Queda anotada para que quien parsea pueda advertirlo en vez de
+            // perder el dato en silencio.
+            if (!$mapeada) {
+                $this->columnasIgnoradas[] = trim((string) $colName);
             }
         }
 

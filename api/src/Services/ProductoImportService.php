@@ -16,10 +16,11 @@ final class ProductoImportService
     private PDO $connection;
     private ProductoRepository $productos;
     private ImportParserService $parser;
+    private StockService $stock;
 
     private const EXPECTED_FIELDS = [
         'codigo_interno', 'nombre', 'precio_costo', 'precio_venta',
-        'rubro', 'stock_minimo', 'activo',
+        'rubro', 'stock_minimo', 'stock_inicial', 'activo',
     ];
 
     public function __construct()
@@ -27,6 +28,7 @@ final class ProductoImportService
         $this->connection = Database::connection();
         $this->productos = new ProductoRepository($this->connection);
         $this->parser = new ImportParserService();
+        $this->stock = new StockService();
     }
 
     public function upload(int $userId, int $empresaId, string $filePath, string $mime): array
@@ -45,9 +47,12 @@ final class ProductoImportService
             throw new HttpException('Máximo 5000 filas por importación', 422);
         }
 
+        // Se leen antes de abrir la transaccion: describen el archivo, no la fila.
+        $columnasIgnoradas = $this->parser->columnasIgnoradas();
+
         $this->connection->beginTransaction();
         try {
-            $importId = $this->createImport($empresaId, $userId, count($items));
+            $importId = $this->createImport($empresaId, $userId, count($items), $columnasIgnoradas);
 
             $rubros = $this->loadRubros($empresaId);
             $codigosExistentes = $this->loadCodigos($empresaId);
@@ -65,6 +70,12 @@ final class ProductoImportService
                 $pCosto  = (int) round((float) ($raw['precio_costo'] ?? 0));
                 $rubroNombre = trim((string) ($raw['rubro'] ?? ''));
                 $stockMin = max(0.0, (float) ($raw['stock_minimo'] ?? 0));
+                // NULL (columna ausente) y 0 significan cosas distintas: sin
+                // columna no se toca el stock; con un 0 explicito tampoco hay
+                // movimiento, pero el usuario lo declaro.
+                $stockInicial = $raw['stock_inicial'] === null || $raw['stock_inicial'] === ''
+                    ? null
+                    : max(0.0, (float) $raw['stock_inicial']);
                 $activoRaw = trim((string) ($raw['activo'] ?? '1'));
                 $activo = in_array(strtolower($activoRaw), ['0', 'false', 'no', 'n', 'inactivo'], true) ? 0 : 1;
 
@@ -118,6 +129,7 @@ final class ProductoImportService
                     'rubro'       => $rubroNombre !== '' ? $rubroNombre : null,
                     'rubro_id'    => $rubroId,
                     'stock_minimo' => $stockMin,
+                    'stock_inicial' => $stockInicial,
                     'activo'      => $activo,
                     'producto_id' => $productoId,
                     'accion'      => $estado === 'ERROR' ? null : $accion,
@@ -142,6 +154,7 @@ final class ProductoImportService
             'filas_actualizar' => $filas_actualizar,
             'filas_error'     => $filas_error,
             'estado'          => $filas_error > 0 ? 'PENDIENTE' : 'VALIDADO',
+            'columnas_ignoradas' => $columnasIgnoradas,
         ];
     }
 
@@ -156,6 +169,11 @@ final class ProductoImportService
 
         $items = $this->getItems($empresaId, $id);
 
+        $import['columnas_ignoradas'] = $import['columnas_ignoradas_json']
+            ? (json_decode((string) $import['columnas_ignoradas_json'], true) ?: [])
+            : [];
+        unset($import['columnas_ignoradas_json']);
+
         return [
             'importacion' => $import,
             'items'       => array_map(function (array $item): array {
@@ -166,7 +184,7 @@ final class ProductoImportService
         ];
     }
 
-    public function aplicar(int $userId, int $empresaId, int $id): array
+    public function aplicar(int $userId, int $empresaId, int $id, ?int $sucursalId = null): array
     {
         $this->tenant($userId, $empresaId);
         $import = $this->findImport($empresaId, $id);
@@ -182,12 +200,51 @@ final class ProductoImportService
         $items = $this->getValidItems($empresaId, $id);
         $creados = 0;
         $actualizados = 0;
+        $rubrosCreados = 0;
+        $stockCargado = 0;
+
+        // Solo se resuelve la sucursal si el archivo trae existencias, para no
+        // fallar una importacion de solo precios en una empresa sin sucursales.
+        $necesitaStock = false;
+        foreach ($items as $item) {
+            if ($item['stock_inicial'] !== null && (float) $item['stock_inicial'] > 0) {
+                $necesitaStock = true;
+                break;
+            }
+        }
+
+        $sucursalDestino = $necesitaStock
+            ? $this->resolveSucursalDestino($empresaId, $sucursalId ?? (int) ($import['sucursal_id'] ?? 0))
+            : 0;
 
         $this->connection->beginTransaction();
         try {
+            // Los rubros que el archivo nombra y la empresa todavia no tiene se
+            // crean aqui. Antes la importacion solo sabia BUSCAR el rubro por
+            // nombre y, si no existia, dejaba el producto en `rubro_id = null`
+            // sin avisar; como tampoco habia pantalla para crear rubros, el
+            // catalogo entero terminaba en "Sin rubro".
+            $rubros = $this->loadRubros($empresaId);
+            foreach ($items as $index => $item) {
+                $nombreRubro = trim((string) ($item['rubro'] ?? ''));
+                if ($nombreRubro === '' || !empty($item['rubro_id'])) {
+                    continue;
+                }
+
+                $normalized = mb_strtolower($nombreRubro, 'UTF-8');
+                if (!isset($rubros[$normalized])) {
+                    $rubros[$normalized] = $this->createRubro($empresaId, $nombreRubro);
+                    ++$rubrosCreados;
+                }
+
+                $items[$index]['rubro_id'] = $rubros[$normalized];
+            }
+
             foreach ($items as $item) {
+                $productoId = 0;
+
                 if ($item['accion'] === 'CREAR') {
-                    $this->productos->create([
+                    $productoId = $this->productos->create([
                         'empresa_id'   => $empresaId,
                         'rubro_id'     => $item['rubro_id'] ?: null,
                         'codigo'       => $item['codigo'],
@@ -220,8 +277,25 @@ final class ProductoImportService
                             'permite_comision' => $existing['permite_comision'] ?? 1,
                             'activo'         => (int) $item['activo'],
                         ]);
+                        $productoId = (int) $item['producto_id'];
                         ++$actualizados;
                     }
+                }
+
+                // Carga de existencias. Se hace como AJUSTE dentro de la misma
+                // transaccion que crea el producto: si el movimiento falla, no
+                // queda un catalogo a medias con stock inconsistente.
+                $stockInicial = $item['stock_inicial'] === null ? null : (float) $item['stock_inicial'];
+                if ($productoId > 0 && $stockInicial !== null && $stockInicial > 0 && $sucursalDestino > 0) {
+                    $this->stock->ajustarStock([
+                        'empresa_id'  => $empresaId,
+                        'sucursal_id' => $sucursalDestino,
+                        'producto_id' => $productoId,
+                        'cantidad'    => $stockInicial,
+                        'usuario_id'  => $userId,
+                        'motivo'      => 'Carga inicial por importacion de catalogo #' . $id,
+                    ], $this->connection);
+                    ++$stockCargado;
                 }
             }
 
@@ -237,7 +311,77 @@ final class ProductoImportService
             'estado'      => 'APLICADO',
             'creados'     => $creados,
             'actualizados' => $actualizados,
+            'rubros_creados' => $rubrosCreados,
+            'stock_cargado' => $stockCargado,
+            'sucursal_id' => $sucursalDestino > 0 ? $sucursalDestino : null,
         ];
+    }
+
+    /**
+     * Sucursal a la que se cargan las existencias.
+     *
+     * Si el usuario eligio una, se valida que sea de la empresa. Si no, se usa
+     * la primera sucursal activa, que en una empresa recien creada es la Casa
+     * Matriz que genera el registro.
+     */
+    private function resolveSucursalDestino(int $empresaId, int $sucursalId): int
+    {
+        if ($sucursalId > 0) {
+            $statement = $this->connection->prepare(
+                'SELECT id FROM sucursales WHERE id = :id AND empresa_id = :empresa_id AND activo = 1 LIMIT 1'
+            );
+            $statement->execute(['id' => $sucursalId, 'empresa_id' => $empresaId]);
+            $found = (int) $statement->fetchColumn();
+
+            if ($found === 0) {
+                throw new HttpException('La sucursal indicada no existe o no pertenece a la empresa', 422);
+            }
+
+            return $found;
+        }
+
+        $statement = $this->connection->prepare(
+            'SELECT id FROM sucursales WHERE empresa_id = :empresa_id AND activo = 1 ORDER BY id LIMIT 1'
+        );
+        $statement->execute(['empresa_id' => $empresaId]);
+        $primera = (int) $statement->fetchColumn();
+
+        if ($primera === 0) {
+            throw new HttpException(
+                'El archivo trae existencias pero la empresa no tiene ninguna sucursal activa donde cargarlas',
+                422
+            );
+        }
+
+        return $primera;
+    }
+
+    /**
+     * Crea un rubro nombrado por el archivo importado y devuelve su id.
+     *
+     * `uq_rubros_empresa_nombre` es case-insensitive por la collation
+     * utf8mb4_unicode_ci, asi que si el rubro ya existia con otra
+     * capitalizacion el INSERT IGNORE no hace nada y hay que recuperar el id
+     * existente en vez de confiar en lastInsertId().
+     */
+    private function createRubro(int $empresaId, string $nombre): int
+    {
+        $statement = $this->connection->prepare(
+            'INSERT IGNORE INTO rubros (empresa_id, nombre, activo) VALUES (:empresa_id, :nombre, 1)'
+        );
+        $statement->execute(['empresa_id' => $empresaId, 'nombre' => $nombre]);
+
+        $id = (int) $this->connection->lastInsertId();
+        if ($statement->rowCount() > 0 && $id > 0) {
+            return $id;
+        }
+
+        $lookup = $this->connection->prepare(
+            'SELECT id FROM rubros WHERE empresa_id = :empresa_id AND nombre = :nombre LIMIT 1'
+        );
+        $lookup->execute(['empresa_id' => $empresaId, 'nombre' => $nombre]);
+
+        return (int) $lookup->fetchColumn();
     }
 
     private function loadRubros(int $empresaId): array
@@ -268,12 +412,22 @@ final class ProductoImportService
         return $map;
     }
 
-    private function createImport(int $empresaId, int $userId, int $total): int
+    /**
+     * @param array<int, string> $columnasIgnoradas
+     */
+    private function createImport(int $empresaId, int $userId, int $total, array $columnasIgnoradas = []): int
     {
         $this->connection->prepare(
-            'INSERT INTO importaciones_maestro (empresa_id, usuario_id, total_filas)
-             VALUES (:empresa_id, :usuario_id, :total_filas)'
-        )->execute(['empresa_id' => $empresaId, 'usuario_id' => $userId, 'total_filas' => $total]);
+            'INSERT INTO importaciones_maestro (empresa_id, usuario_id, total_filas, columnas_ignoradas_json)
+             VALUES (:empresa_id, :usuario_id, :total_filas, :columnas_ignoradas_json)'
+        )->execute([
+            'empresa_id' => $empresaId,
+            'usuario_id' => $userId,
+            'total_filas' => $total,
+            'columnas_ignoradas_json' => $columnasIgnoradas === []
+                ? null
+                : json_encode(array_values($columnasIgnoradas), JSON_UNESCAPED_UNICODE),
+        ]);
 
         return (int) $this->connection->lastInsertId();
     }
@@ -283,10 +437,10 @@ final class ProductoImportService
         $this->connection->prepare(
             'INSERT INTO importaciones_maestro_items
                 (empresa_id, importacion_id, linea, codigo, nombre, precio_costo, precio_venta,
-                 rubro, rubro_id, stock_minimo, activo, producto_id, accion, estado, errores_json, raw_json)
+                 rubro, rubro_id, stock_minimo, stock_inicial, activo, producto_id, accion, estado, errores_json, raw_json)
              VALUES
                 (:empresa_id, :importacion_id, :linea, :codigo, :nombre, :precio_costo, :precio_venta,
-                 :rubro, :rubro_id, :stock_minimo, :activo, :producto_id, :accion, :estado, :errores_json, :raw_json)'
+                 :rubro, :rubro_id, :stock_minimo, :stock_inicial, :activo, :producto_id, :accion, :estado, :errores_json, :raw_json)'
         )->execute([
             'empresa_id'    => $empresaId,
             'importacion_id' => $importId,
@@ -298,6 +452,7 @@ final class ProductoImportService
             'rubro'         => $d['rubro'],
             'rubro_id'      => $d['rubro_id'],
             'stock_minimo'  => $d['stock_minimo'],
+            'stock_inicial' => $d['stock_inicial'],
             'activo'        => $d['activo'],
             'producto_id'   => $d['producto_id'],
             'accion'        => $d['accion'],
@@ -347,7 +502,7 @@ final class ProductoImportService
     {
         $statement = $this->connection->prepare(
             'SELECT id, linea, codigo, nombre, precio_costo, precio_venta, rubro, rubro_id,
-                    stock_minimo, activo, producto_id, accion, estado, errores_json
+                    stock_minimo, stock_inicial, activo, producto_id, accion, estado, errores_json
              FROM importaciones_maestro_items
              WHERE empresa_id = :empresa_id AND importacion_id = :id
              ORDER BY linea'
@@ -361,7 +516,7 @@ final class ProductoImportService
     {
         $statement = $this->connection->prepare(
             "SELECT id, linea, codigo, nombre, precio_costo, precio_venta, rubro, rubro_id,
-                    stock_minimo, activo, producto_id, accion
+                    stock_minimo, stock_inicial, activo, producto_id, accion
              FROM importaciones_maestro_items
              WHERE empresa_id = :empresa_id AND importacion_id = :id AND estado = 'OK'
              ORDER BY linea"

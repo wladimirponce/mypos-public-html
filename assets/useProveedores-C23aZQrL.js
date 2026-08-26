@@ -1,0 +1,1 @@
+import{$t as e,Pt as t}from"./index-B_ExUN99.js";import{n,r}from"./compraService-BquLuHUD.js";function i(i=``){let a=e(e=>e.empresaActiva);return t({queryKey:[`proveedores`,a?.empresa_id,i],queryFn:async()=>r(await n.providers(a?.empresa_id??0,i)),enabled:!!a?.empresa_id,staleTime:6e4})}export{i as t};

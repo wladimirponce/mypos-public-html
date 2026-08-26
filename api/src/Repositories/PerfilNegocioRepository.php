@@ -147,6 +147,21 @@ final class PerfilNegocioRepository
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * Crea un rubro si la empresa no lo tiene todavia.
+     *
+     * `uq_rubros_empresa_nombre` hace el trabajo de deduplicacion, asi que un
+     * INSERT IGNORE deja intacto el rubro que el cliente ya haya creado a mano
+     * con ese nombre.
+     */
+    public function insertRubroIfMissing(int $empresaId, string $nombre): void
+    {
+        $stmt = $this->db->prepare(
+            'INSERT IGNORE INTO rubros (empresa_id, nombre, activo) VALUES (:empresa_id, :nombre, 1)'
+        );
+        $stmt->execute(['empresa_id' => $empresaId, 'nombre' => $nombre]);
+    }
+
     public function insertAtributoDefinicion(int $empresaId, array $plantilla): int
     {
         $sql = '

@@ -247,8 +247,12 @@ final class DocumentoIaRepository
     public function linkProduct(int $empresaId, int $documentId, int $detailId, int $productId): bool
     {
         $statement = $this->connection->prepare(
+            // `metodo_match` tambien pasa a MANUAL: dejarlo en SIN_MATCH tras
+            // vincular a mano mostraba "SIN_MATCH" al lado de un producto ya
+            // vinculado. actualizarDetalle() ya lo hacia asi; esta ruta no.
             'UPDATE documentos_ia_detalles
-             SET producto_id = :producto_id, confirmado = 1, requiere_revision = 0, updated_at = CURRENT_TIMESTAMP
+             SET producto_id = :producto_id, metodo_match = \'MANUAL\',
+                 confirmado = 1, requiere_revision = 0, updated_at = CURRENT_TIMESTAMP
              WHERE id = :id AND empresa_id = :empresa_id AND documento_ia_id = :documento_ia_id'
         );
         $statement->execute([

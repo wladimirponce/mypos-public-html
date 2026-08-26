@@ -37,6 +37,28 @@ final class PerfilNegocioService
         'GENERICO',
     ];
 
+    /**
+     * Rubros iniciales por perfil.
+     *
+     * Una empresa nueva nacia con la tabla `rubros` vacia y, como no habia
+     * ninguna pantalla que creara rubros, el catalogo entero quedaba en "Sin
+     * rubro" de forma permanente. Sembrar un punto de partida razonable evita
+     * ese arranque en frio; el cliente los edita, desactiva o amplia desde
+     * Productos > Rubros.
+     */
+    private const RUBROS_POR_PERFIL = [
+        'MINIMARKET' => ['Abarrotes', 'Bebidas', 'Lacteos', 'Snacks', 'Limpieza', 'Congelados'],
+        'BOTILLERIA' => ['Cervezas', 'Vinos', 'Destilados', 'Bebidas y jugos', 'Snacks', 'Hielo y accesorios'],
+        'ALMACEN' => ['Abarrotes', 'Bebidas', 'Lacteos', 'Limpieza', 'Golosinas'],
+        'FERRETERIA' => ['Herramientas', 'Fijaciones', 'Electricidad', 'Gasfiteria', 'Pinturas', 'Construccion'],
+        'PANADERIA_PASTELERIA' => ['Panaderia', 'Pasteleria', 'Insumos', 'Bebidas', 'Cafeteria'],
+        'CARNICERIA' => ['Vacuno', 'Cerdo', 'Pollo', 'Cecinas', 'Congelados'],
+        'VERDULERIA' => ['Verduras', 'Frutas', 'Hierbas', 'Huevos', 'Abarrotes'],
+        'ROPA_CALZADO' => ['Damas', 'Varones', 'Ninos', 'Calzado', 'Accesorios'],
+        'DISTRIBUIDORA_MAYORISTA' => ['Abarrotes', 'Bebidas', 'Limpieza', 'Cuidado personal', 'Otros'],
+        'GENERICO' => ['General', 'Servicios'],
+    ];
+
     public function __construct(?PerfilNegocioRepository $repository = null)
     {
         $this->repository = $repository
@@ -100,6 +122,13 @@ final class PerfilNegocioService
                 $atributosSembrados++;
             }
 
+            // 4. Sembrar los rubros iniciales del perfil
+            $rubrosSembrados = 0;
+            foreach (self::RUBROS_POR_PERFIL[$perfil] ?? [] as $nombreRubro) {
+                $this->repository->insertRubroIfMissing($empresaId, $nombreRubro);
+                $rubrosSembrados++;
+            }
+
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
@@ -118,6 +147,7 @@ final class PerfilNegocioService
                 'perfil'             => $perfil,
                 'capacidades'        => $codigosActivados,
                 'atributos_sembrados' => $atributosSembrados,
+                'rubros_sembrados'   => $rubrosSembrados,
             ],
         ]);
 
@@ -125,6 +155,7 @@ final class PerfilNegocioService
             'perfil'             => $perfil,
             'capacidades'        => $codigosActivados,
             'atributos_sembrados' => $atributosSembrados,
+            'rubros_sembrados'   => $rubrosSembrados,
         ];
     }
 

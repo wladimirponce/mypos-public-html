@@ -375,6 +375,7 @@ $router->get('/api/v1/public/boleta', [$publicController, 'boleta']);
 $router->get('/api/v1/public/boleta/pdf', [$publicController, 'boletaPdf']);
 
 $onboardingController = new OnboardingController();
+$router->post('/api/v1/onboarding/complete', authenticatedRoute([$onboardingController, 'complete']));
 $router->post('/api/v1/onboarding/simulate-payment', authenticatedRoute([$onboardingController, 'simulatePayment']));
 
 // Webhook de MercadoPago (público, sin autenticación — la seguridad es la firma

@@ -405,6 +405,24 @@ final class DocumentoIaRevisionRepository
 
     public function providerByName(int $empresaId, string $name): ?array
     {
+        // Mismo criterio que en productos: la razon social exacta gana antes de
+        // aplicar la regla de coincidencia unica por LIKE.
+        $exact = $this->connection->prepare(
+            'SELECT id, empresa_id, rut, nombre, razon_social, activo
+             FROM proveedores
+             WHERE empresa_id = :empresa_id
+               AND activo = 1
+               AND deleted_at IS NULL
+               AND (nombre = :nombre OR razon_social = :razon)
+             LIMIT 2'
+        );
+        $exact->execute(['empresa_id' => $empresaId, 'nombre' => $name, 'razon' => $name]);
+        $exactRows = $exact->fetchAll();
+
+        if (count($exactRows) === 1) {
+            return $exactRows[0];
+        }
+
         $statement = $this->connection->prepare(
             'SELECT id, empresa_id, rut, nombre, razon_social, activo
              FROM proveedores
@@ -473,6 +491,27 @@ final class DocumentoIaRevisionRepository
 
     public function productByName(int $empresaId, string $name): ?array
     {
+        // Primero el nombre exacto. Sin este paso, un catalogo con "Coca Cola" y
+        // "Coca Cola Zero" hacia que una linea que dice justo "Coca Cola"
+        // quedara SIN_MATCH: el LIKE devolvia dos filas y la regla de "solo si
+        // hay una" descartaba el acierto evidente. La collation
+        // utf8mb4_unicode_ci ya ignora mayusculas y tildes.
+        $exact = $this->connection->prepare(
+            'SELECT id, empresa_id, codigo, nombre
+             FROM productos
+             WHERE empresa_id = :empresa_id
+               AND activo = 1
+               AND deleted_at IS NULL
+               AND nombre = :nombre
+             LIMIT 2'
+        );
+        $exact->execute(['empresa_id' => $empresaId, 'nombre' => $name]);
+        $exactRows = $exact->fetchAll();
+
+        if (count($exactRows) === 1) {
+            return $exactRows[0];
+        }
+
         $statement = $this->connection->prepare(
             'SELECT id, empresa_id, codigo, nombre
              FROM productos

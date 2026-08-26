@@ -49,7 +49,12 @@ final class ProductoImportController
     public function apply(array $params): void
     {
         $this->respond(
-            fn (int $userId): array => $this->service->aplicar($userId, $this->empresaId(), (int) $params['id']),
+            fn (int $userId): array => $this->service->aplicar(
+                $userId,
+                $this->empresaId(),
+                (int) $params['id'],
+                $this->sucursalIdSolicitada()
+            ),
             'Importación aplicada correctamente'
         );
     }
@@ -82,5 +87,21 @@ final class ProductoImportController
     private function empresaId(): int
     {
         return Auth::empresaId() ?? 0;
+    }
+
+    /**
+     * Sucursal a la que cargar las existencias, elegida en el dialogo de
+     * importacion. Null deja que el servicio use la primera sucursal activa.
+     */
+    private function sucursalIdSolicitada(): ?int
+    {
+        $payload = $_POST;
+        if (empty($payload)) {
+            $payload = \Mypos\Core\Request::json();
+        }
+
+        $sucursalId = (int) ($payload['sucursal_id'] ?? $_GET['sucursal_id'] ?? 0);
+
+        return $sucursalId > 0 ? $sucursalId : null;
     }
 }

@@ -33,6 +33,47 @@ final class OnboardingController
         $this->permissionRepository = new PermissionRepository($this->connection);
     }
 
+    /**
+     * Marca la inscripcion de la empresa como terminada.
+     *
+     * Sin esta ruta la bandera `empresas.onboarding_completado` solo se
+     * encendia en el registro con link de promocion (AuthService::register).
+     * Todo SUPER_ADMIN que entraba por el registro normal quedaba rebotando
+     * de forma permanente contra el asistente de bienvenida, porque ningun
+     * endpoint publicado sabia apagar el guardia.
+     */
+    public function complete(): void
+    {
+        try {
+            $claims = (new AuthMiddleware())->handle();
+            $userId = (int) ($claims['user_id'] ?? 0);
+
+            if ($userId <= 0) {
+                throw new HttpException('Token invalido', 401);
+            }
+
+            $payload = $_POST;
+            if (empty($payload)) {
+                $payload = Request::json();
+            }
+
+            $empresaId = $this->resolveEmpresaId($userId, $payload);
+            $this->assertPuedeConfigurar($userId, $empresaId);
+
+            $this->empresaService->completarOnboarding($empresaId);
+
+            Response::success([
+                'empresa_id' => $empresaId,
+                'onboarding_completado' => true,
+            ], 'Inscripcion completada');
+        } catch (HttpException $exception) {
+            Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());
+        } catch (Throwable $exception) {
+            error_log($exception->getMessage());
+            Response::error('Error interno del servidor', null, 500);
+        }
+    }
+
     public function saveOnboarding(): void
     {
         try {
@@ -49,10 +90,7 @@ final class OnboardingController
             }
 
             $empresaId = $this->resolveEmpresaId($userId, $payload);
-            $context = $this->permissionRepository->userContext($userId, $empresaId);
-            if ($context === null || !in_array((string) $context['rol_codigo'], ['SUPER_ADMIN', 'ADMIN_EMPRESA'], true)) {
-                throw new HttpException('No tienes permiso para completar la inscripcion de esta empresa', 403);
-            }
+            $this->assertPuedeConfigurar($userId, $empresaId);
 
             $this->connection->beginTransaction();
 
@@ -84,6 +122,18 @@ final class OnboardingController
             }
             error_log($exception->getMessage());
             Response::error('Error interno del servidor', null, 500);
+        }
+    }
+
+    /**
+     * Solo quien administra la empresa puede cerrar o rehacer su inscripcion.
+     */
+    private function assertPuedeConfigurar(int $userId, int $empresaId): void
+    {
+        $context = $this->permissionRepository->userContext($userId, $empresaId);
+
+        if ($context === null || !in_array((string) $context['rol_codigo'], ['SUPER_ADMIN', 'ADMIN_EMPRESA'], true)) {
+            throw new HttpException('No tienes permiso para completar la inscripcion de esta empresa', 403);
         }
     }
 
@@ -293,11 +343,8 @@ final class OnboardingController
             }
 
             $empresaId = $this->resolveEmpresaId($userId, $payload);
-            $context = $this->permissionRepository->userContext($userId, $empresaId);
-            if ($context === null || !in_array((string) $context['rol_codigo'], ['SUPER_ADMIN', 'ADMIN_EMPRESA'], true)) {
-                throw new HttpException('No tienes permiso para completar la inscripcion de esta empresa', 403);
-            }
-            
+            $this->assertPuedeConfigurar($userId, $empresaId);
+
             $monto = (float) ($payload['monto'] ?? 9990);
             
             // Obtener email del usuario para enviar boleta
