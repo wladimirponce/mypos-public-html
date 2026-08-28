@@ -1,0 +1,1 @@
+import{F as e,S as t}from"./index-CtOvw6g-.js";function n(n){return e(t,n)}export{n as t};
