@@ -10,6 +10,7 @@ use Mypos\Repositories\AuthRepository;
 use Mypos\Repositories\EmpresaRepository;
 use Mypos\Support\AppConfig;
 use Mypos\Support\SecurityAlert;
+use Throwable;
 
 final class EmpresaService
 {
@@ -399,22 +400,16 @@ final class EmpresaService
         $rolId = (int) ($data['rol_id'] ?? 0);
         $sucursalId = isset($data['sucursal_principal_id']) && $data['sucursal_principal_id'] !== '' ? (int) $data['sucursal_principal_id'] : null;
 
-        // Alta de una cuenta nueva desde el panel. Hasta ahora solo se podia
-        // asociar a alguien que ya se hubiera registrado por su cuenta, asi que
-        // un administrador no tenia forma de dar acceso a su equipo.
         $nuevoUsuario = is_array($data['nuevo_usuario'] ?? null) ? $data['nuevo_usuario'] : null;
-        if ($usuarioId <= 0 && $nuevoUsuario !== null) {
-            $usuarioId = $this->crearUsuarioParaEmpresa($nuevoUsuario);
-        }
-
-        if ($usuarioId <= 0) {
+        $debeCrearUsuario = $usuarioId <= 0 && $nuevoUsuario !== null;
+        if ($usuarioId <= 0 && !$debeCrearUsuario) {
             throw new HttpException('El usuario es obligatorio', 422, ['usuario_id' => ['El usuario es obligatorio']]);
         }
         if ($rolId <= 0) {
             throw new HttpException('El rol es obligatorio', 422, ['rol_id' => ['El rol es obligatorio']]);
         }
 
-        if ($this->repository->checkUsuarioPertenencia($empresaId, $usuarioId)) {
+        if (!$debeCrearUsuario && $this->repository->checkUsuarioPertenencia($empresaId, $usuarioId)) {
             throw new HttpException('El usuario ya pertenece a esta empresa', 422, ['usuario_id' => ['El usuario ya pertenece a esta empresa']]);
         }
 
@@ -427,7 +422,33 @@ final class EmpresaService
             $this->planLimits->assertCanAddUsuario($empresaId);
         }
 
-        $this->repository->asociarUsuarioEmpresa($empresaId, $usuarioId, $rolId, $sucursalId, $activo);
+        $connection = $this->repository->connection();
+        $transaccionPropia = $debeCrearUsuario && !$connection->inTransaction();
+
+        try {
+            if ($transaccionPropia) {
+                $connection->beginTransaction();
+            }
+
+            // La cuenta y su acceso nacen como una sola operacion. Si falla la
+            // asociacion (por ejemplo, por un rol invalido), no queda un correo
+            // global ocupado sin pertenecer a ninguna empresa.
+            if ($debeCrearUsuario) {
+                $usuarioId = $this->crearUsuarioParaEmpresa($nuevoUsuario);
+            }
+
+            $this->repository->asociarUsuarioEmpresa($empresaId, $usuarioId, $rolId, $sucursalId, $activo);
+
+            if ($transaccionPropia) {
+                $connection->commit();
+            }
+        } catch (Throwable $exception) {
+            if ($transaccionPropia && $connection->inTransaction()) {
+                $connection->rollBack();
+            }
+
+            throw $exception;
+        }
 
         SecurityAlert::emit('usuarios.rol_asignado', 'medium', [
             'component' => 'usuarios',

@@ -1,1 +1,0 @@
-import{F as e,S as t}from"./index-B_ExUN99.js";function n(n){return e(t,n)}export{n as t};
