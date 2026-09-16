@@ -14,7 +14,9 @@ use Mypos\Repositories\AuthRepository;
 use Mypos\Repositories\SuscripcionRepository;
 use Mypos\Support\AppConfig;
 use Mypos\Support\PlanCatalog;
+use Mypos\Support\PublicUrl;
 use Mypos\Support\SubscriptionChargePolicy;
+use Mypos\Support\SubscriptionLifecycle;
 
 class SuscripcionService
 {
@@ -130,6 +132,13 @@ class SuscripcionService
                 ['plan_limit' => ['uso_actual_supera_plan']]
             );
         }
+        // Se valida ANTES de insertar la orden: si la URL de confirmacion no es
+        // alcanzable, cortar aqui evita dejar una fila pendiente que nadie va a
+        // poder cerrar.
+        if ($gateway === 'flow') {
+            $this->assertWebhookAlcanzable($this->apiBaseUrl() . '/api/v1/suscripciones/flow-webhook');
+        }
+
         $ordenNumero = 'MP_' . time() . '_' . bin2hex(random_bytes(3));
         $correo = $this->userEmail($usuarioId);
         
@@ -229,12 +238,61 @@ class SuscripcionService
 
             $restartPeriod = $chargeRule !== null
                 && !$this->repository->hasCompletedFlowPayment($empresaId);
-            $this->repository->markOrderCompleted((int) $orden['id']);
-            $this->repository->updateOrActivateSubscription(
-                (int) $orden['empresa_id'],
-                (string) $orden['plan_id'],
-                $restartPeriod
+
+            // Webhook, regreso del cliente y conciliador pueden llegar a la vez.
+            // Solo quien gana la fila extiende el periodo y avisa por correo.
+            if ($this->repository->markOrderCompleted((int) $orden['id'])) {
+                $this->repository->updateOrActivateSubscription(
+                    (int) $orden['empresa_id'],
+                    (string) $orden['plan_id'],
+                    $restartPeriod
+                );
+                $this->enviarComprobante($orden);
+            }
+        }
+    }
+
+    /**
+     * Envia el comprobante del pago recien acreditado.
+     *
+     * Nunca lanza: el cobro ya ocurrio y la suscripcion ya quedo extendida, asi
+     * que un fallo de correo solo debe quedar en el log.
+     *
+     * @param array<string,mixed> $orden
+     */
+    private function enviarComprobante(array $orden): void
+    {
+        try {
+            $usuario = $this->authRepo->findUserById((int) $orden['usuario_id']);
+            $email = is_array($usuario) ? trim((string) ($usuario['email'] ?? '')) : '';
+            if ($email === '') {
+                error_log(sprintf(
+                    '[Suscripciones] Orden %s pagada sin correo de destino (usuario %d)',
+                    (string) $orden['orden_numero'],
+                    (int) $orden['usuario_id']
+                ));
+                return;
+            }
+
+            $suscripcion = $this->repository->getSubscriptionStatus((int) $orden['empresa_id']);
+            $vigenteHasta = null;
+            if (is_array($suscripcion) && !empty($suscripcion['fecha_fin'])) {
+                $timestamp = strtotime((string) $suscripcion['fecha_fin']);
+                $vigenteHasta = $timestamp !== false ? date('d-m-Y', $timestamp) : null;
+            }
+
+            (new MailService())->enviarBoletaPago(
+                $email,
+                (string) ($usuario['nombre'] ?? 'Cliente MyPOS'),
+                (float) $orden['monto'],
+                [],
+                (string) $orden['orden_numero'],
+                PlanCatalog::get((string) $orden['plan_id'])['nombre'],
+                (string) ($orden['moneda'] ?? 'CLP'),
+                $vigenteHasta
             );
+        } catch (\Throwable $exception) {
+            error_log('[Suscripciones] No se pudo enviar el comprobante: ' . $exception->getMessage());
         }
     }
 
@@ -253,8 +311,10 @@ class SuscripcionService
                 throw new HttpException('No se pudo capturar el pago en PayPal', 503);
             }
 
-            $this->repository->markOrderCompleted((int) $orden['id']);
-            $this->repository->updateOrActivateSubscription((int) $orden['empresa_id'], (string) $orden['plan_id']);
+            if ($this->repository->markOrderCompleted((int) $orden['id'])) {
+                $this->repository->updateOrActivateSubscription((int) $orden['empresa_id'], (string) $orden['plan_id']);
+                $this->enviarComprobante($orden);
+            }
         }
 
         return $this->frontendUrl() . '/app/billing/return?gateway=paypal&status=success&order=' . urlencode((string) $orden['orden_numero']);
@@ -287,6 +347,7 @@ class SuscripcionService
                 'monthly_amount_clp' => $this->montoNegociadoClp(null, $chargeRule),
                 'payment_gateway' => $chargeRule['gateway'] ?? null,
                 'exenta' => false,
+                'vigencia' => SubscriptionLifecycle::evaluate(null),
             ];
         }
 
@@ -305,7 +366,63 @@ class SuscripcionService
             'monthly_amount_clp' => $this->montoNegociadoClp($status, $chargeRule),
             'payment_gateway' => $chargeRule['gateway'] ?? null,
             'exenta' => false,
+            // Fase del ciclo de vida (aviso previo / gracia / bloqueo). Es lo que
+            // usa la SPA para avisar a tiempo en vez de esperar el 402.
+            'vigencia' => SubscriptionLifecycle::evaluate($status),
         ];
+    }
+
+    /**
+     * Rescata ordenes Flow pagadas que quedaron sin acreditar.
+     *
+     * Ultima red de seguridad del modelo de pago manual: cubre al cliente que
+     * pago y cerro el navegador antes de volver al SPA, cuando ademas el webhook
+     * no llego. Lo corre `bin/conciliar-pagos-suscripcion.php`.
+     *
+     * @return array{revisadas:int, acreditadas:int, errores:int}
+     */
+    public function reconciliarPagosFlow(int $horas = 72): array
+    {
+        $resumen = ['revisadas' => 0, 'acreditadas' => 0, 'errores' => 0];
+
+        foreach ($this->repository->getPendingFlowOrders($horas) as $orden) {
+            $resumen['revisadas']++;
+            $token = trim((string) ($orden['token_externo'] ?? ''));
+
+            try {
+                $this->confirmFlowPayment($token);
+
+                $actualizada = $this->repository->getOrderByNumber((string) $orden['orden_numero']);
+                if (is_array($actualizada) && $actualizada['estado'] === 'completado') {
+                    $resumen['acreditadas']++;
+                    error_log(sprintf(
+                        '[Conciliador] Orden %s acreditada por conciliacion (empresa %d)',
+                        (string) $orden['orden_numero'],
+                        (int) $orden['empresa_id']
+                    ));
+                }
+            } catch (HttpException $exception) {
+                // 400 = Flow dice que no esta pagada. Es el caso normal de una
+                // orden abandonada, no un error que valga la pena reportar.
+                if ($exception->statusCode() !== 400) {
+                    $resumen['errores']++;
+                    error_log(sprintf(
+                        '[Conciliador] Orden %s no se pudo verificar: %s',
+                        (string) $orden['orden_numero'],
+                        $exception->getMessage()
+                    ));
+                }
+            } catch (\Throwable $exception) {
+                $resumen['errores']++;
+                error_log(sprintf(
+                    '[Conciliador] Orden %s fallo inesperadamente: %s',
+                    (string) $orden['orden_numero'],
+                    $exception->getMessage()
+                ));
+            }
+        }
+
+        return $resumen;
     }
 
     public function getPaymentConfig(): array
@@ -342,12 +459,73 @@ class SuscripcionService
             throw new HttpException('Orden no encontrada', 404);
         }
 
+        // Reconciliacion activa. Antes esto solo leia la fila y esperaba a que el
+        // webhook la cambiara: si el webhook no llegaba (URL de confirmacion
+        // inalcanzable, firewall, DNS), el cliente pagaba y la orden se quedaba
+        // "pendiente" para siempre. Ahora el propio regreso del cliente le
+        // pregunta a Flow y acredita el pago, con el webhook como atajo y ya no
+        // como unico camino.
+        if ($orden['estado'] === 'pendiente' && $orden['gateway'] === 'flow') {
+            $token = trim((string) ($orden['token_externo'] ?? ''));
+            if ($token !== '') {
+                try {
+                    $this->confirmFlowPayment($token);
+                    $orden = $this->repository->getOrderByNumber($ordenNumero) ?? $orden;
+                } catch (HttpException $exception) {
+                    // 400 = Flow aun no acusa el pago (el cliente puede seguir en
+                    // la pasarela). Se informa "pendiente" y el SPA reintenta.
+                    if ($exception->statusCode() !== 400) {
+                        error_log(sprintf(
+                            '[Suscripciones] No se pudo reconciliar la orden %s con Flow: %s',
+                            $ordenNumero,
+                            $exception->getMessage()
+                        ));
+                    }
+                }
+            }
+        }
+
         return [
             'orden_numero' => $orden['orden_numero'],
             'gateway' => $orden['gateway'],
             'estado' => $orden['estado'],
             'plan_id' => $orden['plan_id'],
         ];
+    }
+
+    /**
+     * Verifica que Flow pueda alcanzar la URL de confirmacion antes de cobrar.
+     *
+     * Con `API_BASE_URL` mal configurada (localhost, IP privada, host vacio) el
+     * webhook nunca llega. La reconciliacion en el regreso del cliente lo cubre,
+     * pero un `.env` mal puesto igual degrada el servicio en silencio: mejor que
+     * reviente aqui, ANTES de mover dinero, con un mensaje que diga que revisar.
+     *
+     * Fuera de produccion solo se registra: en local es normal apuntar a
+     * localhost contra el sandbox de Flow.
+     */
+    private function assertWebhookAlcanzable(string $url): void
+    {
+        if (PublicUrl::isReachableFromInternet($url)) {
+            return;
+        }
+
+        $detalle = sprintf(
+            'API_BASE_URL no es alcanzable desde internet ("%s"): Flow no podria confirmar el pago.',
+            $url
+        );
+
+        if (!AppConfig::isProduction()) {
+            error_log('[Suscripciones] ' . $detalle . ' Se continua por ser entorno de desarrollo.');
+            return;
+        }
+
+        error_log('[Suscripciones] ' . $detalle);
+        throw new HttpException(
+            'El cobro en linea no esta disponible en este momento. Nuestro equipo ya fue notificado.',
+            503,
+            AppConfig::debug() ? ['payment' => [$detalle]] : null
+        );
     }
 
     private function createFlowOrder(int $ordenId, string $ordenNumero, string $correo, int $monto, array $plan): array

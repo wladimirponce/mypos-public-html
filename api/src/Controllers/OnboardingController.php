@@ -269,8 +269,10 @@ final class OnboardingController
                 'tipo' => $this->nullable($payload['sii_migracion'] ?? null) ?? 'nueva',
                 'certificado_recibido' => $certPath !== null,
                 'certificado_path' => $certPath,
+                // Sin `admin_api_key_env`: la clave admin<->backend se autogenera
+                // y vive en dte_configuracion.admin_api_key (migracion 082). Un
+                // cliente nuevo no requiere ninguna variable de entorno.
                 'admin_estado' => 'pendiente_configuracion',
-                'admin_api_key_env' => 'DTE_ADMIN_API_KEY_' . $empresaId,
             ],
         ];
 
@@ -327,40 +329,4 @@ final class OnboardingController
         return $text === '' ? null : $text;
     }
 
-    public function simulatePayment(): void
-    {
-        try {
-            $claims = (new AuthMiddleware())->handle();
-            $userId = (int) ($claims['user_id'] ?? 0);
-
-            if ($userId <= 0) {
-                throw new HttpException('Token invalido', 401);
-            }
-
-            $payload = $_POST;
-            if (empty($payload)) {
-                $payload = Request::json();
-            }
-
-            $empresaId = $this->resolveEmpresaId($userId, $payload);
-            $this->assertPuedeConfigurar($userId, $empresaId);
-
-            $monto = (float) ($payload['monto'] ?? 9990);
-            
-            // Obtener email del usuario para enviar boleta
-            $user = $this->authRepository->findUserById($userId);
-            if ($user !== null) {
-                $mailService = new \Mypos\Services\MailService();
-                $mailService->enviarBoletaPago((string) $user['email'], (string) $user['nombre'], $monto);
-            }
-
-            Response::success([
-                'status' => 'ok',
-                'message' => 'Pago simulado correctamente y correo enviado'
-            ]);
-        } catch (Throwable $exception) {
-            error_log($exception->getMessage());
-            Response::error('Error interno del servidor', null, 500);
-        }
-    }
 }

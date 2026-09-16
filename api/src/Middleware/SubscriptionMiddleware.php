@@ -9,6 +9,7 @@ use Mypos\Core\HttpException;
 use Mypos\Config\Database;
 use Mypos\Repositories\SuscripcionRepository;
 use Mypos\Support\AppConfig;
+use Mypos\Support\SubscriptionLifecycle;
 
 final class SubscriptionMiddleware
 {
@@ -27,7 +28,7 @@ final class SubscriptionMiddleware
         }
 
         $empresaId = Auth::empresaId();
-        
+
         if (!$empresaId) {
             throw new HttpException('Empresa no seleccionada en el contexto', 400);
         }
@@ -41,24 +42,25 @@ final class SubscriptionMiddleware
         $repository = new SuscripcionRepository($connection);
         $suscripcion = $repository->getSubscriptionStatus($empresaId);
 
-        if (!$suscripcion) {
-            throw new HttpException('Tu suscripción no se encuentra activa o no existe. Por favor regulariza tu pago.', 402);
-        }
-        
-        $estado = (string) $suscripcion['estado'];
-        $fechaFin = $suscripcion['fecha_fin'] ? strtotime($suscripcion['fecha_fin']) : 0;
-        $now = time();
-        
-        // Allow a small grace period? Let's just do strict check for now
-        if ($estado !== 'activa' || $fechaFin < $now) {
-            // Update to vencida if not already
-            if ($estado === 'activa') {
-                $stmtUpdate = $connection->prepare('UPDATE empresas_suscripcion SET estado = "vencida" WHERE empresa_id = :empresa_id');
-                $stmtUpdate->execute(['empresa_id' => $empresaId]);
+        $vigencia = SubscriptionLifecycle::evaluate($suscripcion);
+
+        // La columna se sincroniza con el calendario, pero NO decide el acceso:
+        // durante los dias de gracia la fila ya dice 'vencida' y aun asi se deja
+        // pasar. Quien corta es `permite_acceso`.
+        if ($suscripcion !== null) {
+            $estadoEsperado = SubscriptionLifecycle::estadoPersistible($vigencia['fase']);
+            if ((string) $suscripcion['estado'] !== $estadoEsperado) {
+                $statement = $connection->prepare(
+                    'UPDATE empresas_suscripcion SET estado = :estado WHERE empresa_id = :empresa_id'
+                );
+                $statement->execute(['estado' => $estadoEsperado, 'empresa_id' => $empresaId]);
             }
-            throw new HttpException('Tu suscripción ha expirado. Por favor, realiza el pago para continuar usando el sistema.', 402);
         }
-        
+
+        if (!$vigencia['permite_acceso']) {
+            throw new HttpException($vigencia['mensaje'], 402);
+        }
+
         return $claims;
     }
 }

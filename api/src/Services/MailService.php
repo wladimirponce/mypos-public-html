@@ -259,26 +259,68 @@ final class MailService
         }
     }
 
-    public function enviarBoletaPago(string $toEmail, string $nombreUsuario, float $monto, array $dteData = []): void
-    {
+    /**
+     * Comprobante del pago de la suscripcion MyPOS.
+     *
+     * Lo dispara la confirmacion real del pago (webhook de Flow, regreso del
+     * cliente o conciliador), una sola vez por orden. No lanza: un problema de
+     * correo no puede tumbar una confirmacion de pago ya cobrada.
+     *
+     * @param array{pdf_path?: string} $dteData Boleta electronica, si ya existe.
+     */
+    public function enviarBoletaPago(
+        string $toEmail,
+        string $nombreUsuario,
+        float $monto,
+        array $dteData = [],
+        string $ordenNumero = '',
+        string $planNombre = '',
+        string $moneda = 'CLP',
+        ?string $vigenteHasta = null
+    ): void {
         try {
             $mail = $this->getMailer();
             $mail->addAddress($toEmail, $nombreUsuario);
 
-            $mail->isHTML(true);
-            $mail->Subject = 'Comprobante de Pago MyPOS';
-            $mail->Body    = "
-                <h2>Hola {$nombreUsuario},</h2>
-                <p>Hemos recibido el pago exitosamente.</p>
-                <p>Monto pagado: <strong>$" . number_format($monto, 0, ',', '.') . " CLP</strong></p>
-                <p>Adjunto a este correo encontraras la Boleta Electronica correspondiente a tu pago.</p>
-                <p>Saludos,<br>Equipo MyPOS</p>
-            ";
+            $montoTexto = $moneda === 'CLP'
+                ? '$' . number_format($monto, 0, ',', '.') . ' CLP'
+                : number_format($monto, 2, ',', '.') . ' ' . $moneda;
 
-            // If we have a PDF file path in $dteData, we could attach it.
-            // For now, we just simulate sending the email if no actual PDF is passed.
-            if (!empty($dteData['pdf_path']) && file_exists($dteData['pdf_path'])) {
-                $mail->addAttachment($dteData['pdf_path'], 'Boleta.pdf');
+            $detalle = '';
+            if ($planNombre !== '') {
+                $detalle .= '<li>Plan: <strong>' . htmlspecialchars($planNombre, ENT_QUOTES, 'UTF-8') . '</strong></li>';
+            }
+            $detalle .= '<li>Monto pagado: <strong>' . $montoTexto . '</strong></li>';
+            if ($ordenNumero !== '') {
+                $detalle .= '<li>Orden: <strong>' . htmlspecialchars($ordenNumero, ENT_QUOTES, 'UTF-8') . '</strong></li>';
+            }
+            if ($vigenteHasta !== null && $vigenteHasta !== '') {
+                $detalle .= '<li>Tu plan queda vigente hasta el <strong>'
+                    . htmlspecialchars($vigenteHasta, ENT_QUOTES, 'UTF-8') . '</strong></li>';
+            }
+
+            // Solo se promete la boleta cuando efectivamente va adjunta. El texto
+            // anterior la anunciaba siempre, aunque no se adjuntara nada.
+            $pdfPath = isset($dteData['pdf_path']) ? (string) $dteData['pdf_path'] : '';
+            $tieneBoleta = $pdfPath !== '' && is_file($pdfPath);
+
+            $cierre = $tieneBoleta
+                ? '<p>Adjunta a este correo encontraras la boleta electronica correspondiente.</p>'
+                : '<p>Te enviaremos la boleta electronica por separado.</p>';
+
+            $mail->isHTML(true);
+            $mail->Subject = 'Comprobante de pago MyPOS'
+                . ($ordenNumero !== '' ? ' - ' . $ordenNumero : '');
+            $mail->Body = '
+                <h2>Hola ' . htmlspecialchars($nombreUsuario, ENT_QUOTES, 'UTF-8') . ',</h2>
+                <p>Recibimos tu pago correctamente. Tu suscripcion quedo al dia.</p>
+                <ul>' . $detalle . '</ul>
+                ' . $cierre . '
+                <p>Saludos,<br>Equipo MyPOS</p>
+            ';
+
+            if ($tieneBoleta) {
+                $mail->addAttachment($pdfPath, 'Boleta.pdf');
             }
 
             $mail->send();

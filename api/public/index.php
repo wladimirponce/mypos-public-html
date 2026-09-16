@@ -376,7 +376,6 @@ $router->get('/api/v1/public/boleta/pdf', [$publicController, 'boletaPdf']);
 
 $onboardingController = new OnboardingController();
 $router->post('/api/v1/onboarding/complete', authenticatedRoute([$onboardingController, 'complete']));
-$router->post('/api/v1/onboarding/simulate-payment', authenticatedRoute([$onboardingController, 'simulatePayment']));
 
 // Webhook de MercadoPago (público, sin autenticación — la seguridad es la firma
 // x-signature + la consulta de la order con el token propio de la empresa).
@@ -419,7 +418,6 @@ $suscripcionController = new SuscripcionController();
 $comunicacionVentasController = new ComunicacionVentasController();
 $router->post('/api/v1/suscripciones/order', tenantRoute([$suscripcionController, 'createOrder']));
 $router->post('/api/v1/suscripciones/flow-webhook', [$suscripcionController, 'flowWebhook']);
-$router->get('/api/v1/suscripciones/flow-return', [$suscripcionController, 'flowReturn']);
 $router->get('/api/v1/suscripciones/paypal-return', [$suscripcionController, 'paypalReturn']);
 $router->get('/api/v1/suscripciones/status', tenantRoute([$suscripcionController, 'status']));
 $router->get('/api/v1/suscripciones/order-status', tenantRoute([$suscripcionController, 'orderStatus']));

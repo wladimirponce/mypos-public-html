@@ -86,12 +86,50 @@ class SuscripcionRepository
         return $row ?: null;
     }
 
-    public function markOrderCompleted(int $ordenId): void
+    /**
+     * Marca la orden como pagada y dice si ESTA llamada fue la que la cerro.
+     *
+     * Una orden puede confirmarse por tres caminos que compiten entre si: el
+     * webhook de Flow, el regreso del cliente al SPA y el conciliador nocturno.
+     * El filtro `estado <> "completado"` hace que solo una gane la fila (MySQL
+     * bloquea la fila durante el UPDATE), y el booleano deja que el llamador
+     * ganador sea el unico que extiende la suscripcion y envia el comprobante.
+     * Sin esto el cliente podia recibir el correo tres veces.
+     */
+    public function markOrderCompleted(int $ordenId): bool
     {
         $statement = $this->connection->prepare(
-            'UPDATE suscripciones_ordenes SET estado = "completado" WHERE id = :id'
+            'UPDATE suscripciones_ordenes SET estado = "completado"
+             WHERE id = :id AND estado <> "completado"'
         );
         $statement->execute(['id' => $ordenId]);
+
+        return $statement->rowCount() === 1;
+    }
+
+    /**
+     * Ordenes Flow que quedaron pendientes y todavia pueden estar pagadas.
+     *
+     * Las usa el conciliador para rescatar al cliente que pago y cerro el
+     * navegador antes de volver, cuando ademas el webhook nunca llego.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function getPendingFlowOrders(int $horas): array
+    {
+        $statement = $this->connection->prepare(
+            'SELECT * FROM suscripciones_ordenes
+             WHERE gateway = "flow"
+               AND estado = "pendiente"
+               AND token_externo IS NOT NULL
+               AND token_externo <> ""
+               AND creado_el >= DATE_SUB(NOW(), INTERVAL :horas HOUR)
+             ORDER BY creado_el ASC'
+        );
+        $statement->bindValue('horas', $horas, PDO::PARAM_INT);
+        $statement->execute();
+
+        return $statement->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
     public function markOrderRejected(int $ordenId): void

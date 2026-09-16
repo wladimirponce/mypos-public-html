@@ -57,11 +57,10 @@ class SuscripcionController
         }
     }
 
-    public function flowReturn(): void
-    {
-        // El frontend captura directamente desde Flow con un URL de retorno en el SPA.
-        // Este endpoint no es estrictamente necesario ya que Flow redirige al frontend.
-    }
+    // No existe un `flowReturn`: Flow redirige al cliente directamente al SPA
+    // (`FRONTEND_URL/app/billing/return`), que confirma el pago contra
+    // `order-status`. PayPal si necesita el suyo porque su returnUrl vuelve al
+    // backend para capturar la orden antes de redirigir.
 
     public function paypalReturn(): void
     {
@@ -102,6 +101,18 @@ class SuscripcionController
             if ($email !== null && \Mypos\Support\AppConfig::isPlatformOwnerEmail($email)) {
                 $status['estado'] = 'activa';
                 $status['exenta'] = true;
+                // Sin esto la SPA le mostraria el aviso de vencimiento al unico
+                // usuario que nunca va a pagar.
+                $status['vigencia'] = [
+                    'fase' => \Mypos\Support\SubscriptionLifecycle::FASE_ACTIVA,
+                    'permite_acceso' => true,
+                    'en_periodo_de_aviso' => false,
+                    'dias_para_vencer' => null,
+                    'dias_de_gracia_restantes' => null,
+                    'fecha_fin' => $status['fecha_fin'] ?? null,
+                    'fecha_limite_gracia' => null,
+                    'mensaje' => '',
+                ];
             }
 
             return $status;

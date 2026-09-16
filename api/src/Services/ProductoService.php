@@ -324,7 +324,39 @@ final class ProductoService
     public function hardDeleteProducto(int $userId, int $id, int $empresaId): array
     {
         $this->tenant($userId, $empresaId);
-        $this->notFoundUnless($this->productos->hardDelete($id, $empresaId));
+        $producto = $this->productos->find($id, $empresaId);
+        if ($producto === null) {
+            throw new HttpException('Producto no encontrado', 404);
+        }
+
+        try {
+            $this->notFoundUnless($this->productos->hardDelete($id, $empresaId));
+        } catch (PDOException $exception) {
+            if ($exception->getCode() === '23000') {
+                throw new HttpException(
+                    'No se puede eliminar definitivamente porque el producto tiene ventas, compras, stock u otros registros asociados. Desactívalo en su lugar.',
+                    409
+                );
+            }
+
+            throw $exception;
+        }
+
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'usuario_id' => $userId,
+            'modulo' => 'productos',
+            'accion' => 'eliminar_definitivamente',
+            'entidad' => 'productos',
+            'entidad_id' => $id,
+            'descripcion' => 'Producto eliminado físicamente',
+            'datos_anteriores' => [
+                'codigo' => $producto['codigo'] ?? $producto['sku'] ?? null,
+                'nombre' => $producto['nombre'] ?? null,
+            ],
+            'severidad' => 'WARNING',
+            'resultado' => 'OK',
+        ]);
 
         return ['id' => $id, 'deleted' => true];
     }
