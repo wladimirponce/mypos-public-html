@@ -880,6 +880,8 @@ $router->get('/api/v1/reportes/salud-financiera', protectedRoute([$reporteContro
 $router->get('/api/v1/reportes/resumen-ventas', protectedRoute([$reporteController, 'resumenVentas'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-dia', protectedRoute([$reporteController, 'ventasPorDia'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-metodo-pago', protectedRoute([$reporteController, 'ventasPorMetodoPago'], 'reportes.ver'));
+$router->get('/api/v1/reportes/ventas-diarias-por-metodo-pago', protectedRoute([$reporteController, 'ventasDiariasPorMetodoPago'], 'reportes.ver'));
+$router->get('/api/v1/reportes/vales-detalle', protectedRoute([$reporteController, 'valesDetalle'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-producto', protectedRoute([$reporteController, 'ventasPorProducto'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-rubro', protectedRoute([$reporteController, 'ventasPorRubro'], 'reportes.ver'));
 $router->get('/api/v1/reportes/ventas-por-usuario', protectedRoute([$reporteController, 'ventasPorUsuario'], 'reportes.ver'));

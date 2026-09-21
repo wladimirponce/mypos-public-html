@@ -35,6 +35,16 @@ final class ReporteController
         $this->respond(fn (): array => $this->service->ventasPorMetodoPago($_GET));
     }
 
+    public function ventasDiariasPorMetodoPago(): void
+    {
+        $this->respond(fn (): array => $this->service->ventasDiariasPorMetodoPago($_GET));
+    }
+
+    public function valesDetalle(): void
+    {
+        $this->respond(fn (): array => $this->service->valesDetalle($_GET));
+    }
+
     public function ventasPorProducto(): void
     {
         $this->respond(fn (): array => $this->service->ventasPorProducto($_GET));

@@ -175,6 +175,104 @@ final class ReporteService
         ], $this->repository->ventasPorMetodoPago($empresaId, $sucursalId, $from, $to));
     }
 
+    public function ventasDiariasPorMetodoPago(array $filters): array
+    {
+        [$empresaId, $sucursalId, $from, $to] = $this->filters($filters);
+
+        return array_map(static fn (array $row): array => [
+            'fecha' => (string) $row['fecha'],
+            'metodo_pago_id' => (int) $row['metodo_pago_id'],
+            'codigo' => (string) $row['codigo'],
+            'nombre' => (string) $row['nombre'],
+            'total' => (int) $row['total'],
+            'cantidad_operaciones' => (int) $row['cantidad_operaciones'],
+        ], $this->repository->ventasDiariasPorMetodoPago($empresaId, $sucursalId, $from, $to));
+    }
+
+    public function valesDetalle(array $filters): array
+    {
+        [$empresaId, $sucursalId, $from, $to] = $this->filters($filters);
+        $detalles = [];
+        $pagos = [];
+
+        foreach ($this->repository->detallesVales($empresaId, $sucursalId, $from, $to) as $row) {
+            $detalles[(int) $row['venta_id']][] = [
+                'linea' => (int) $row['linea'],
+                'producto_id' => (int) $row['producto_id'],
+                'codigo' => $row['codigo_producto'],
+                'nombre' => (string) $row['nombre_producto'],
+                'cantidad' => (string) $row['cantidad'],
+                'precio_unitario' => (int) $row['precio_unitario'],
+                'descuento' => (int) $row['descuento_total'],
+                'impuesto' => (int) $row['impuesto_total'],
+                'total' => (int) $row['total'],
+            ];
+        }
+
+        foreach ($this->repository->pagosVales($empresaId, $sucursalId, $from, $to) as $row) {
+            $pagos[(int) $row['venta_id']][] = [
+                'codigo' => (string) $row['codigo'],
+                'nombre' => (string) $row['nombre'],
+                'monto' => (int) $row['monto'],
+            ];
+        }
+
+        $items = [];
+        $totales = [
+            'cantidad_vales' => 0,
+            'cantidad_productos' => '0.000',
+            'subtotal' => 0,
+            'descuentos' => 0,
+            'impuestos' => 0,
+            'total' => 0,
+        ];
+        $cantidadProductos = 0.0;
+
+        foreach ($this->repository->vales($empresaId, $sucursalId, $from, $to) as $row) {
+            $ventaId = (int) $row['id'];
+            $productos = $detalles[$ventaId] ?? [];
+            foreach ($productos as $producto) {
+                $cantidadProductos += (float) $producto['cantidad'];
+            }
+
+            $items[] = [
+                'venta_id' => $ventaId,
+                'folio' => $row['folio'] !== null ? (string) $row['folio'] : null,
+                'tipo_venta' => (string) $row['tipo_venta'],
+                'fecha_venta' => (string) $row['fecha_venta'],
+                'sucursal' => (string) $row['sucursal'],
+                'caja' => (string) $row['caja'],
+                'usuario' => (string) $row['usuario'],
+                'subtotal' => (int) $row['subtotal'],
+                'descuento' => (int) $row['descuento_total'],
+                'impuesto' => (int) $row['impuesto_total'],
+                'total' => (int) $row['total'],
+                'pagos' => $pagos[$ventaId] ?? [],
+                'productos' => $productos,
+            ];
+
+            $totales['cantidad_vales']++;
+            $totales['subtotal'] += (int) $row['subtotal'];
+            $totales['descuentos'] += (int) $row['descuento_total'];
+            $totales['impuestos'] += (int) $row['impuesto_total'];
+            $totales['total'] += (int) $row['total'];
+        }
+
+        $totales['cantidad_productos'] = number_format($cantidadProductos, 3, '.', '');
+        $summary = $this->resumenVentas($filters);
+
+        return [
+            'empresa_id' => $empresaId,
+            'sucursal_id' => $sucursalId,
+            'fecha_desde' => $from,
+            'fecha_hasta' => $to,
+            'parcial' => (bool) $summary['parcial'],
+            'advertencia' => $summary['advertencia'],
+            'items' => $items,
+            'totales' => $totales,
+        ];
+    }
+
     public function ventasPorProducto(array $filters): array
     {
         [$empresaId, $sucursalId, $from, $to] = $this->filters($filters);

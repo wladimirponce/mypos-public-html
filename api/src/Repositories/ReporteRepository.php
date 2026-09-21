@@ -179,6 +179,82 @@ final class ReporteRepository
     }
 
     /** @return array<int, array<string, mixed>> */
+    public function ventasDiariasPorMetodoPago(int $empresaId, ?int $sucursalId, string $from, string $to): array
+    {
+        $statement = $this->connection->prepare(
+            "SELECT DATE(v.fecha_venta) AS fecha,
+                    vp.metodo_pago_id,
+                    vp.metodo_pago_codigo AS codigo,
+                    COALESCE(mp.nombre, vp.metodo_pago_codigo) AS nombre,
+                    COALESCE(SUM(vp.monto), 0) AS total,
+                    COUNT(vp.id) AS cantidad_operaciones
+             FROM venta_pagos vp
+             INNER JOIN ventas v ON v.id = vp.venta_id AND v.empresa_id = vp.empresa_id
+             LEFT JOIN metodos_pago mp ON mp.id = vp.metodo_pago_id
+             WHERE {$this->salesWhere($sucursalId, 'v')}
+             GROUP BY DATE(v.fecha_venta), vp.metodo_pago_id, vp.metodo_pago_codigo, mp.nombre
+             ORDER BY fecha, nombre"
+        );
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
+
+        return $statement->fetchAll();
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function vales(int $empresaId, ?int $sucursalId, string $from, string $to): array
+    {
+        $statement = $this->connection->prepare(
+            "SELECT v.id, v.folio, v.tipo_venta, v.fecha_venta, v.subtotal,
+                    v.descuento_total, v.impuesto_total, v.total,
+                    s.nombre AS sucursal, c.nombre AS caja, u.nombre AS usuario
+             FROM ventas v
+             INNER JOIN sucursales s ON s.id = v.sucursal_id AND s.empresa_id = v.empresa_id
+             INNER JOIN cajas c ON c.id = v.caja_id AND c.empresa_id = v.empresa_id
+             INNER JOIN usuarios u ON u.id = v.usuario_id
+             WHERE {$this->salesWhere($sucursalId, 'v')}
+             ORDER BY v.fecha_venta DESC, v.id DESC"
+        );
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
+
+        return $statement->fetchAll();
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function detallesVales(int $empresaId, ?int $sucursalId, string $from, string $to): array
+    {
+        $statement = $this->connection->prepare(
+            "SELECT vd.venta_id, vd.linea, vd.producto_id, vd.codigo_producto,
+                    vd.nombre_producto, vd.cantidad, vd.precio_unitario,
+                    vd.descuento_total, vd.impuesto_total, vd.total
+             FROM venta_detalles vd
+             INNER JOIN ventas v ON v.id = vd.venta_id AND v.empresa_id = vd.empresa_id
+             WHERE {$this->salesWhere($sucursalId, 'v')}
+             ORDER BY vd.venta_id DESC, vd.linea"
+        );
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
+
+        return $statement->fetchAll();
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function pagosVales(int $empresaId, ?int $sucursalId, string $from, string $to): array
+    {
+        $statement = $this->connection->prepare(
+            "SELECT vp.venta_id, vp.metodo_pago_codigo AS codigo,
+                    COALESCE(mp.nombre, vp.metodo_pago_codigo) AS nombre,
+                    vp.monto
+             FROM venta_pagos vp
+             INNER JOIN ventas v ON v.id = vp.venta_id AND v.empresa_id = vp.empresa_id
+             LEFT JOIN metodos_pago mp ON mp.id = vp.metodo_pago_id
+             WHERE {$this->salesWhere($sucursalId, 'v')}
+             ORDER BY vp.venta_id DESC, vp.id"
+        );
+        $statement->execute($this->salesParams($empresaId, $sucursalId, $from, $to));
+
+        return $statement->fetchAll();
+    }
+
+    /** @return array<int, array<string, mixed>> */
     public function productosPorDia(int $empresaId, ?int $sucursalId, string $from, string $to): array
     {
         $statement = $this->connection->prepare(
