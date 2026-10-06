@@ -194,14 +194,14 @@ final class CierreDiarioRepository
     {
         $statement = $this->connection->prepare(
             'INSERT INTO cierre_resumen_pagos (empresa_id, cierre_diario_id, metodo_pago_id, metodo_pago_codigo, cantidad_operaciones, total)
-             SELECT :empresa_id, :cierre_id, vp.metodo_pago_id, vp.metodo_pago_codigo, COUNT(vp.id), COALESCE(SUM(vp.monto), 0)
+             SELECT :empresa_id, :cierre_id, vp.metodo_pago_id, MAX(vp.metodo_pago_codigo), COUNT(vp.id), COALESCE(SUM(vp.monto), 0)
              FROM venta_pagos vp
              INNER JOIN ventas v ON v.id = vp.venta_id
              WHERE v.empresa_id = :empresa_id_filter
                AND v.sucursal_id = :sucursal_id
                AND DATE(v.fecha_venta) = :fecha_cierre
                AND v.estado <> \'ANULADA\'
-             GROUP BY vp.metodo_pago_id, vp.metodo_pago_codigo'
+             GROUP BY vp.metodo_pago_id'
         );
         $statement->execute([
             'empresa_id' => $empresaId,
@@ -214,18 +214,24 @@ final class CierreDiarioRepository
 
     public function insertProductSummaries(int $closureId, int $empresaId, int $sucursalId, string $date): void
     {
+        // Agrupar solo por producto_id (clave unica del resumen). Las lineas de
+        // balanza guardan un nombre por etiqueta y un producto renombrado durante
+        // el dia deja nombres distintos: agrupar por nombre duplicaba la clave.
         $statement = $this->connection->prepare(
             'INSERT INTO cierre_resumen_productos (empresa_id, cierre_diario_id, producto_id, codigo_producto, nombre_producto, cantidad, total, margen_total, comision_total)
-             SELECT :empresa_id, :cierre_id, vd.producto_id, vd.codigo_producto, vd.nombre_producto,
+             SELECT :empresa_id, :cierre_id, vd.producto_id,
+                    COALESCE(MAX(p.codigo), MAX(vd.codigo_producto)),
+                    COALESCE(MAX(p.nombre), MAX(vd.nombre_producto)),
                     COALESCE(SUM(vd.cantidad), 0), COALESCE(SUM(vd.total), 0),
                     COALESCE(SUM(vd.margen_total), 0), COALESCE(SUM(vd.comision_total), 0)
              FROM venta_detalles vd
              INNER JOIN ventas v ON v.id = vd.venta_id
+             LEFT JOIN productos p ON p.id = vd.producto_id
              WHERE v.empresa_id = :empresa_id_filter
                AND v.sucursal_id = :sucursal_id
                AND DATE(v.fecha_venta) = :fecha_cierre
                AND v.estado <> \'ANULADA\'
-             GROUP BY vd.producto_id, vd.codigo_producto, vd.nombre_producto'
+             GROUP BY vd.producto_id'
         );
         $statement->execute([
             'empresa_id' => $empresaId,

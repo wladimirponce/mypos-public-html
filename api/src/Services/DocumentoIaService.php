@@ -171,9 +171,7 @@ final class DocumentoIaService
                 'paginas_procesadas' => count($files),
             ]);
         } catch (HttpException $exception) {
-            $this->repository->updateProcessing($processingId, 'ERROR', null, $exception->getMessage());
-            $this->repository->markError($empresaId, $id, $exception->getMessage());
-            $this->auditGemini($empresaId, (int) $document['sucursal_id'], $userId, $id, (int) $file['id'], 'documentos_ia.gemini_error', 'ERROR', $exception->getMessage());
+            $this->registrarErrorGemini($empresaId, (int) $document['sucursal_id'], $userId, $id, (int) $file['id'], $processingId, $exception->getMessage());
             throw $exception;
         } catch (\Throwable $exception) {
             SafeLogger::error('Unexpected Gemini document processing error', [
@@ -185,10 +183,28 @@ final class DocumentoIaService
                 'documento_ia_id' => $id,
                 'paginas' => count($files),
             ]);
-            $this->repository->updateProcessing($processingId, 'ERROR', null, 'Error controlado al procesar con Gemini');
-            $this->repository->markError($empresaId, $id, 'Error controlado al procesar con Gemini');
-            $this->auditGemini($empresaId, (int) $document['sucursal_id'], $userId, $id, (int) $file['id'], 'documentos_ia.gemini_error', 'ERROR', 'Error controlado al procesar con Gemini');
+            $this->registrarErrorGemini($empresaId, (int) $document['sucursal_id'], $userId, $id, (int) $file['id'], $processingId, 'Error controlado al procesar con Gemini');
             throw new HttpException('Error controlado al procesar con Gemini', 502);
+        }
+    }
+
+    /**
+     * Deja trazabilidad del fallo sin ocultarlo: si el registro mismo falla
+     * (BD), se loguea y se conserva el error original para el usuario.
+     */
+    private function registrarErrorGemini(int $empresaId, int $sucursalId, int $userId, int $id, int $fileId, int $processingId, string $message): void
+    {
+        try {
+            $this->repository->updateProcessing($processingId, 'ERROR', null, $message);
+            $this->repository->markError($empresaId, $id, $message);
+            $this->auditGemini($empresaId, $sucursalId, $userId, $id, $fileId, 'documentos_ia.gemini_error', 'ERROR', $message);
+        } catch (\Throwable $bookkeeping) {
+            SafeLogger::error('Could not record Gemini error', [
+                'type' => $bookkeeping::class,
+                'message' => $bookkeeping->getMessage(),
+                'documento_ia_id' => $id,
+                'original_error' => $message,
+            ]);
         }
     }
 

@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Mypos\Services;
 
 use Mypos\Core\HttpException;
+use Mypos\Support\SafeLogger;
 
 final class GeminiService
 {
     private const MAX_TOTAL_INPUT_BYTES = 18874368;
+    private const RETRY_DELAYS_SECONDS = [2, 5];
 
     private const PROMPT = <<<'PROMPT'
 Eres un extractor de documentos de compra para un sistema POS chileno llamado MyPOS.
@@ -163,22 +165,42 @@ PROMPT;
             ],
         ]);
 
-        $body = @file_get_contents($url, false, $context);
-        $status = $this->httpStatus($http_response_header ?? []);
-        if ($body === false) {
-            throw new HttpException('No fue posible conectar con Gemini', 502);
-        }
+        // Gemini responde 503 ("model overloaded") / 429 en horas peak; suelen
+        // resolverse en segundos, asi que se reintenta antes de fallar al usuario.
+        // No se reintenta un timeout de conexion: ya consumio los 60 s.
+        $attempt = 0;
+        while (true) {
+            $attempt++;
+            $http_response_header = [];
+            $body = @file_get_contents($url, false, $context);
+            $status = $this->httpStatus($http_response_header);
+            if ($body === false) {
+                throw new HttpException('No fue posible conectar con Gemini', 502);
+            }
 
-        $decoded = json_decode($body, true);
-        if (!is_array($decoded)) {
-            throw new HttpException('Gemini respondio un formato invalido', 502);
-        }
+            if ($status >= 400 && $this->isTransientStatus($status) && $attempt <= count(self::RETRY_DELAYS_SECONDS)) {
+                SafeLogger::warning('Gemini transient error, retrying', ['status' => $status, 'attempt' => $attempt]);
+                sleep(self::RETRY_DELAYS_SECONDS[$attempt - 1]);
+                continue;
+            }
 
-        if ($status >= 400) {
-            throw new HttpException($this->geminiErrorMessage($status), $status === 429 ? 429 : 502);
-        }
+            if ($status >= 400) {
+                SafeLogger::error('Gemini request failed', ['status' => $status, 'attempts' => $attempt, 'body' => substr($body, 0, 500)]);
+                throw new HttpException($this->geminiErrorMessage($status), $status === 429 ? 429 : 502);
+            }
 
-        return $decoded;
+            $decoded = json_decode($body, true);
+            if (!is_array($decoded)) {
+                throw new HttpException('Gemini respondio un formato invalido', 502);
+            }
+
+            return $decoded;
+        }
+    }
+
+    private function isTransientStatus(int $status): bool
+    {
+        return in_array($status, [429, 500, 502, 503, 504], true);
     }
 
     public function extraerJsonRespuesta(array $geminiResponse): array

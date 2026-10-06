@@ -11,6 +11,7 @@ use Mypos\Middleware\AuthMiddleware;
 use Mypos\Middleware\PermissionMiddleware;
 use Mypos\Middleware\TenantMiddleware;
 use Mypos\Services\DocumentoIaService;
+use Mypos\Support\SafeLogger;
 use Throwable;
 
 final class DocumentoIaController
@@ -181,7 +182,13 @@ final class DocumentoIaController
         } catch (HttpException $exception) {
             Response::error($exception->getMessage(), $exception->errors(), $exception->statusCode());
         } catch (Throwable $exception) {
-            error_log($exception->getMessage());
+            SafeLogger::error('Unexpected documento IA error', [
+                'type' => $exception::class,
+                'message' => $exception->getMessage(),
+                'file' => basename($exception->getFile()),
+                'line' => $exception->getLine(),
+                'route' => $_SERVER['REQUEST_URI'] ?? null,
+            ]);
             Response::error('Error interno del servidor', null, 500);
         }
     }

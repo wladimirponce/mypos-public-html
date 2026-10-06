@@ -1,1 +1,0 @@
-import{F as e,S as t}from"./index-DVNnKxx3.js";function n(n){return e(t,n)}export{n as t};
