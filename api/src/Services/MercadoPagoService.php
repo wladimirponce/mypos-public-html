@@ -287,6 +287,189 @@ final class MercadoPagoService
         return $this->presentarIntento($intento);
     }
 
+    /**
+     * Cancela un cobro pendiente para que la terminal no pueda cobrarlo despues
+     * (evita el cobro doble si el cajero abandona y cobra por otro medio).
+     *
+     * MP solo cancela por API orders que aun no tomo la terminal. Si ya esta en
+     * la terminal (at_terminal) responde error: se refresca el estado real y, si
+     * sigue pendiente, se devuelve 409 para que el cajero la cancele en la maquina.
+     * Si entretanto quedo APROBADO, se devuelve ese estado (el POS debe usarlo).
+     *
+     * @return array<string, mixed>
+     */
+    public function cancelarCobro(int $userId, int $empresaId, int $intentoId): array
+    {
+        $intento = $this->repository->findIntento($empresaId, $intentoId);
+        if ($intento === null) {
+            throw new HttpException('Intento de cobro no encontrado', 404);
+        }
+        if ($intento['venta_id'] !== null) {
+            throw new HttpException('El cobro ya fue usado en una venta y no se puede cancelar', 422);
+        }
+        if ($this->nullable($intento['estado']) !== 'PENDIENTE') {
+            return $this->presentarIntento($intento); // idempotente
+        }
+
+        $orderId = $this->nullable($intento['provider_order_id'] ?? null) ?? '';
+        if ($orderId === '') {
+            // Sin order en MP no hay nada que la terminal pueda cobrar.
+            $this->repository->updateIntentoEstado($intentoId, [
+                'estado' => 'CANCELADO',
+                'status_detail' => 'canceled_without_order',
+                'provider_order_id' => null,
+                'raw_response_json' => $intento['raw_response_json'] ?? null,
+            ]);
+        } else {
+            $response = $this->clientFor($empresaId)->cancelarOrden($orderId, MercadoPagoClient::uuidV4());
+
+            if ($response['status'] >= 200 && $response['status'] < 300) {
+                $mapeo = $this->mapEstadoDesdeOrden($response['body']);
+                $this->repository->updateIntentoEstado($intentoId, [
+                    'estado' => $mapeo['estado'] === 'PENDIENTE' ? 'CANCELADO' : $mapeo['estado'],
+                    'status_detail' => $mapeo['status_detail'],
+                    'provider_order_id' => null,
+                    'raw_response_json' => $response['raw'],
+                ]);
+            } else {
+                error_log('[MercadoPago] No se pudo cancelar order ' . $orderId . ' (' . $response['status'] . '): ' . $response['raw']);
+                $fresco = $this->refrescarDesdeMp($empresaId, $intento);
+                if ($fresco === null || $this->nullable($fresco['estado']) === 'PENDIENTE') {
+                    throw new HttpException(
+                        'El cobro ya está en la terminal y no se puede cancelar desde MyPOS. Cancélalo en la máquina o espera a que el cliente termine.',
+                        409
+                    );
+                }
+            }
+        }
+
+        $intento = (array) $this->repository->findIntento($empresaId, $intentoId);
+
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'sucursal_id' => $intento['sucursal_id'],
+            'usuario_id' => $userId,
+            'modulo' => 'mercadopago',
+            'accion' => 'cancelar',
+            'entidad' => 'mercadopago_intentos',
+            'entidad_id' => $intentoId,
+            'descripcion' => 'Cobro MercadoPago cancelado desde el POS',
+            'datos_nuevos' => [
+                'provider_order_id' => $orderId !== '' ? $orderId : null,
+                'estado' => $intento['estado'],
+            ],
+        ]);
+
+        return $this->presentarIntento($intento);
+    }
+
+    // ── Terminales en la cuenta MercadoPago ───────────────────────────────────
+
+    /**
+     * Lista las terminales Point de la cuenta MP de la empresa, marcando cuales
+     * ya estan dadas de alta en MyPOS y si estan en modo integrado (PDV).
+     *
+     * @return array{terminales: list<array<string, mixed>>}
+     */
+    public function buscarTerminalesMp(int $empresaId): array
+    {
+        $client = $this->clientFor($empresaId);
+
+        $locales = [];
+        foreach ($this->repository->listTerminales($empresaId) as $t) {
+            $locales[$this->nullable($t['terminal_id']) ?? ''] = $t;
+        }
+
+        $remotas = [];
+        $limit = 50;
+        for ($pagina = 0, $offset = 0; $pagina < 10; $pagina++, $offset += $limit) {
+            $response = $client->listarTerminales($limit, $offset);
+            if ($response['status'] < 200 || $response['status'] >= 300) {
+                throw $this->traducirErrorTerminales($response, 'No se pudieron obtener las terminales de MercadoPago');
+            }
+
+            // MP responde { data: { terminals: [...] }, paging: { total, ... } }.
+            $body = $response['body'];
+            $data = is_array($body['data'] ?? null) ? $body['data'] : $body;
+            $items = is_array($data['terminals'] ?? null) ? $data['terminals'] : [];
+            foreach ($items as $item) {
+                if (is_array($item)) {
+                    $remotas[] = $item;
+                }
+            }
+
+            $paging = is_array($body['paging'] ?? null) ? $body['paging'] : [];
+            $total = is_numeric($paging['total'] ?? null) ? (int) $paging['total'] : 0;
+            if (count($items) < $limit || ($total > 0 && $offset + $limit >= $total)) {
+                break;
+            }
+        }
+
+        $terminales = [];
+        foreach ($remotas as $t) {
+            $terminalId = $this->nullable($t['id'] ?? null);
+            if ($terminalId === null) {
+                continue;
+            }
+            $modo = strtoupper($this->nullable($t['operating_mode'] ?? null) ?? '');
+            $local = $locales[$terminalId] ?? null;
+
+            $terminales[] = [
+                'terminal_id' => $terminalId,
+                'pos_id' => $this->nullable($t['pos_id'] ?? null),
+                'store_id' => $this->nullable($t['store_id'] ?? null),
+                'external_pos_id' => $this->nullable($t['external_pos_id'] ?? null),
+                'operating_mode' => $modo !== '' ? $modo : null,
+                'modo_integrado' => $modo === 'PDV',
+                'terminal_ref_id' => $local !== null ? $local['id'] : null,
+                'nombre_local' => $local !== null ? $local['nombre'] : null,
+            ];
+        }
+
+        return ['terminales' => $terminales];
+    }
+
+    /**
+     * Pasa una terminal a modo integrado (PDV) para que reciba los cobros que
+     * envia MyPOS. La terminal aplica el cambio al reiniciarse.
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    public function activarModoIntegrado(int $userId, int $empresaId, array $payload): array
+    {
+        $terminalId = $this->nullable($payload['terminal_id'] ?? null);
+        if ($terminalId === null) {
+            throw new HttpException('terminal_id (identificador de la terminal en MercadoPago) es obligatorio', 422);
+        }
+
+        $response = $this->clientFor($empresaId)->configurarModoTerminal($terminalId, 'PDV');
+        if ($response['status'] < 200 || $response['status'] >= 300) {
+            throw $this->traducirErrorTerminales($response, 'No se pudo activar el modo integrado en la terminal');
+        }
+
+        $terminals = $response['body']['terminals'] ?? null;
+        $primera = is_array($terminals) && is_array($terminals[0] ?? null) ? $terminals[0] : [];
+        $modo = strtoupper($this->nullable($primera['operating_mode'] ?? null) ?? 'PDV');
+
+        AuditoriaService::registrarEvento([
+            'empresa_id' => $empresaId,
+            'usuario_id' => $userId,
+            'modulo' => 'mercadopago',
+            'accion' => 'editar',
+            'entidad' => 'mercadopago_terminales',
+            'descripcion' => 'Terminal MercadoPago pasada a modo integrado (PDV)',
+            'datos_nuevos' => ['terminal_id' => $terminalId, 'operating_mode' => $modo],
+        ]);
+
+        return [
+            'terminal_id' => $terminalId,
+            'operating_mode' => $modo,
+            'modo_integrado' => $modo === 'PDV',
+            'requiere_reinicio' => true,
+        ];
+    }
+
     // ── Webhook ───────────────────────────────────────────────────────────────
 
     /**
@@ -564,6 +747,23 @@ final class MercadoPagoService
         error_log('[MercadoPago] Error creando order (' . $response['status'] . '): ' . $response['raw']);
 
         return new HttpException($mensaje, $response['status'] >= 400 && $response['status'] < 500 ? 422 : 502, is_array($errores) ? ['mercadopago' => array_map('strval', (array) $errores)] : null);
+    }
+
+    /** @param array{status:int, body:array<string,mixed>, raw:string} $response */
+    private function traducirErrorTerminales(array $response, string $mensajeBase): HttpException
+    {
+        error_log('[MercadoPago] Error en API de terminales (' . $response['status'] . '): ' . $response['raw']);
+
+        if ($response['status'] === 401 || $response['status'] === 403) {
+            return new HttpException('El access_token de MercadoPago no es válido o no tiene permisos sobre las terminales Point.', 422);
+        }
+
+        $detalle = $this->nullable($response['body']['message'] ?? null);
+
+        return new HttpException(
+            $detalle !== null ? "{$mensajeBase}: {$detalle}" : $mensajeBase,
+            $response['status'] >= 400 && $response['status'] < 500 ? 422 : 502
+        );
     }
 
     /** CLP no tiene decimales. La API espera el monto como string. */

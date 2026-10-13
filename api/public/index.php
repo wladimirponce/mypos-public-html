@@ -517,11 +517,14 @@ $router->post('/api/v1/vales/{id}/anular', protectedRoute([$valeCreditoControlle
 $router->get('/api/v1/mercadopago/config', protectedRoute([$mercadoPagoController, 'getConfig'], 'mercadopago.ver'));
 $router->put('/api/v1/mercadopago/config', protectedRoute([$mercadoPagoController, 'putConfig'], 'mercadopago.configurar'));
 $router->get('/api/v1/mercadopago/terminales', protectedRoute([$mercadoPagoController, 'indexTerminales'], 'mercadopago.ver'));
+$router->get('/api/v1/mercadopago/terminales/remotas', protectedRoute([$mercadoPagoController, 'terminalesRemotas'], 'mercadopago.configurar'));
+$router->post('/api/v1/mercadopago/terminales/modo-integrado', protectedRoute([$mercadoPagoController, 'activarModoIntegrado'], 'mercadopago.configurar'));
 $router->post('/api/v1/mercadopago/terminales', protectedRoute([$mercadoPagoController, 'storeTerminal'], 'mercadopago.configurar'));
 $router->put('/api/v1/mercadopago/terminales/{id}', protectedRoute([$mercadoPagoController, 'updateTerminal'], 'mercadopago.configurar'));
 $router->put('/api/v1/mercadopago/terminales/{id}/estado', protectedRoute([$mercadoPagoController, 'estadoTerminal'], 'mercadopago.configurar'));
 $router->post('/api/v1/mercadopago/cobros', protectedRoute([$mercadoPagoController, 'iniciarCobro'], 'mercadopago.cobrar'));
 $router->get('/api/v1/mercadopago/cobros/{id}', protectedRoute([$mercadoPagoController, 'estadoCobro'], 'mercadopago.cobrar'));
+$router->post('/api/v1/mercadopago/cobros/{id}/cancelar', protectedRoute([$mercadoPagoController, 'cancelarCobro'], 'mercadopago.cobrar'));
 
 // Presencia digital / MyPOS Cerca (administracion autenticada).
 $router->get('/api/v1/presencia-digital/perfiles/{sucursal_id}', protectedRoute([$myposCercaController, 'getProfile'], 'presencia_digital.ver'));

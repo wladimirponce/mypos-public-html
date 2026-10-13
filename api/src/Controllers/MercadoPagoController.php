@@ -85,6 +85,20 @@ final class MercadoPagoController
         }, 'Estado de terminal actualizado');
     }
 
+    /** Terminales Point de la cuenta MP (para elegir en vez de digitar el id). */
+    public function terminalesRemotas(): void
+    {
+        $this->respond(fn (): array => $this->service->buscarTerminalesMp($this->getEmpresaId()));
+    }
+
+    public function activarModoIntegrado(): void
+    {
+        $this->respond(
+            fn (int $userId): array => $this->service->activarModoIntegrado($userId, $this->getEmpresaId(), Request::json()),
+            'Modo integrado activado. Reinicia la terminal para aplicar el cambio.'
+        );
+    }
+
     // ── Cobro ─────────────────────────────────────────────────────────────────
 
     public function iniciarCobro(): void
@@ -106,6 +120,15 @@ final class MercadoPagoController
     public function estadoCobro(array $params): void
     {
         $this->respond(fn (): array => $this->service->estadoCobro($this->getEmpresaId(), (int) $params['id']));
+    }
+
+    /** @param array<string, string> $params */
+    public function cancelarCobro(array $params): void
+    {
+        $this->respond(
+            fn (int $userId): array => $this->service->cancelarCobro($userId, $this->getEmpresaId(), (int) $params['id']),
+            'Cobro cancelado'
+        );
     }
 
     // ── Webhook (publico, sin auth) ─────────────────────────────────────────────

@@ -1,1 +1,0 @@
-import{F as e,S as t}from"./index-DC0bmeL8.js";function n(n){return e(t,n)}export{n as t};

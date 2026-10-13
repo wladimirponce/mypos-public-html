@@ -65,6 +65,37 @@ final class MercadoPagoClient
     }
 
     /**
+     * Lista las terminales Point asociadas a la cuenta del access_token.
+     * Cada item trae id (terminal_id para orders), pos_id, store_id,
+     * external_pos_id y operating_mode (PDV | STANDALONE).
+     *
+     * @return array{status:int, body:array<string,mixed>, raw:string}
+     */
+    public function listarTerminales(int $limit = 50, int $offset = 0): array
+    {
+        return $this->request('GET', '/terminals/v1/list?' . http_build_query([
+            'limit' => $limit,
+            'offset' => $offset,
+        ]));
+    }
+
+    /**
+     * Cambia el modo de operacion de una terminal. PDV = recibe orders por API
+     * (modo integrado); STANDALONE = cobro manual digitando el monto.
+     * El cambio se aplica en la terminal al reiniciarla.
+     *
+     * @return array{status:int, body:array<string,mixed>, raw:string}
+     */
+    public function configurarModoTerminal(string $terminalId, string $operatingMode): array
+    {
+        return $this->request('PATCH', '/terminals/v1/setup', [
+            'terminals' => [
+                ['id' => $terminalId, 'operating_mode' => $operatingMode],
+            ],
+        ]);
+    }
+
+    /**
      * @param array<string, mixed>|null $body
      * @param array<int, string> $extraHeaders
      * @return array{status:int, body:array<string,mixed>, raw:string}
@@ -90,8 +121,10 @@ final class MercadoPagoClient
             CURLOPT_CONNECTTIMEOUT => 10,
         ]);
 
-        if ($body !== null && ($method === 'POST' || $method === 'PUT')) {
-            curl_setopt($handle, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_UNICODE));
+        if ($body !== null && in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
+            // Un cuerpo vacio se envia como objeto JSON ({}), no como lista ([]).
+            $json = $body === [] ? '{}' : json_encode($body, JSON_UNESCAPED_UNICODE);
+            curl_setopt($handle, CURLOPT_POSTFIELDS, $json);
         }
 
         $response = curl_exec($handle);
