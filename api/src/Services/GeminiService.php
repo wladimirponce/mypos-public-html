@@ -11,6 +11,10 @@ final class GeminiService
 {
     private const MAX_TOTAL_INPUT_BYTES = 18874368;
     private const RETRY_DELAYS_SECONDS = [2, 5];
+    private const FALLBACK_RETRY_DELAYS_SECONDS = [2];
+    private const DEFAULT_FALLBACK_MODELS = 'gemini-3.5-flash-lite,gemini-2.5-flash';
+
+    private ?string $lastModelUsed = null;
 
     private const PROMPT = <<<'PROMPT'
 Eres un extractor de documentos de compra para un sistema POS chileno llamado MyPOS.
@@ -123,7 +127,7 @@ PROMPT;
         return [
             'resultado' => $this->normalizar($json),
             'raw_response' => $response,
-            'modelo' => $this->model(),
+            'modelo' => $this->lastModelUsed(),
             'tokens_input' => isset($usage['promptTokenCount']) ? (int) $usage['promptTokenCount'] : null,
             'tokens_output' => $tokensOutput,
         ];
@@ -146,7 +150,6 @@ PROMPT;
             throw new HttpException('Gemini no esta configurado para esta instalacion.', 422);
         }
 
-        $url = rtrim($this->apiBase(), '/') . '/models/' . rawurlencode($this->model()) . ':generateContent';
         $payload = json_encode($request, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         if ($payload === false) {
             throw new HttpException('No fue posible preparar solicitud Gemini: ' . json_last_error_msg(), 500);
@@ -165,37 +168,74 @@ PROMPT;
             ],
         ]);
 
-        // Gemini responde 503 ("model overloaded") / 429 en horas peak; suelen
-        // resolverse en segundos, asi que se reintenta antes de fallar al usuario.
+        // Gemini responde 503 ("model overloaded") / 429 en horas peak. Primero se
+        // reintenta el mismo modelo; si sigue saturado se pasa a los modelos de
+        // respaldo (GEMINI_MODEL_FALLBACKS), que suelen tener capacidad libre.
         // No se reintenta un timeout de conexion: ya consumio los 60 s.
-        $attempt = 0;
-        while (true) {
-            $attempt++;
-            $http_response_header = [];
-            $body = @file_get_contents($url, false, $context);
-            $status = $this->httpStatus($http_response_header);
-            if ($body === false) {
-                throw new HttpException('No fue posible conectar con Gemini', 502);
-            }
+        $models = $this->modelChain();
+        $lastStatus = 0;
+        foreach ($models as $index => $model) {
+            $url = rtrim($this->apiBase(), '/') . '/models/' . rawurlencode($model) . ':generateContent';
+            $delays = $index === 0 ? self::RETRY_DELAYS_SECONDS : self::FALLBACK_RETRY_DELAYS_SECONDS;
+            $attempt = 0;
+            while (true) {
+                $attempt++;
+                $http_response_header = [];
+                $body = @file_get_contents($url, false, $context);
+                $status = $this->httpStatus($http_response_header);
+                if ($body === false) {
+                    throw new HttpException('No fue posible conectar con Gemini', 502);
+                }
 
-            if ($status >= 400 && $this->isTransientStatus($status) && $attempt <= count(self::RETRY_DELAYS_SECONDS)) {
-                SafeLogger::warning('Gemini transient error, retrying', ['status' => $status, 'attempt' => $attempt]);
-                sleep(self::RETRY_DELAYS_SECONDS[$attempt - 1]);
-                continue;
-            }
+                if ($status >= 400 && $this->isTransientStatus($status) && $attempt <= count($delays)) {
+                    SafeLogger::warning('Gemini transient error, retrying', ['model' => $model, 'status' => $status, 'attempt' => $attempt]);
+                    sleep($delays[$attempt - 1]);
+                    continue;
+                }
 
-            if ($status >= 400) {
-                SafeLogger::error('Gemini request failed', ['status' => $status, 'attempts' => $attempt, 'body' => substr($body, 0, 500)]);
-                throw new HttpException($this->geminiErrorMessage($status), $status === 429 ? 429 : 502);
-            }
+                if ($status >= 400 && $this->isTransientStatus($status) && $index < count($models) - 1) {
+                    SafeLogger::warning('Gemini model unavailable, using fallback', ['model' => $model, 'status' => $status, 'fallback' => $models[$index + 1]]);
+                    $lastStatus = $status;
+                    continue 2;
+                }
 
-            $decoded = json_decode($body, true);
-            if (!is_array($decoded)) {
-                throw new HttpException('Gemini respondio un formato invalido', 502);
-            }
+                if ($status >= 400) {
+                    SafeLogger::error('Gemini request failed', ['model' => $model, 'status' => $status, 'attempts' => $attempt, 'body' => substr($body, 0, 500)]);
+                    throw new HttpException($this->geminiErrorMessage($status), $status === 429 ? 429 : 502);
+                }
 
-            return $decoded;
+                $decoded = json_decode($body, true);
+                if (!is_array($decoded)) {
+                    throw new HttpException('Gemini respondio un formato invalido', 502);
+                }
+
+                $this->lastModelUsed = $model;
+                return $decoded;
+            }
         }
+
+        throw new HttpException($this->geminiErrorMessage($lastStatus), 502);
+    }
+
+    /** Modelo que respondio la ultima solicitud (puede ser un respaldo). */
+    public function lastModelUsed(): string
+    {
+        return $this->lastModelUsed ?? $this->model();
+    }
+
+    /** @return list<string> */
+    private function modelChain(): array
+    {
+        $raw = (string) ($_ENV['GEMINI_MODEL_FALLBACKS'] ?? getenv('GEMINI_MODEL_FALLBACKS') ?: self::DEFAULT_FALLBACK_MODELS);
+        $models = [$this->model()];
+        foreach (explode(',', $raw) as $fallback) {
+            $fallback = trim($fallback);
+            if ($fallback !== '' && !in_array($fallback, $models, true)) {
+                $models[] = $fallback;
+            }
+        }
+
+        return $models;
     }
 
     private function isTransientStatus(int $status): bool
