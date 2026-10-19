@@ -1,0 +1,1 @@
+import{F as e,S as t}from"./index-B7yPs1sp.js";function n(n){return e(t,n)}export{n as t};
