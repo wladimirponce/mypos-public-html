@@ -1,0 +1,1 @@
+import{t as e}from"./react-vendor-C0Fs0kvo-landingfix-portal.js";import{l as t}from"./index-CxuUOR9i-landingfix-portal.js";var n=e();function r({activo:e}){let r=e===void 0||!!Number(e);return(0,n.jsx)(t,{tone:r?`success`:`neutral`,children:r?`Activo`:`Inactivo`})}export{r as t};
