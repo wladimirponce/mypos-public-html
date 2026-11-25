@@ -7,7 +7,6 @@ deployment:
     - /bin/rm -f $DEPLOYPATH/api/config.py $DEPLOYPATH/api/main.py $DEPLOYPATH/api/passenger_wsgi.py $DEPLOYPATH/api/requirements.txt $DEPLOYPATH/api/test_local.py
     - /bin/cp -R assets $DEPLOYPATH/
     - /bin/cp -R img $DEPLOYPATH/
-    - /bin/cp -R videos $DEPLOYPATH/
     - /bin/cp -R admin $DEPLOYPATH/
     - /bin/cp -R api $DEPLOYPATH/
     - /bin/cp -R agent $DEPLOYPATH/
